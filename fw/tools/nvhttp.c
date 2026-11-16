@@ -33,7 +33,7 @@
 
 /* page.h: the pages this tool makes (while the flash is written) show the
  * tabs every box has */
-int page_dreamcast_tab;
+int page_consoles_tab;
 
 #define BODY_MAX (NV_FILE_MAX + 4096u)  /* a file of the largest size inside a form */
 #define RECV_S   20                     /* a browser that sends nothing for this long is gone */

@@ -501,77 +501,53 @@ static void test_ethernet(void)
 }
 
 /* the settings are spread over five pages, each with its own form */
-/* the Dreamcast tab: the switches of the dreamcast service on a page of
- * their own, one per port, and no longer on the Line page */
-static void test_dreamcast_page(void)
+/* the Consoles tab: the dreamcast switches and the saturn matchmaking
+ * switch on one page per port (/dreamcast, /dreamcast2), shown only while a
+ * port uses the dreamcast or saturn service */
+static void test_consoles_page(void)
 {
     cfg_t c, out;
 
-    CHECK_EQ_I(settings_page_of("/dreamcast", 10), SETTINGS_DREAMCAST);
-    CHECK_EQ_I(settings_page_of("/dreamcast2", 11), SETTINGS_DREAMCAST2);
-    CHECK(strcmp(settings_page_path(SETTINGS_DREAMCAST2), "/dreamcast2") == 0);
-    /* the tab is there only while a port has the service */
+    CHECK_EQ_I(settings_page_of("/dreamcast", 10), SETTINGS_CONSOLES);
+    CHECK_EQ_I(settings_page_of("/dreamcast2", 11), SETTINGS_CONSOLES2);
+    CHECK(strcmp(settings_page_path(SETTINGS_CONSOLES2), "/dreamcast2") == 0);
+    /* no console port: no tab */
     base(&c);
     CHECK(settings_render_page(&c, SETTINGS_LINE, 0, NULL, html, sizeof html) > 0);
     CHECK(!has(html, "/dreamcast"));
-    c.port2.service = CFG_SERVICE_DREAMCAST;
+    /* a saturn port alone brings the tab up too */
+    c.port2.service = CFG_SERVICE_SATURN;
     CHECK(settings_render_page(&c, SETTINGS_LINE, 0, NULL, html, sizeof html) > 0);
-    CHECK(has(html, "<a href=\"/dreamcast\">Dreamcast</a>"));
+    CHECK(has(html, "<a href=\"/dreamcast\">Consoles</a>"));
     base(&c);
-    c.service = CFG_SERVICE_DREAMCAST; c.dc_lan = 1; c.port2.dc_now = 1;
+    c.service = CFG_SERVICE_DREAMCAST; c.dc_lan = 1;
+    c.port2.service = CFG_SERVICE_SATURN; c.port2.sat_match = 1;
     CHECK(settings_render_page(&c, SETTINGS_LINE, 0, NULL, html, sizeof html) > 0);
-    CHECK(!has(html, "name=\"dreamcast_now\"")); CHECK(!has(html, "name=\"dreamcast_lan\"")); CHECK(!has(html, "name=\"dreamcast_upnp\""));
-    CHECK(has(html, "<select name=\"service\">"));
-    CHECK(has(html, "<a href=\"/dreamcast\">Dreamcast</a>"));           /* the tab */
-    CHECK(settings_render_page(&c, SETTINGS_DREAMCAST, 0, NULL, html, sizeof html) > 0);
-    CHECK(has(html, "<b>Dreamcast</b>")); CHECK(!has(html, "<a href=\"/dreamcast\">Dreamcast</a>"));
+    CHECK(!has(html, "name=\"dreamcast_now\"")); CHECK(!has(html, "name=\"saturn_matchmaking\""));
+    CHECK(has(html, "<a href=\"/dreamcast\">Consoles</a>"));           /* the tab */
+    /* the page itself: both sections, the Dreamcast switches and the Saturn one */
+    CHECK(settings_render_page(&c, SETTINGS_CONSOLES, 0, NULL, html, sizeof html) > 0);
+    CHECK(has(html, "<b>Consoles</b>")); CHECK(!has(html, "<a href=\"/dreamcast\">Consoles</a>"));
     CHECK(has(html, "<p class=\"sw\"><b>Port 1</b> <a href=\"/dreamcast2\">Port 2</a></p>"));
     CHECK(has(html, "<form method=\"post\" action=\"/dreamcast\">"));
+    CHECK(has(html, "<h2>Dreamcast</h2>")); CHECK(has(html, "<h2>Saturn</h2>"));
     CHECK(has(html, "<select name=\"dreamcast_now\">")); CHECK(has(html, "<select name=\"dreamcast_lan\">"));
-    CHECK(has(html, "<select name=\"dreamcast_upnp\">"));
-    CHECK(has(html, "<option value=\"on\" selected>On: the console gets an address"));
-    CHECK(has(html, "<select name=\"dreamcast_iwango\">")); CHECK(has(html, "IWANGO games"));
-    CHECK(!has(html, "name=\"service\"")); CHECK(!has(html, "name=\"number\""));
+    CHECK(has(html, "<select name=\"dreamcast_upnp\">")); CHECK(has(html, "<select name=\"dreamcast_iwango\">"));
+    CHECK(has(html, "<select name=\"saturn_matchmaking\">")); CHECK(has(html, "saturn.dreampipe.net"));
+    CHECK(has(html, "<option value=\"on\" selected>On: the console gets an address"));   /* dc_lan on */
     CHECK(has(html, "The service of this port is Dreamcast"));
-    CHECK(settings_render_page(&c, SETTINGS_DREAMCAST2, 0, NULL, html, sizeof html) > 0);
+    CHECK(has(html, "The service of this port is not Saturn"));
+    CHECK(!has(html, "name=\"service\"")); CHECK(!has(html, "name=\"number\""));
+    CHECK(settings_render_page(&c, SETTINGS_CONSOLES2, 0, NULL, html, sizeof html) > 0);
     CHECK(has(html, "<p class=\"sw\"><a href=\"/dreamcast\">Port 1</a> <b>Port 2</b></p>"));
     CHECK(has(html, "<input type=\"hidden\" name=\"port\" value=\"2\">"));
-    CHECK(has(html, "<option value=\"on\" selected>On: tell the Dreamcast Now"));
-    CHECK(has(html, "The service of this port is not Dreamcast"));
-    /* its post changes the switches and nothing else */
-    CHECK_EQ_I(apply(&c, "dreamcast_now=on&dreamcast_lan=off&dreamcast_upnp=on", &out), SETTINGS_OK);
-    CHECK_EQ_I(out.dc_now, 1); CHECK_EQ_I(out.dc_lan, 0); CHECK_EQ_I(out.dc_upnp, 1);
-    CHECK_EQ_I(out.service, CFG_SERVICE_DREAMCAST); CHECK(strcmp(out.line_number, c.line_number) == 0);
-}
-
-/* the Saturn tab: one switch (matchmaking), a page per port, shown only
- * while a port has the saturn service */
-static void test_saturn_page(void)
-{
-    cfg_t c, out;
-
-    CHECK_EQ_I(settings_page_of("/saturn", 7), SETTINGS_SATURN);
-    CHECK_EQ_I(settings_page_of("/saturn2", 8), SETTINGS_SATURN2);
-    base(&c);
-    CHECK(settings_render_page(&c, SETTINGS_LINE, 0, NULL, html, sizeof html) > 0);
-    CHECK(!has(html, "/saturn"));
-    c.service = CFG_SERVICE_SATURN; c.port2.sat_match = 1;
-    CHECK(settings_render_page(&c, SETTINGS_LINE, 0, NULL, html, sizeof html) > 0);
-    CHECK(has(html, "<a href=\"/saturn\">Saturn</a>"));          /* the tab */
-    CHECK(!has(html, "name=\"saturn_matchmaking\""));           /* not on the Line page */
-    CHECK(settings_render_page(&c, SETTINGS_SATURN, 0, NULL, html, sizeof html) > 0);
-    CHECK(has(html, "<b>Saturn</b>"));
-    CHECK(has(html, "<p class=\"sw\"><b>Port 1</b> <a href=\"/saturn2\">Port 2</a></p>"));
-    CHECK(has(html, "<form method=\"post\" action=\"/saturn\">"));
-    CHECK(has(html, "<select name=\"saturn_matchmaking\">"));
-    CHECK(has(html, "saturn.dreampipe.net"));
     CHECK(has(html, "The service of this port is Saturn"));
-    CHECK(settings_render_page(&c, SETTINGS_SATURN2, 0, NULL, html, sizeof html) > 0);
-    CHECK(has(html, "<input type=\"hidden\" name=\"port\" value=\"2\">"));
-    CHECK(has(html, "<option value=\"on\" selected>"));          /* port 2 has it on */
-    /* its post changes only the switch */
-    CHECK_EQ_I(apply(&c, "saturn_matchmaking=on", &out), SETTINGS_OK);
-    CHECK_EQ_I(out.sat_match, 1); CHECK_EQ_I(out.service, CFG_SERVICE_SATURN);
+    CHECK(has(html, "The service of this port is not Dreamcast"));
+    /* posts change only their own switches */
+    CHECK_EQ_I(apply(&c, "dreamcast_now=on&dreamcast_upnp=on", &out), SETTINGS_OK);
+    CHECK_EQ_I(out.dc_now, 1); CHECK_EQ_I(out.dc_upnp, 1); CHECK_EQ_I(out.service, CFG_SERVICE_DREAMCAST);
+    CHECK_EQ_I(apply(&c, "port=2&saturn_matchmaking=on", &out), SETTINGS_OK);
+    CHECK_EQ_I(out.port2.sat_match, 1);
     CHECK_EQ_I(apply(&c, "saturn_matchmaking=maybe", &out), SETTINGS_INVALID);
 }
 
@@ -588,7 +564,7 @@ static void test_one_port(void)
     CHECK(!has(html, "Port 2")); CHECK(!has(html, "/line2"));
     CHECK(settings_render_page(&c, SETTINGS_MODEM, 0, NULL, html, sizeof html) > 0);
     CHECK(!has(html, "/modem2"));
-    CHECK(settings_render_page(&c, SETTINGS_DREAMCAST, 0, NULL, html, sizeof html) > 0);
+    CHECK(settings_render_page(&c, SETTINGS_CONSOLES, 0, NULL, html, sizeof html) > 0);
     CHECK(!has(html, "/dreamcast2"));
     CHECK_EQ_I(settings_page_of("/line2", 6), -1);
     CHECK_EQ_I(settings_page_of("/modem2", 7), -1);
@@ -1222,8 +1198,7 @@ int main(void)
     test_pages();
     test_port2();
     test_one_port();
-    test_dreamcast_page();
-    test_saturn_page();
+    test_consoles_page();
     test_apply();
     test_users();
     test_invalid();

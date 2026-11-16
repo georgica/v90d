@@ -1623,22 +1623,22 @@ static void test_two_ports(void)
     CHECK(strstr(resp, "<a href=\"/calls\">Calls</a>") != NULL);
     /* the Dreamcast tab: on every page, and only while a port has that service */
     CHECK(strstr(resp, "/dreamcast") == NULL);
+    /* the Consoles tab shows for a dreamcast or a saturn port, and the page
+     * carries both the dreamcast switches and the saturn one */
     C.port2.service = CFG_SERVICE_DREAMCAST;
     len = exchange("GET / HTTP/1.0\r\n\r\n", resp, sizeof resp);
-    CHECK(strstr(resp, "<a href=\"/dreamcast\">Dreamcast</a>") != NULL);
+    CHECK(strstr(resp, "<a href=\"/dreamcast\">Consoles</a>") != NULL);
     len = exchange("GET /dreamcast2 HTTP/1.0\r\n\r\n", resp, sizeof resp);
-    CHECK(parse_resp(resp, len, &r) && r.code == 200 && strstr(resp, "<select name=\"dreamcast_lan\">") != NULL);
+    CHECK(parse_resp(resp, len, &r) && r.code == 200 && strstr(resp, "<select name=\"dreamcast_lan\">") != NULL
+          && strstr(resp, "<select name=\"saturn_matchmaking\">") != NULL);
     C.port2.service = CFG_SERVICE_INTERNET;
-    len = exchange("GET /firmware HTTP/1.0\r\n\r\n", resp, sizeof resp);
-    CHECK(strstr(resp, "/dreamcast") == NULL);
-    /* the Saturn tab, likewise, only with a saturn port */
-    CHECK(strstr(resp, "/saturn") == NULL);
     C.service = CFG_SERVICE_SATURN;
     len = exchange("GET /firmware HTTP/1.0\r\n\r\n", resp, sizeof resp);
-    CHECK(strstr(resp, "<a href=\"/saturn\">Saturn</a>") != NULL);
-    len = exchange("GET /saturn HTTP/1.0\r\nHost: 192.168.1.2\r\n\r\n", resp, sizeof resp);
-    CHECK(parse_resp(resp, len, &r) && r.code == 200 && strstr(resp, "<select name=\"saturn_matchmaking\">") != NULL);
+    CHECK(strstr(resp, "<a href=\"/dreamcast\">Consoles</a>") != NULL);
+    CHECK_EQ_I(code_of("GET /saturn HTTP/1.0\r\nHost: 192.168.1.2\r\n\r\n"), 404);   /* no separate Saturn tab */
     C.service = CFG_SERVICE_INTERNET;
+    len = exchange("GET /firmware HTTP/1.0\r\n\r\n", resp, sizeof resp);
+    CHECK(strstr(resp, "/dreamcast") == NULL);
     CHECK_EQ_I(code_of("POST /calls HTTP/1.0\r\nContent-Length: 0\r\n\r\n"), 405);
     /* behind the login like the rest */
     strcpy(C.admin_password, "pw");

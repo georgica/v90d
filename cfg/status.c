@@ -5,8 +5,7 @@
 #include "sbuf.h"
 #include "page.h"
 
-int page_dreamcast_tab;     /* page.h */
-int page_saturn_tab;
+int page_consoles_tab;      /* page.h */
 
 #define COUNT(a) ((int)(sizeof(a) / sizeof((a)[0])))
 

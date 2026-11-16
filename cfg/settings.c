@@ -163,8 +163,7 @@ static const struct { const char *path, *title; } pages[SETTINGS_PAGES] = {
     { "/settings", "settings" }, { "/line", "line" }, { "/modem", "modem" }, { "/users", "users" },
     { "/network", "network" }, { "/system", "system" },
     { "/line2", "line, port 2" }, { "/modem2", "modem, port 2" },
-    { "/dreamcast", "Dreamcast" }, { "/dreamcast2", "Dreamcast, port 2" },
-    { "/saturn", "Saturn" }, { "/saturn2", "Saturn, port 2" },
+    { "/dreamcast", "Consoles" }, { "/dreamcast2", "Consoles, port 2" },
 };
 
 const char *settings_page_path(int page)
@@ -180,7 +179,7 @@ int settings_page_of(const char *path, size_t len)
     int i;
     for (i = 0; i < SETTINGS_PAGES; i++)
         if (strlen(pages[i].path) == len && memcmp(pages[i].path, path, len) == 0) {
-            if (!two_ports && (i == SETTINGS_LINE2 || i == SETTINGS_MODEM2 || i == SETTINGS_DREAMCAST2 || i == SETTINGS_SATURN2)) return -1;
+            if (!two_ports && (i == SETTINGS_LINE2 || i == SETTINGS_MODEM2 || i == SETTINGS_CONSOLES2)) return -1;
             return i;
         }
     return -1;
@@ -207,17 +206,17 @@ int settings_render_page(const cfg_t *c, int page, int saved, const char *error,
 
     sb_init(&b, buf, cap);
     if (page < 0 || page >= SETTINGS_PAGES) page = own = SETTINGS_ALL;
-    page_dreamcast_tab = c->service == CFG_SERVICE_DREAMCAST || c->port2.service == CFG_SERVICE_DREAMCAST;
-    page_saturn_tab = c->service == CFG_SERVICE_SATURN || c->port2.service == CFG_SERVICE_SATURN;
-    if (page == SETTINGS_LINE2 || page == SETTINGS_MODEM2 || page == SETTINGS_DREAMCAST2 || page == SETTINGS_SATURN2) {
+    page_consoles_tab = c->service == CFG_SERVICE_DREAMCAST || c->port2.service == CFG_SERVICE_DREAMCAST
+                      || c->service == CFG_SERVICE_SATURN || c->port2.service == CFG_SERVICE_SATURN;
+    if (page == SETTINGS_LINE2 || page == SETTINGS_MODEM2 || page == SETTINGS_CONSOLES2) {
         /* port 2: the same sections, filled from its settings */
         port2 = 1;
         cfg_for_port(c, 1, &two); c = &two;
         page = page == SETTINGS_LINE2 ? SETTINGS_LINE : page == SETTINGS_MODEM2 ? SETTINGS_MODEM
-             : page == SETTINGS_DREAMCAST2 ? SETTINGS_DREAMCAST : SETTINGS_SATURN;
+             : SETTINGS_CONSOLES;
     }
     page_top(&b, pages[own].title, "",
-             page == SETTINGS_DREAMCAST ? PAGE_TAB_DREAMCAST : page == SETTINGS_SATURN ? PAGE_TAB_SATURN : page ? page : -1, NULL);
+             page == SETTINGS_CONSOLES ? PAGE_TAB_CONSOLES : page ? page : -1, NULL);
     if (error) {
         sb_puts(&b, "<p><b>Not saved:</b> ");
         sb_html(&b, error, SETTINGS_MSG_MAX, 0);
@@ -225,7 +224,7 @@ int settings_render_page(const cfg_t *c, int page, int saved, const char *error,
     } else if (saved) {
         sb_puts(&b, "<p><b>Settings saved.</b></p>\n");
     }
-    if (two_ports && (page == SETTINGS_LINE || page == SETTINGS_MODEM || page == SETTINGS_DREAMCAST || page == SETTINGS_SATURN)) {
+    if (two_ports && (page == SETTINGS_LINE || page == SETTINGS_MODEM || page == SETTINGS_CONSOLES)) {
         const char *base = pages[page].path;
         sb_puts(&b, "<p class=\"sw\">");
         if (port2) { sb_puts(&b, "<a href=\""); sb_puts(&b, base); sb_puts(&b, "\">Port 1</a> <b>Port 2</b>"); }
@@ -262,14 +261,14 @@ int settings_render_page(const cfg_t *c, int page, int saved, const char *error,
                 " console. A change takes effect when the lines are free.</p></section>\n");
 
     }
-    if (ON(SETTINGS_DREAMCAST)) {
+    if (ON(SETTINGS_CONSOLES)) {
     sb_puts(&b, "<section><h2>Dreamcast</h2>\n<table>\n");
     in_select(&b, "Dreamcast Now", F_DCNOW, c->dc_now, n_v92, t_dcnow, 2);
     in_select(&b, "Console on the network", F_DCLAN, c->dc_lan, n_v92, t_dclan, 2);
     in_select(&b, "Game ports from the router", F_DCUPNP, c->dc_upnp, n_v92, t_dcupnp, 2);
     in_select(&b, "IWANGO games", F_DCIWANGO, c->dc_iwango, n_v92, t_dciwango, 2);
     sb_puts(&b, "</table>\n<p>");
-    if (page == SETTINGS_DREAMCAST)
+    if (page == SETTINGS_CONSOLES)
         sb_puts(&b, c->service == CFG_SERVICE_DREAMCAST ? "The service of this port is Dreamcast: these switches are in force. "
                                                          : "The service of this port is not Dreamcast (Line tab): these switches do nothing until it is. ");
     sb_puts(&b, "They only act on a port whose service is Dreamcast. Dreamcast Now sends a report to"
@@ -283,11 +282,11 @@ int settings_render_page(const cfg_t *c, int page, int saved, const char *error,
                 " for that network stored (below), the box keeps the tunnel up. All four are off unless turned on. A"
                 " change takes effect when the lines are free.</p></section>\n");
     }
-    if (ON(SETTINGS_SATURN)) {
+    if (ON(SETTINGS_CONSOLES)) {
     sb_puts(&b, "<section><h2>Saturn</h2>\n<table>\n");
     in_select(&b, "Matchmaking", F_SATMATCH, c->sat_match, n_v92, t_satmatch, 2);
     sb_puts(&b, "</table>\n<p>");
-    if (page == SETTINGS_SATURN)
+    if (page == SETTINGS_CONSOLES)
         sb_puts(&b, c->service == CFG_SERVICE_SATURN ? "The service of this port is Saturn: this switch is in force. "
                                                       : "The service of this port is not Saturn (Line tab): this switch does nothing until it is. ");
     sb_puts(&b, "Direct play always works: the waiting player dials 0, the other dials #a*b*c*d# with"
@@ -382,7 +381,7 @@ int settings_render_page(const cfg_t *c, int page, int saved, const char *error,
     sb_puts(&b, "</table></section>\n");
     }
     sb_puts(&b, "<p><input type=\"submit\" value=\"Save\"></p>\n</form>\n");
-    if (page == SETTINGS_DREAMCAST) {
+    if (page == SETTINGS_CONSOLES) {
         /* one profile for the box, whichever port's page this is; posted as
          * it is (text/plain), since it is longer than a form field may be */
         sb_puts(&b, "<form method=\"post\" action=\"/dreamcast/vpn\" enctype=\"text/plain\">\n"

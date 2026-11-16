@@ -485,7 +485,7 @@ static void vpn_done(httpd_t *h, httpd_conn_t *c, uint32_t now)
     char msg[VPN_MSG_MAX], remote[48];
     size_t n = c->body_want, len = 0;
     int page = h->cfg->service != CFG_SERVICE_DREAMCAST && h->cfg->port2.service == CFG_SERVICE_DREAMCAST
-               ? SETTINGS_DREAMCAST2 : SETTINGS_DREAMCAST;
+               ? SETTINGS_CONSOLES2 : SETTINGS_CONSOLES;
 
     while (n && (c->tx[n - 1] == '\n' || c->tx[n - 1] == '\r')) n--;
     if (n == 8 && memcmp(c->tx, "remove=1", 8) == 0) {
@@ -815,9 +815,9 @@ static void handle(httpd_t *h, httpd_conn_t *c, size_t n, uint32_t now)
 
     q = memchr(uri, '?', ulen);
     plen = q ? (size_t)(q - uri) : ulen;
-    page_dreamcast_tab = h->cfg->service == CFG_SERVICE_DREAMCAST || h->cfg->port2.service == CFG_SERVICE_DREAMCAST;
+    page_consoles_tab = h->cfg->service == CFG_SERVICE_DREAMCAST || h->cfg->port2.service == CFG_SERVICE_DREAMCAST
+                      || h->cfg->service == CFG_SERVICE_SATURN || h->cfg->port2.service == CFG_SERVICE_SATURN;
     settings_set_two_ports(h->status2 != NULL);    /* one port (HT801): no port-2 pages */
-    page_saturn_tab = h->cfg->service == CFG_SERVICE_SATURN || h->cfg->port2.service == CFG_SERVICE_SATURN;
     if (plen >= 9 && memcmp(uri, "/firmware", 9) == 0) {
         int sub = plen == 9 ? 0 : plen == 16 && memcmp(uri + 9, "/upload", 7) == 0 ? 1
                 : plen == 15 && memcmp(uri + 9, "/stock", 6) == 0 ? 2 : -1;
