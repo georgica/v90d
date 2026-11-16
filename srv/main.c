@@ -54,6 +54,7 @@
 #include <sched.h>
 #include <sys/mman.h>
 #include <sys/wait.h>
+#include <sys/stat.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include "srv.h"
@@ -64,6 +65,8 @@
 #include "dclist.h"
 #include "dcnow.h"
 #include "upnp.h"
+#include "vpn.h"
+#include "settings.h"
 
 #define PORTS CFG_PORTS
 static srv_t    S[PORTS];
@@ -593,6 +596,102 @@ static void sl_poll(uint32_t now_ms)
     }
 }
 
+/* ---- the VPN for the IWANGO games (dreamcast_iwango). The games' servers
+ * of today stand in a private network behind an OpenVPN server; the owner
+ * of the box has a client profile for it and gives it to the Dreamcast
+ * page (cfg/vpn.h checks it). OpenVPN itself is not ours: the image carries
+ * the program as it is (DESIGN.md, the owner's decision), and this code
+ * only keeps it running while a dreamcast port wants it. ---- */
+#define VPN_DEV "v90vpn"
+static const char *vp_prog = "/usr/sbin/openvpn";      /* -O; "" = none */
+static const char *vp_path = "/tmp/v90d.vpn";          /* -V: the profile */
+static pid_t    vp_pid; static uint32_t vp_next; static int vp_dirty, vp_stopping, vp_said, vp_on;
+
+static int vp_switch(void)
+{
+    int i;
+    for (i = 0; i < n_ports; i++) if (S[i].cfg.service == CFG_SERVICE_DREAMCAST && S[i].cfg.dc_iwango) return 1;
+    return 0;
+}
+/* the server a stored profile names, for the page and the log; 0 = no profile */
+static int vp_remote(char *out, size_t cap)
+{
+    static char text[VPN_PROFILE_MAX]; int fd = open(vp_path, O_RDONLY | O_CLOEXEC); ssize_t n;
+    out[0] = 0;
+    if (fd < 0) return 0;
+    n = read(fd, text, sizeof text);
+    close(fd);
+    if (n > 0) (void)vpn_profile_remote(text, (size_t)n, out, cap);
+    return 1;
+}
+/* the Dreamcast page was given a profile (len 0: take the stored one away) */
+static int on_vpn(void *ctx, const char *text, size_t len)
+{
+    char tmp[300]; int fd;
+    (void)ctx;
+    if (len == 0) {
+        if (unlink(vp_path) < 0 && errno != ENOENT) return -1;
+        logf_(CFG_LOG_INFO, "IWANGO games: the VPN profile was removed");
+    } else {
+        snprintf(tmp, sizeof tmp, "%s.new", vp_path);
+        fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+        if (fd < 0) return -1;
+        if (fchmod(fd, 0600) < 0 || write(fd, text, len) != (ssize_t)len) { close(fd); unlink(tmp); return -1; }
+        close(fd);
+        if (rename(tmp, vp_path) < 0) { unlink(tmp); return -1; }
+        logf_(CFG_LOG_INFO, "IWANGO games: a VPN profile was stored");
+    }
+    vp_dirty = 1;
+    return 0;
+}
+static void vp_poll(uint32_t now_ms)
+{
+    char remote[48]; int sw = vp_switch(), have = access(vp_path, R_OK) == 0, want = sw && have && vp_prog[0], st;
+
+    if (vp_pid > 0 && waitpid(vp_pid, &st, WNOHANG) == vp_pid) {
+        vp_pid = 0;
+        if (!vp_stopping) {
+            logf_(CFG_LOG_WARN, "IWANGO games: the VPN program ended by itself; again in half a minute");
+            vp_next = now_ms + 30000u;
+        }
+        vp_stopping = 0;
+    }
+    if (sw && !have) { if (!vp_said) logf_(CFG_LOG_WARN, "IWANGO games: no VPN profile is stored (it is given on the Dreamcast page)"); vp_said = 1; }
+    else vp_said = 0;
+    if (want != vp_on) { vp_on = want; net_dirty = 1; }
+    if (vp_pid > 0) {
+        if ((!want || vp_dirty) && !vp_stopping) {
+            (void)kill(vp_pid, SIGTERM);
+            vp_stopping = 1; vp_next = now_ms;
+            if (!want) logf_(CFG_LOG_INFO, "IWANGO games: the VPN is stopped");
+        }
+        vp_dirty = 0;
+        return;
+    }
+    vp_dirty = 0;
+    if (!want || (int32_t)(now_ms - vp_next) < 0) return;
+    (void)vp_remote(remote, sizeof remote);
+    vp_pid = fork();
+    if (vp_pid == 0) {
+        struct sched_param sp;
+        memset(&sp, 0, sizeof sp);
+        (void)sched_setscheduler(0, SCHED_OTHER, &sp);
+        (void)munlockall();
+        /* after the profile, so that it cannot say otherwise: our device,
+         * no scripts, and the box's own traffic and name servers stay */
+        execl(vp_prog, "openvpn", "--config", vp_path, "--dev", VPN_DEV, "--dev-type", "tun", "--script-security", "1",
+              "--pull-filter", "ignore", "redirect-gateway", "--pull-filter", "ignore", "dhcp-option",
+              "--pull-filter", "ignore", "block-outside-dns",
+              /* of the routes the server sends, only those into 10.0.0.0/8: it
+               * is not to take the box's own traffic or its network away */
+              "--pull-filter", "accept", "route-gateway", "--pull-filter", "accept", "route 10.",
+              "--pull-filter", "ignore", "route", "--connect-retry", "5", "60", "--verb", "1", (char *)NULL);
+        _exit(127);
+    }
+    if (vp_pid < 0) { vp_pid = 0; vp_next = now_ms + 30000u; return; }
+    logf_(CFG_LOG_INFO, "IWANGO games: starting the VPN (server %s)", remote);
+}
+
 /* the network side answers ARP for the console's address, or not */
 static void proxy_arp(int on)
 {
@@ -732,6 +831,7 @@ static void net_apply(void)
         p.rewrite = dc_rw; p.n_rewrite = dc_n;
         p.n_open = dclist_ports(&p.open);
         strncpy(p.wan, lan_if, sizeof p.wan - 1);
+        if (vp_on) strcpy(p.vpn, VPN_DEV);
         p.http_port = ARCH_HTTP; p.ftp_port = ARCH_FTP; p.dns_port = ARCH_DNS; p.pasv_lo = ARCH_PASV_LO; p.pasv_hi = ARCH_PASV_HI;
         if (nat_apply(&p) < 0) logf_(CFG_LOG_ERROR, "cannot install the NAT rules: %s", strerror(errno));
         else {
@@ -872,7 +972,7 @@ int main(int argc, char **argv)
     /* the telephone lights: <prefix><port>/brightness, lit while the port is off hook */
     const char *led_prefix = "/sys/class/leds/ht802:phone"; int led_fd[PORTS] = { -1, -1 }, led_on[PORTS] = { -1, -1 };
 
-    while ((opt = getopt(argc, argv, "c:l:d:i:t:vpw:W:L:A:N:R:P:D:G:E:")) != -1) {
+    while ((opt = getopt(argc, argv, "c:l:d:i:t:vpw:W:L:A:N:R:P:D:G:E:O:V:")) != -1) {
         switch (opt) {
         case 'c': cfg_path = optarg; break;
         case 'l': if (n_ports >= PORTS) usage(); line_spec[n_ports++] = optarg; break;
@@ -891,6 +991,8 @@ int main(int argc, char **argv)
         case 'p': print_net = 1; break;
         case 'L': led_prefix = optarg; break;
         case 'N': fw_tool = optarg; break;      /* the flash tool behind the Firmware page */
+        case 'O': vp_prog = optarg; break;      /* the OpenVPN program; "" = none */
+        case 'V': vp_path = optarg; break;      /* where the VPN profile is kept */
         case 'E': la_cmd = optarg; break;       /* prints the console's address on the network (instead of udhcpc) */
         case 'G': dn_prog = optarg; break;      /* run instead of wget for the Dreamcast Now report: PROG URL BODY */
         case 'D': dc_cmd = optarg; break;       /* the command that fetches the console address list; "" = none */
@@ -948,6 +1050,8 @@ int main(int argc, char **argv)
     httpd_init(&H, &live, &S[0].status);
     if (n_ports > 1) httpd_status2(&H, &S[1].status);
     httpd_on_save(&H, on_save, NULL);
+    httpd_on_vpn(&H, on_vpn, NULL);
+    { char r[48]; settings_set_vpn(vp_remote(r, sizeof r) ? r : NULL); }
     {
         static const httpd_fw_t fw = { V90D_VERSION " (built " __DATE__ ")", fw_text, fw_take, NULL };
         httpd_on_firmware(&H, &fw);
@@ -1035,7 +1139,7 @@ int main(int argc, char **argv)
             arch_clock = now_ms;
             sl_poll(now_ms);
             if (now_ms % 2000 == 0) arch_poll(now_ms);
-            if (now_ms % 1000 == 0) { dc_poll(now_ms); dn_poll(now_ms); la_poll(now_ms); up_poll(now_ms); }
+            if (now_ms % 1000 == 0) { dc_poll(now_ms); dn_poll(now_ms); la_poll(now_ms); up_poll(now_ms); vp_poll(now_ms); }
             if (fw_pid > 0 && now_ms % 1000 == 0 && waitpid(fw_pid, NULL, WNOHANG) == fw_pid) fw_pid = 0;
             /* the Restart button, once its answer has gone out */
             if (H.restart_asked && httpd_active(&H) == 0) {
@@ -1083,6 +1187,7 @@ int main(int argc, char **argv)
     httpd_close(&H);
     arch_stop();
     if (S[0].cfg.nat || any_archive() || any_console()) (void)nat_remove();
+    if (vp_pid > 0) { (void)kill(vp_pid, SIGTERM); (void)waitpid(vp_pid, NULL, 0); }
     if (any_lan()) proxy_arp(0);
     if (up_ip) {            /* give the ports back; the child finishes by itself */
         if (up_pid > 0) (void)waitpid(up_pid, NULL, 0);

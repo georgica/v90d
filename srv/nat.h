@@ -39,6 +39,8 @@ typedef struct {
     const nat_rewrite *rewrite; int n_rewrite;
     const nat_open *open; int n_open;
     char     wan[16];           /* interface name; "" = no ports opened */
+    char        vpn[16];        /* not empty: whatever leaves by this device is masqueraded (the tunnel to the
+                                   IWANGO games' network), also for a console that is a host on the network */
 } nat_plan;
 int nat_apply(const nat_plan *p);
 /* Remove our table. 0, or -1 with errno (ENOENT if it was not there). */

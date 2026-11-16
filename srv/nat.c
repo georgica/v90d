@@ -156,6 +156,33 @@ static void rule_msg(nlbuf *mp, uint32_t peer_ip)
     msg_end(mp, at);
 }
 
+/* oifname <ifn> masquerade */
+static void masq_if_msg(nlbuf *mp, const char *ifn)
+{
+    size_t at, exprs, el, data, val, k; char name[IFNAMSIZ];
+    memset(name, 0, sizeof name);
+    for (k = 0; k + 1 < sizeof name && ifn[k]; k++) name[k] = ifn[k];
+    at = msg_begin(mp, nft(NFT_MSG_NEWRULE), NLM_F_CREATE | NLM_F_APPEND | NLM_F_ACK, NFPROTO_IPV4, 0);
+    attr_str(mp, NFTA_RULE_TABLE, TABLE);
+    attr_str(mp, NFTA_RULE_CHAIN, CHAIN);
+    exprs = nest_begin(mp, NFTA_RULE_EXPRESSIONS);
+    el = expr_begin(mp, "meta", &data);                 /* the name of the interface it leaves by */
+    attr_u32(mp, NFTA_META_KEY, NFT_META_OIFNAME);
+    attr_u32(mp, NFTA_META_DREG, NFT_REG_1);
+    expr_end(mp, el, data);
+    el = expr_begin(mp, "cmp", &data);
+    attr_u32(mp, NFTA_CMP_SREG, NFT_REG_1);
+    attr_u32(mp, NFTA_CMP_OP, NFT_CMP_EQ);
+    val = nest_begin(mp, NFTA_CMP_DATA);
+    attr(mp, NFTA_DATA_VALUE, name, sizeof name);
+    nest_end(mp, val);
+    expr_end(mp, el, data);
+    el = expr_begin(mp, "masq", &data);
+    expr_end(mp, el, data);
+    nest_end(mp, exprs);
+    msg_end(mp, at);
+}
+
 /* register 1 = len octets of the packet at off in the given header; compare with v */
 static void match(nlbuf *mp, uint32_t base, uint32_t off, const void *v, uint32_t len, uint32_t op)
 {
@@ -295,6 +322,7 @@ int nat_apply(const nat_plan *p)
     msg_end(&m, at);
 
     for (i = 0; i < 2; i++) if (p->masquerade && p->peer[i] && !p->lan[i]) rule_msg(&m, p->peer[i]);
+    if (p->vpn[0]) masq_if_msg(&m, p->vpn);
 
     if ((p->peer[0] && (p->archive[0] || p->console[0])) || (p->peer[1] && (p->archive[1] || p->console[1]))) {
         at = msg_begin(&m, nft(NFT_MSG_NEWCHAIN), NLM_F_CREATE | NLM_F_ACK, NFPROTO_IPV4, 0);

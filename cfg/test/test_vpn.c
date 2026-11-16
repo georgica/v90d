@@ -41,6 +41,20 @@ int main(void)
     CHECK_EQ_I(chk("  up x\n"), -1);
     CHECK_EQ_I(chk("UP x\n"), -1);
     CHECK_EQ_I(chk("setenv PATH /tmp\n"), -1);
+    /* routes: only into the private 10.0.0.0/8, where the games' network is;
+     * never the box's own traffic or its network */
+    CHECK_EQ_I(chk("remote a 1\nroute 10.200.0.0 255.255.255.0\n"), 0);
+    CHECK_EQ_I(chk("remote a 1\nroute 10.200.0.1\n"), 0);
+    CHECK_EQ_I(chk("remote a 1\nroute 0.0.0.0 0.0.0.0\n"), -1);
+    CHECK(strcmp(msg, "line 2: a route may only lead into 10.0.0.0/8") == 0);
+    CHECK_EQ_I(chk("remote a 1\nroute 192.168.1.0 255.255.255.0\n"), -1);
+    CHECK_EQ_I(chk("remote a 1\nroute 10.0.0.0 0.0.0.0\n"), -1);         /* a mask wider than /8 */
+    CHECK_EQ_I(chk("remote a 1\nroute 10.0.0.0 128.0.0.0\n"), -1);
+    CHECK_EQ_I(chk("remote a 1\nroute 10.0.0.0 255.0.0.0\n"), 0);
+    CHECK_EQ_I(chk("remote a 1\nroute remote_host\n"), -1);
+    CHECK_EQ_I(chk("remote a 1\nroute 110.1.1.1\n"), -1);
+    CHECK_EQ_I(chk("remote a 1\nroute 10.1.1\n"), -1);
+    CHECK_EQ_I(chk("remote a 1\nroute\n"), -1);
     /* blocks: known ones only, closed, not nested */
     CHECK_EQ_I(chk("<ca>\nabc\n"), -1); CHECK(strcmp(msg, "line 1: <ca> is not closed") == 0);
     CHECK_EQ_I(chk("<up>\nabc\n</up>\n"), -1);

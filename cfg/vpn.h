@@ -7,7 +7,9 @@
  * client's profile needs is let through: the directives listed in vpn.c,
  * and certificates and keys as inline blocks. Anything that names a file,
  * runs a script, loads a plugin, writes a log or changes where all the
- * traffic goes is refused, with the line it stands on. Pure C99. */
+ * traffic goes is refused, with the line it stands on; a route may only
+ * lead into 10.0.0.0/8 (the daemon holds the server's pushed routes to the
+ * same). Pure C99. */
 #ifndef V90D_CFG_VPN_H
 #define V90D_CFG_VPN_H
 #include <stddef.h>

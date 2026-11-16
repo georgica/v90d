@@ -877,8 +877,9 @@ int main(int argc, char **argv)
      * another service: nothing of it happens. No lease is asked for, no
      * report sent, no router searched, no address list fetched, no rules. */
     {
-        static char lanlog[300], mark[320], leasecmd[400], listcmd[400], nowcmd[400]; struct ifreq ifr; int sk;
+        static char lanlog[300], mark[320], leasecmd[400], listcmd[400], nowcmd[400], vpnf[320]; struct ifreq ifr; int sk;
         snprintf(mark, sizeof mark, "%s/ns_inert.mark", argv[2]); unlink(mark);
+        snprintf(vpnf, sizeof vpnf, "%s/ns_inert.vpn", argv[2]);
         snprintf(leasecmd, sizeof leasecmd, ": > %s; echo 192.0.2.77 600", mark);
         snprintf(listcmd, sizeof listcmd, ": > %s; echo 172.17.18.2 192.0.2.9 9500", mark);
         snprintf(nowcmd, sizeof nowcmd, "%s/ns_inert.sh", argv[2]);
@@ -886,7 +887,8 @@ int main(int argc, char **argv)
         cfg_default(&c);
         strcpy(c.line_number, "5551234"); c.rings = 1;
         c.n_users = 1; strcpy(c.users[0].name, "alice"); strcpy(c.users[0].secret, "wonderland"); c.auth = CFG_AUTH_CHAP;
-        c.service = CFG_SERVICE_INTERNET; c.dc_now = 1; c.dc_lan = 1; c.dc_upnp = 1;
+        c.service = CFG_SERVICE_INTERNET; c.dc_now = 1; c.dc_lan = 1; c.dc_upnp = 1; c.dc_iwango = 1;
+        { char pf[320]; FILE *f; snprintf(pf, sizeof pf, "%s/ns_inert.vpn", argv[2]); f = fopen(pf, "w"); if (f) { fputs("client\nremote a 1\n", f); fclose(f); } }
         c.status_port = 8080;
         CHECK_EQ_I(cfg_save(&c, conf, err, sizeof err), CFG_OK);
         CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
@@ -896,7 +898,7 @@ int main(int argc, char **argv)
             int a = fcntl(sv[1], F_DUPFD, 20), lfd = open(lanlog, O_WRONLY | O_CREAT | O_TRUNC, 0644);
             dup2(a, 3); if (lfd >= 0) dup2(lfd, 2);
             for (i = 4; i < 64; i++) close(i);
-            execl(argv[1], "v90d", "-c", conf, "-l", "fd:3", "-i", "lo", "-t", "ppp0", "-A", "", "-D", listcmd, "-E", leasecmd, "-G", nowcmd, (char *)NULL);
+            execl(argv[1], "v90d", "-c", conf, "-l", "fd:3", "-i", "lo", "-t", "ppp0", "-A", "", "-D", listcmd, "-E", leasecmd, "-G", nowcmd, "-O", nowcmd, "-V", vpnf, (char *)NULL);
             _exit(127);
         }
         close(sv[1]);
@@ -919,6 +921,76 @@ int main(int argc, char **argv)
         CHECK(access(mark, F_OK) != 0);
         CHECK(file_has("/proc/sys/net/ipv4/conf/lo/proxy_arp", "0"));
         CHECK(!file_has(lanlog, "console")); CHECK(!file_has(lanlog, "game ports")); CHECK(!file_has(lanlog, "Dreamcast"));
+        quiet_exit = 1;
+        kill(pid, SIGTERM);
+        for (i = 0; i < 400 && !dead; i++) step(0);
+        close(line_fd);
+        CHECK_EQ_I(waitpid(pid, &st, 0), pid);
+        CHECK(WIFEXITED(st) && WEXITSTATUS(st) == 0);
+    }
+    /* 10. the VPN for the IWANGO games: with the switch on for a dreamcast
+     * port and a profile stored, the OpenVPN program of the image is kept
+     * running (here a stand-in that writes down how it was called); a new
+     * profile restarts it, no profile or no switch stops it. */
+    {
+        static char lanlog[300], prog[320], argsf[320], vpnf[320], req[900]; int k;
+        snprintf(prog, sizeof prog, "%s/ns_vpn.sh", argv[2]);
+        snprintf(argsf, sizeof argsf, "%s/ns_vpn.args", argv[2]); unlink(argsf);
+        snprintf(vpnf, sizeof vpnf, "%s/ns_vpn.profile", argv[2]); unlink(vpnf);
+        { FILE *f = fopen(prog, "w"); if (f) { fprintf(f, "#!/bin/sh\necho \"$@\" >> %s\ncat \"$2\" >> %s\nexec sleep 1000\n", argsf, argsf); fclose(f); chmod(prog, 0755); } }
+        cfg_default(&c);
+        strcpy(c.line_number, "5551234"); c.rings = 1;
+        c.service = CFG_SERVICE_DREAMCAST; c.dc_iwango = 1;
+        c.status_port = 8080;
+        CHECK_EQ_I(cfg_save(&c, conf, err, sizeof err), CFG_OK);
+        CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
+        snprintf(lanlog, sizeof lanlog, "%s/ns_vpn.log", argv[2]);
+        pid = fork();
+        if (pid == 0) {
+            int a = fcntl(sv[1], F_DUPFD, 20), lfd = open(lanlog, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            dup2(a, 3); if (lfd >= 0) dup2(lfd, 2);
+            for (i = 4; i < 64; i++) close(i);
+            execl(argv[1], "v90d", "-c", conf, "-l", "fd:3", "-i", "lo", "-t", "ppp0", "-A", "", "-D", "", "-O", prog, "-V", vpnf, (char *)NULL);
+            _exit(127);
+        }
+        close(sv[1]);
+        line_fd = sv[0]; idle_fd = -1;
+        dead = quiet_exit = 0; hook = modem_on = 0; blk_n = 0; c_tx = 0; c_rx_pw = 0;
+        channel_init(&CH, &cc);
+        memset(prev_tx, 0xFF, sizeof prev_tx);
+        run_ms(3500);
+        /* the switch is on but there is no profile: nothing runs, and the log says what is missing */
+        CHECK(access(argsf, F_OK) != 0);
+        CHECK(file_has(lanlog, "IWANGO games: no VPN profile is stored"));
+        CHECK(http("GET /dreamcast HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n", resp, sizeof resp) > 0);
+        CHECK(strstr(resp, "No profile is stored.") != NULL);
+        /* a profile is given on the page: kept in the file, the program started on it */
+        k = snprintf(req, sizeof req, "POST /dreamcast/vpn HTTP/1.0\r\nHost: 127.0.0.1\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s",
+                     (int)strlen("profile=client\r\nremote vpn.example 1194\r\n\r\n"), "profile=client\r\nremote vpn.example 1194\r\n\r\n");
+        CHECK(http_n(req, (size_t)k, resp, sizeof resp) > 0);
+        CHECK(strstr(resp, " 303 ") != NULL);
+        for (i = 0; i < 50 && access(argsf, F_OK) != 0; i++) { run_ms(200); usleep(50000); }
+        CHECK(file_has(vpnf, "remote vpn.example 1194"));
+        { struct stat sb; CHECK(stat(vpnf, &sb) == 0 && (sb.st_mode & 0777) == 0600); }
+        CHECK(file_has(argsf, "--config ")); CHECK(file_has(argsf, "--dev v90vpn --dev-type tun"));
+        CHECK(file_has(argsf, "--script-security 1")); CHECK(file_has(argsf, "--pull-filter ignore redirect-gateway"));
+        CHECK(file_has(argsf, "--pull-filter accept route 10. --pull-filter ignore route "));
+        CHECK(file_has(argsf, "remote vpn.example 1194"));
+        CHECK(file_has(lanlog, "IWANGO games: starting the VPN (server vpn.example 1194)"));
+        CHECK(http("GET /dreamcast HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n", resp, sizeof resp) > 0);
+        CHECK(strstr(resp, "A profile is stored (server vpn.example 1194).") != NULL);
+        /* another profile: the program is started again on the new one */
+        k = snprintf(req, sizeof req, "POST /dreamcast/vpn HTTP/1.0\r\nHost: 127.0.0.1\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s",
+                     (int)strlen("profile=client\r\nremote other.example 443\r\n\r\n"), "profile=client\r\nremote other.example 443\r\n\r\n");
+        CHECK(http_n(req, (size_t)k, resp, sizeof resp) > 0);
+        for (i = 0; i < 50 && !file_has(argsf, "other.example"); i++) { run_ms(200); usleep(50000); }
+        CHECK(file_has(argsf, "remote other.example 443"));
+        /* the profile is taken away: stopped */
+        k = snprintf(req, sizeof req, "POST /dreamcast/vpn HTTP/1.0\r\nHost: 127.0.0.1\r\nContent-Type: text/plain\r\nContent-Length: 10\r\n\r\nremove=1\r\n");
+        CHECK(http_n(req, (size_t)k, resp, sizeof resp) > 0);
+        for (i = 0; i < 50 && !file_has(lanlog, "IWANGO games: the VPN is stopped"); i++) { run_ms(200); usleep(50000); }
+        CHECK(file_has(lanlog, "IWANGO games: the VPN is stopped"));
+        CHECK(access(vpnf, F_OK) != 0);
         quiet_exit = 1;
         kill(pid, SIGTERM);
         for (i = 0; i < 400 && !dead; i++) step(0);

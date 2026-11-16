@@ -168,6 +168,15 @@ int main(void)
     CHECK(s == CALLER); CHECK(d == IP4(198, 51, 100, 7));
     n = mkpkt(pkt, 17, IP4(198, 51, 100, 99), 5570, WAN_US, 7980);
     CHECK(!through(wan_fd, ppp_fd, pkt, n, &s, &d, &dp));
+    /* what such a console sends into the VPN device leaves with our address
+     * in there: the far side of a tunnel knows no way back to the network
+     * here (the device "wan7" stands for the tunnel) */
+    strcpy(p.vpn, "wan7");
+    CHECK_EQ_I(nat_apply(&p), 0);
+    n = mkpkt(pkt, 17, CALLER, 4030, IP4(203, 0, 113, 50), 9500);
+    CHECK(through(ppp_fd, wan_fd, pkt, n, &s, &d, &dp));
+    CHECK(s == WAN_US); CHECK(d == IP4(203, 0, 113, 50));
+    p.vpn[0] = 0;
     p.lan[0] = 0;
 
     /* the full lists fit in one transaction */
