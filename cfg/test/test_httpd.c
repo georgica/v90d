@@ -1588,6 +1588,12 @@ static void test_two_ports(void)
     /* one port: these do not exist */
     CHECK_EQ_I(code_of("GET /port2 HTTP/1.0\r\n\r\n"), 404);
     CHECK_EQ_I(code_of("GET /status2.json HTTP/1.0\r\n\r\n"), 404);
+    /* a one-port box: the port-2 settings pages do not exist either, and the
+     * Line page offers no Port 2 link */
+    CHECK_EQ_I(code_of("GET /line2 HTTP/1.0\r\nHost: 192.168.1.2\r\n\r\n"), 404);
+    CHECK_EQ_I(code_of("GET /modem2 HTTP/1.0\r\nHost: 192.168.1.2\r\n\r\n"), 404);
+    len = exchange("GET /line HTTP/1.0\r\nHost: 192.168.1.2\r\n\r\n", resp, sizeof resp);
+    CHECK(strstr(resp, "/line2") == NULL);
     len = exchange("GET / HTTP/1.0\r\n\r\n", resp, sizeof resp);
     CHECK(parse_resp(resp, len, &r) && r.code == 200 && strstr(resp, "Port 2") == NULL);
 

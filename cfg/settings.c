@@ -169,11 +169,17 @@ const char *settings_page_path(int page)
     return pages[page >= 0 && page < SETTINGS_PAGES ? page : 0].path;
 }
 
+static int two_ports = 1;       /* the box has two FXS ports unless told otherwise */
+void settings_set_two_ports(int two) { two_ports = two != 0; }
+
 int settings_page_of(const char *path, size_t len)
 {
     int i;
     for (i = 0; i < SETTINGS_PAGES; i++)
-        if (strlen(pages[i].path) == len && memcmp(pages[i].path, path, len) == 0) return i;
+        if (strlen(pages[i].path) == len && memcmp(pages[i].path, path, len) == 0) {
+            if (!two_ports && (i == SETTINGS_LINE2 || i == SETTINGS_MODEM2 || i == SETTINGS_DREAMCAST2)) return -1;
+            return i;
+        }
     return -1;
 }
 
@@ -213,7 +219,7 @@ int settings_render_page(const cfg_t *c, int page, int saved, const char *error,
     } else if (saved) {
         sb_puts(&b, "<p><b>Settings saved.</b></p>\n");
     }
-    if (page == SETTINGS_LINE || page == SETTINGS_MODEM || page == SETTINGS_DREAMCAST) {
+    if (two_ports && (page == SETTINGS_LINE || page == SETTINGS_MODEM || page == SETTINGS_DREAMCAST)) {
         const char *base = pages[page].path;
         sb_puts(&b, "<p class=\"sw\">");
         if (port2) { sb_puts(&b, "<a href=\""); sb_puts(&b, base); sb_puts(&b, "\">Port 1</a> <b>Port 2</b>"); }
@@ -587,7 +593,7 @@ static void set_field(form_t *f, int fi, const char *v, size_t len)
     case F_DOWN:    set_num(f, fi, &c->max_down, v); break;
     case F_UP:      set_num(f, fi, &c->max_up, v); break;
     case F_PORT:
-        if (len != 1 || (v[0] != '1' && v[0] != '2')) f->bad = 1;
+        if (len != 1 || (v[0] != '1' && v[0] != '2') || (v[0] == '2' && !two_ports)) f->bad = 1;
         break;
     case F_ADMINPW:
         if (len > CFG_SECRET_MAX)

@@ -545,6 +545,29 @@ static void test_dreamcast_page(void)
 }
 
 /* port 2 has a Line and a Modem page of its own */
+/* a one-port box (an HT801): the Line, Modem and Dreamcast pages show no
+ * Port 2 switch, and the port-2 paths do not resolve */
+static void test_one_port(void)
+{
+    cfg_t c, out;
+
+    base(&c); c.service = CFG_SERVICE_DREAMCAST;
+    settings_set_two_ports(0);
+    CHECK(settings_render_page(&c, SETTINGS_LINE, 0, NULL, html, sizeof html) > 0);
+    CHECK(!has(html, "Port 2")); CHECK(!has(html, "/line2"));
+    CHECK(settings_render_page(&c, SETTINGS_MODEM, 0, NULL, html, sizeof html) > 0);
+    CHECK(!has(html, "/modem2"));
+    CHECK(settings_render_page(&c, SETTINGS_DREAMCAST, 0, NULL, html, sizeof html) > 0);
+    CHECK(!has(html, "/dreamcast2"));
+    CHECK_EQ_I(settings_page_of("/line2", 6), -1);
+    CHECK_EQ_I(settings_page_of("/modem2", 7), -1);
+    CHECK_EQ_I(settings_page_of("/dreamcast2", 11), -1);
+    CHECK_EQ_I(settings_page_of("/line", 5), SETTINGS_LINE);     /* port 1 still there */
+    /* a port=2 post is refused on a one-port box */
+    CHECK_EQ_I(apply(&c, "port=2&rings=3", &out), SETTINGS_BAD);
+    settings_set_two_ports(1);                                  /* back for the other tests */
+}
+
 static void test_port2(void)
 {
     cfg_t c, out;
@@ -1167,6 +1190,7 @@ int main(void)
     test_ethernet();
     test_pages();
     test_port2();
+    test_one_port();
     test_dreamcast_page();
     test_apply();
     test_users();

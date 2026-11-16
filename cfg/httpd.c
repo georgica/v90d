@@ -816,6 +816,7 @@ static void handle(httpd_t *h, httpd_conn_t *c, size_t n, uint32_t now)
     q = memchr(uri, '?', ulen);
     plen = q ? (size_t)(q - uri) : ulen;
     page_dreamcast_tab = h->cfg->service == CFG_SERVICE_DREAMCAST || h->cfg->port2.service == CFG_SERVICE_DREAMCAST;
+    settings_set_two_ports(h->status2 != NULL);    /* one port (HT801): no port-2 pages */
     if (plen >= 9 && memcmp(uri, "/firmware", 9) == 0) {
         int sub = plen == 9 ? 0 : plen == 16 && memcmp(uri + 9, "/upload", 7) == 0 ? 1
                 : plen == 15 && memcmp(uri + 9, "/stock", 6) == 0 ? 2 : -1;

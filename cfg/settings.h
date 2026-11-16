@@ -96,6 +96,11 @@ int settings_render_page(const cfg_t *c, int page, int saved, const char *error,
  * owner keeps: "host port" of its server, or NULL when none is stored. The
  * profile itself is never shown. */
 void settings_set_vpn(const char *remote);
+/* How many FXS ports the box has (the daemon tells the web layer once at
+ * start: an HT801 has one, an HT802 two). With one, the settings pages show
+ * no Port 2 switch, the port-2 paths (/line2, /modem2, /dreamcast2) do not
+ * resolve, and a port=2 post is refused. The default is two. */
+void settings_set_two_ports(int two);
 const char *settings_page_path(int page);
 /* the page whose path is path[0..len), -1 if it is none */
 int settings_page_of(const char *path, size_t len);
