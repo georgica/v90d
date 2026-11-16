@@ -30,7 +30,7 @@ static int quad(const char *s, size_t n, unsigned long *out)
     for (part = 0; part < 4; part++) {
         unsigned v = 0; size_t d = 0;
         while (i < n && s[i] >= '0' && s[i] <= '9' && d < 3) { v = v * 10u + (unsigned)(s[i++] - '0'); d++; }
-        if (!d || v > 255) return 0;
+        if (!d || v > 255 || (d > 1 && s[i - d] == '0')) return 0;     /* no leading zero: some read that as octal */
         a = a << 8 | v;
         if (part < 3) { if (i >= n || s[i++] != '.') return 0; }
     }
@@ -132,4 +132,19 @@ int vpn_profile_remote(const char *t, size_t len, char *out, size_t cap)
         return 0;
     }
     return -1;
+}
+
+int vpn_profile_routes(const char *t, size_t len)
+{
+    size_t at = 0; int n = 0, in_block = 0;
+    while (at < len) {
+        size_t a = at, e = at;
+        while (e < len && t[e] != '\n') e++;
+        at = e < len ? e + 1 : e;
+        while (a < e && (t[a] == ' ' || t[a] == '\t')) a++;
+        if (a < e && t[a] == '<') { in_block = !(a + 1 < e && t[a + 1] == '/'); continue; }
+        if (in_block) continue;
+        if (e - a >= 5 && memcmp(t + a, "route", 5) == 0 && (e - a == 5 || t[a + 5] == ' ' || t[a + 5] == '\t' || t[a + 5] == '\r')) n++;
+    }
+    return n;
 }

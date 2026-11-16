@@ -1,6 +1,7 @@
 #!/bin/sh
 # Fetch and unpack what the firmware is built from but is not ours: the
-# cross toolchain (Bootlin, GCC with uClibc-ng for ARMv5), Linux and busybox.
+# cross toolchain (Bootlin, GCC with uClibc-ng for ARMv5), Linux, busybox, and
+# OpenVPN with mbed TLS (the VPN client for the IWANGO games; fw/mkvpn.sh).
 # Each download is checked against the SHA-256 written here; a file that is
 # already there and checks is not fetched again. Then busybox is built with
 # fw/busybox.config.
@@ -28,6 +29,10 @@ get https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-$KVER.tar.xz \
     "$fw/dl/linux-$KVER.tar.xz" d1054ab4803413efe2850f50f1a84349c091631ec50a1cf9e891d1b1f9061835
 get https://busybox.net/downloads/$BB.tar.bz2 \
     "$fw/dl/$BB.tar.bz2" b8cc24c9574d809e7279c3be349795c5d5ceb6fdf19ca709f80cde50e47de314
+get https://swupdate.openvpn.org/community/releases/openvpn-2.6.12.tar.gz \
+    "$fw/dl/openvpn-2.6.12.tar.gz" 1c610fddeb686e34f1367c347e027e418e07523a10f4d8ce4a2c2af2f61a1929
+get https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-2.28.9/mbedtls-2.28.9.tar.bz2 \
+    "$fw/dl/mbedtls-2.28.9.tar.bz2" e85ea97aaf78dd6c0a5ba2e54dd5932ffa15f39abfc189c26beef7684630c02b
 
 [ -x "$top/toolchain/$TC/bin/arm-linux-gcc" ] || { echo "unpacking the toolchain"; tar -C "$top/toolchain" -xjf "$top/toolchain/$TC.tar.bz2"; "$top/toolchain/$TC/relocate-sdk.sh" >/dev/null; }
 mkdir -p "$fw/build"
@@ -40,4 +45,5 @@ if [ ! -x "$fw/build/$BB/busybox" ]; then
     make -s -C "$fw/build/$BB" ARCH=arm CROSS_COMPILE="$top/toolchain/$TC/bin/arm-linux-" -j"$(nproc)" busybox
 fi
 ls -l "$fw/build/$BB/busybox"
+sh "$fw/mkvpn.sh"
 echo "ready: make -C fw release"

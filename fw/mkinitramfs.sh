@@ -35,6 +35,7 @@ file /etc/init.d/rcS $fw/rcS 755 0 0
 file /etc/udhcpc.script $fw/udhcpc.script 755 0 0
 file /etc/dclease.script $fw/dclease.script 755 0 0
 file /etc/v90d.conf $fw/v90d.conf 600 0 0
+file /etc/confpack.sh $fw/confpack.sh 644 0 0
 file /usr/sbin/v90d $top/srv/build/v90d-arm 755 0 0
 file /usr/sbin/v90nv $fw/tools/v90nv.arm 755 0 0
 slink /etc/resolv.conf /tmp/resolv.conf 777 0 0
@@ -42,6 +43,9 @@ LIST
 # the archive mode gateway (arch/), when it has been built
 [ -f "$top/arch/build/v90arch-arm" ] || { echo "build the archive gateway first (make -C arch v90arch-arm)" >&2; exit 1; }
 echo "file /usr/sbin/v90arch $top/arch/build/v90arch-arm 755 0 0"
+# OpenVPN, as it is (fw/mkvpn.sh): the tunnel to the IWANGO games' network
+[ -f "$fw/build/vpn/openvpn" ] || { echo "build OpenVPN first (sh fw/mkvpn.sh; fw/setup.sh does it)" >&2; exit 1; }
+echo "file /usr/sbin/openvpn $fw/build/vpn/openvpn 755 0 0"
 if [ "$1" = debug ]; then
     echo "file /etc/debug $fw/debug.note 644 0 0"
     for t in peek slicpoke tdmpoke; do

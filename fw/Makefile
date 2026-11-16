@@ -144,6 +144,7 @@ test-v90nv: tools/v90nv.host tools/v90nv.arm
 
 # everything about the release that can be tested without a box
 test-release: test-v90nv
+	tools/test_confpack.sh
 	python3 tools/test_mkgsfw.py
 	python3 tools/test_release.py
 	$(MAKE) -s -C loader test test-arm

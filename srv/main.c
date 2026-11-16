@@ -613,6 +613,7 @@ static int vp_switch(void)
     for (i = 0; i < n_ports; i++) if (S[i].cfg.service == CFG_SERVICE_DREAMCAST && S[i].cfg.dc_iwango) return 1;
     return 0;
 }
+static int vp_routes;       /* route lines in the stored profile */
 /* the server a stored profile names, for the page and the log; 0 = no profile */
 static int vp_remote(char *out, size_t cap)
 {
@@ -622,6 +623,7 @@ static int vp_remote(char *out, size_t cap)
     n = read(fd, text, sizeof text);
     close(fd);
     if (n > 0) (void)vpn_profile_remote(text, (size_t)n, out, cap);
+    vp_routes = n > 0 ? vpn_profile_routes(text, (size_t)n) : 0;
     return 1;
 }
 /* the Dreamcast page was given a profile (len 0: take the stored one away) */
@@ -679,13 +681,21 @@ static void vp_poll(uint32_t now_ms)
         (void)munlockall();
         /* after the profile, so that it cannot say otherwise: our device,
          * no scripts, and the box's own traffic and name servers stay */
-        execl(vp_prog, "openvpn", "--config", vp_path, "--dev", VPN_DEV, "--dev-type", "tun", "--script-security", "1",
-              "--pull-filter", "ignore", "redirect-gateway", "--pull-filter", "ignore", "dhcp-option",
-              "--pull-filter", "ignore", "block-outside-dns",
-              /* of the routes the server sends, only those into 10.0.0.0/8: it
-               * is not to take the box's own traffic or its network away */
-              "--pull-filter", "accept", "route-gateway", "--pull-filter", "accept", "route 10.",
-              "--pull-filter", "ignore", "route", "--connect-retry", "5", "60", "--verb", "1", (char *)NULL);
+        /* Of what the server sends, no route is taken: a filter on their
+         * text would be a poor guard. The tunnel carries what the profile's
+         * own (checked) route lines say, or the games' network as the
+         * address list of the console service shows it. */
+        if (vp_routes)
+            execl(vp_prog, "openvpn", "--config", vp_path, "--dev", VPN_DEV, "--dev-type", "tun", "--script-security", "1",
+                  "--pull-filter", "ignore", "redirect-gateway", "--pull-filter", "ignore", "dhcp-option",
+                  "--pull-filter", "ignore", "block-outside-dns", "--pull-filter", "accept", "route-gateway",
+                  "--pull-filter", "ignore", "route", "--connect-retry", "5", "60", "--verb", "1", (char *)NULL);
+        else
+            execl(vp_prog, "openvpn", "--config", vp_path, "--dev", VPN_DEV, "--dev-type", "tun", "--script-security", "1",
+                  "--pull-filter", "ignore", "redirect-gateway", "--pull-filter", "ignore", "dhcp-option",
+                  "--pull-filter", "ignore", "block-outside-dns", "--pull-filter", "accept", "route-gateway",
+                  "--pull-filter", "ignore", "route", "--route", "10.200.0.0", "255.255.255.0",
+                  "--connect-retry", "5", "60", "--verb", "1", (char *)NULL);
         _exit(127);
     }
     if (vp_pid < 0) { vp_pid = 0; vp_next = now_ms + 30000u; return; }

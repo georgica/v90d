@@ -48,7 +48,12 @@ say "started: scheme $SCHEME, set $(sed -n 's/^set=//p' $WHERE 2>/dev/null)"
 NOFLASH=; grep -q v90d.noflash /proc/cmdline && NOFLASH=1
 [ "$SCHEME" = none ] && NOFLASH=1
 CONF=/tmp/v90d.conf
+# the VPN profile of the Dreamcast page is kept in the same flash file as
+# the settings (confpack.sh) and lives next to them while the box runs
+VPN=/tmp/v90d.vpn
+. /etc/confpack.sh
 if [ "$SCHEME" != none ] && v90nv conf-load $CONF; then
+    conf_split
     say "settings from flash"
 else
     cp /etc/v90d.conf $CONF
@@ -64,7 +69,7 @@ if ! /usr/sbin/v90d -c $CONF -p >/dev/null 2>&1; then
     cp /etc/v90d.conf $CONF
 fi
 chmod 600 $CONF
-cp $CONF $CONF.kept
+(umask 077; conf_pack > $CONF.kept)
 LAN=eth0
 
 hostname v90d
@@ -117,8 +122,8 @@ grep -q v90d.nodaemon /proc/cmdline && { say "no daemon, as asked"; exit 0; }
 if [ -z "$NOFLASH" ]; then
     # the settings page saves to $CONF; carry a change to the flash
     while sleep 5; do
-        cmp -s $CONF $CONF.kept && continue
-        cp $CONF $CONF.new
+        (umask 077; conf_pack > $CONF.new)
+        cmp -s $CONF.new $CONF.kept && continue
         if v90nv conf-save $CONF.new; then mv $CONF.new $CONF.kept; say "settings kept in flash"
         else say "settings NOT kept in flash"; sleep 60; fi
     done &
@@ -142,7 +147,8 @@ fi
     [ -f /tmp/v90d.restart ] || continue
     say "restart asked"
     if [ -z "$NOFLASH" ]; then
-        v90nv conf-save $CONF
+        (umask 077; conf_pack > $CONF.new)
+        v90nv conf-save $CONF.new
         v90nv confirm >/dev/null 2>&1
     fi
     sync

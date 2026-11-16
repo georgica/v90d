@@ -55,6 +55,12 @@ int main(void)
     CHECK_EQ_I(chk("remote a 1\nroute 110.1.1.1\n"), -1);
     CHECK_EQ_I(chk("remote a 1\nroute 10.1.1\n"), -1);
     CHECK_EQ_I(chk("remote a 1\nroute\n"), -1);
+    CHECK_EQ_I(chk("remote a 1\nroute 010.1.1.1\n"), -1);                 /* read as octal by some: 8.1.1.1 */
+    CHECK_EQ_I(chk("remote a 1\nroute 10.01.1.1\n"), -1);
+    CHECK_EQ_I(chk("remote a 1\nroute 10.0.0.0 255.0.0.0\n"), 0);
+    CHECK_EQ_I(vpn_profile_routes("remote a 1\nroute 10.1.0.0 255.255.0.0\n", 38), 1);
+    CHECK_EQ_I(vpn_profile_routes("remote a 1\n# route 10.1.0.0\n<ca>\nroute 10.1.1.1\n</ca>\n", 54), 0);
+    CHECK_EQ_I(vpn_profile_routes("  route 10.1.1.1\nroute 10.2.2.2", 31), 2);
     /* blocks: known ones only, closed, not nested */
     CHECK_EQ_I(chk("<ca>\nabc\n"), -1); CHECK(strcmp(msg, "line 1: <ca> is not closed") == 0);
     CHECK_EQ_I(chk("<up>\nabc\n</up>\n"), -1);
