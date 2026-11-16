@@ -618,5 +618,49 @@ int main(int argc, char **argv)
         CHECK_EQ_I(waitpid(pid, &st, 0), pid);
         CHECK(WIFEXITED(st) && WEXITSTATUS(st) == 0);
     }
+    /* 7. a console as a host on the network: the port's caller gets the
+     * address that the lease command hands out (on the box, a DHCP lease of
+     * its own) instead of the configured one, and the network side answers
+     * ARP for it. */
+    {
+        static char lanlog[300]; struct ifreq ifr; int sk;
+        cfg_default(&c);
+        strcpy(c.line_number, "5551234"); c.rings = 1;
+        c.service = CFG_SERVICE_DREAMCAST; c.dc_lan = 1;
+        c.status_port = 8080;
+        CHECK_EQ_I(cfg_save(&c, conf, err, sizeof err), CFG_OK);
+        CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
+        snprintf(lanlog, sizeof lanlog, "%s/ns_lan.log", argv[2]);
+        pid = fork();
+        if (pid == 0) {
+            int a = fcntl(sv[1], F_DUPFD, 20), lfd = open(lanlog, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            dup2(a, 3); if (lfd >= 0) dup2(lfd, 2);
+            for (i = 4; i < 64; i++) close(i);
+            execl(argv[1], "v90d", "-c", conf, "-l", "fd:3", "-i", "lo", "-t", "ppp0", "-A", "", "-D", "", "-E", "echo 192.0.2.77", (char *)NULL);
+            _exit(127);
+        }
+        close(sv[1]);
+        line_fd = sv[0]; idle_fd = -1;
+        dead = quiet_exit = 0; hook = modem_on = 0; blk_n = 0; c_tx = 0; c_rx_pw = 0;
+        channel_init(&CH, &cc);
+        memset(prev_tx, 0xFF, sizeof prev_tx);
+        run_ms(3500);
+        memset(&ifr, 0, sizeof ifr); strcpy(ifr.ifr_name, "ppp0");
+        sk = socket(AF_INET, SOCK_DGRAM, 0);
+        CHECK_EQ_I(ioctl(sk, SIOCGIFDSTADDR, &ifr), 0);
+        CHECK(ntohl(((struct sockaddr_in *)(void *)&ifr.ifr_dstaddr)->sin_addr.s_addr) == IP4(192, 0, 2, 77));
+        close(sk);
+        CHECK(file_has("/proc/sys/net/ipv4/conf/lo/proxy_arp", "1"));
+        CHECK(file_has(lanlog, "port 1: the console is 192.0.2.77 on the network"));
+        CHECK(http("GET /status.json HTTP/1.0\r\n\r\n", resp, sizeof resp) > 0);
+        CHECK(strstr(resp, "\"service\":\"dreamcast\"") != NULL);
+        quiet_exit = 1;
+        kill(pid, SIGTERM);
+        for (i = 0; i < 400 && !dead; i++) step(0);
+        close(line_fd);
+        CHECK_EQ_I(waitpid(pid, &st, 0), pid);
+        CHECK(WIFEXITED(st) && WEXITSTATUS(st) == 0);
+        CHECK(file_has("/proc/sys/net/ipv4/conf/lo/proxy_arp", "0"));
+    }
     T_REPORT("ns_call");
 }

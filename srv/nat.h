@@ -35,6 +35,7 @@ typedef struct {
     int      archive[2];        /* per peer */
     uint16_t http_port, ftp_port, dns_port, pasv_lo, pasv_hi;
     int      console[2];        /* per peer */
+    int      lan[2];            /* per peer: a host on the network itself, not masqueraded, no ports opened */
     const nat_rewrite *rewrite; int n_rewrite;
     const nat_open *open; int n_open;
     char     wan[16];           /* interface name; "" = no ports opened */

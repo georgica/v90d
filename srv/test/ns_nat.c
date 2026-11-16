@@ -155,6 +155,21 @@ int main(void)
     n = mkpkt(pkt, 17, IP4(198, 51, 100, 99), 5560, WAN_US, 7980);
     CHECK(!through(wan_fd, ppp_fd, pkt, n, &s, &d, &dp));
 
+    /* a console that is a host on the network itself (lan): its packets
+     * leave with its own address, the address rewrites still hold, and no
+     * port is opened towards it here (the network reaches it directly) */
+    p.console[0] = 1; p.lan[0] = 1;
+    CHECK_EQ_I(nat_apply(&p), 0);
+    n = mkpkt(pkt, 17, CALLER, 4020, IP4(203, 0, 113, 50), 9500);
+    CHECK(through(ppp_fd, wan_fd, pkt, n, &s, &d, &dp));
+    CHECK(s == CALLER); CHECK(d == IP4(203, 0, 113, 50));
+    n = mkpkt(pkt, 17, CALLER, 4021, IP4(203, 0, 113, 10), 9500);
+    CHECK(through(ppp_fd, wan_fd, pkt, n, &s, &d, &dp));
+    CHECK(s == CALLER); CHECK(d == IP4(198, 51, 100, 7));
+    n = mkpkt(pkt, 17, IP4(198, 51, 100, 99), 5570, WAN_US, 7980);
+    CHECK(!through(wan_fd, ppp_fd, pkt, n, &s, &d, &dp));
+    p.lan[0] = 0;
+
     /* the full lists fit in one transaction */
     {
         static nat_rewrite many[NAT_REWRITE_MAX]; static nat_open wide[NAT_OPEN_MAX]; int i;

@@ -294,7 +294,7 @@ int nat_apply(const nat_plan *p)
     attr_str(&m, NFTA_CHAIN_TYPE, "nat");
     msg_end(&m, at);
 
-    for (i = 0; i < 2; i++) if (p->masquerade && p->peer[i]) rule_msg(&m, p->peer[i]);
+    for (i = 0; i < 2; i++) if (p->masquerade && p->peer[i] && !p->lan[i]) rule_msg(&m, p->peer[i]);
 
     if ((p->peer[0] && (p->archive[0] || p->console[0])) || (p->peer[1] && (p->archive[1] || p->console[1]))) {
         at = msg_begin(&m, nft(NFT_MSG_NEWCHAIN), NLM_F_CREATE | NLM_F_ACK, NFPROTO_IPV4, 0);
@@ -318,7 +318,7 @@ int nat_apply(const nat_plan *p)
                 for (j = 0; j < p->n_rewrite && j < NAT_REWRITE_MAX; j++)
                     dnat_msg(&m, p->peer[i], NULL, p->rewrite[j].from, p->rewrite[j].proto,
                              p->rewrite[j].port, p->rewrite[j].port, p->rewrite[j].to);
-                if (!opened && p->wan[0]) {
+                if (!opened && p->wan[0] && !p->lan[i]) {
                     opened = 1;
                     for (j = 0; j < p->n_open && j < NAT_OPEN_MAX; j++)
                         dnat_msg(&m, 0, p->wan, 0, p->open[j].proto, p->open[j].lo, p->open[j].hi, p->peer[i]);

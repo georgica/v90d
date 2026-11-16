@@ -42,6 +42,7 @@
 #define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
+#include <arpa/inet.h>
 #include <poll.h>
 #include <signal.h>
 #include <stdarg.h>
@@ -255,6 +256,88 @@ static void dn_poll(uint32_t now_ms)
     }
 }
 
+/* A console as a host on the network (dreamcast_lan): the caller of that
+ * port gets an address of the network itself. The address comes from a
+ * command that prints it (on the box, udhcpc asking the network's DHCP
+ * server for a second lease under a client name of its own; the script it
+ * is given prints the address and changes nothing). It is asked again every
+ * half hour, which also keeps the lease. Without an answer the port stays
+ * as the settings have it, behind this box's address. */
+static const char *la_cmd;              /* -E; null = udhcpc on lan_if */
+static struct { uint32_t ip; pid_t pid; int fd; uint32_t next_ms; int started; char text[64]; size_t len; } la[PORTS];
+static int lan_wanted(int i) { return S[i].cfg.service == CFG_SERVICE_DREAMCAST && S[i].cfg.dc_lan; }
+static int any_lan(void)
+{
+    int i;
+    for (i = 0; i < n_ports; i++) if (lan_wanted(i) && la[i].ip) return 1;
+    return 0;
+}
+static void la_poll(uint32_t now_ms)
+{
+    int i, st;
+    for (i = 0; i < n_ports; i++) {
+        if (la[i].pid > 0) {
+            ssize_t r;
+            while (la[i].len < sizeof la[i].text - 1 && (r = read(la[i].fd, la[i].text + la[i].len, sizeof la[i].text - 1 - la[i].len)) > 0)
+                la[i].len += (size_t)r;
+            if (waitpid(la[i].pid, &st, WNOHANG) != la[i].pid) continue;
+            la[i].pid = 0; close(la[i].fd); la[i].fd = -1;
+            la[i].text[la[i].len] = 0;
+            la[i].text[strcspn(la[i].text, " \r\n")] = 0;
+            {
+                struct in_addr ia; uint32_t ip = 0; char a[16];
+                if (WIFEXITED(st) && WEXITSTATUS(st) == 0 && inet_aton(la[i].text, &ia)) ip = ntohl(ia.s_addr);
+                if (!ip) {
+                    logf_(CFG_LOG_WARN, "port %d: no address for the console from the network; trying again in a minute", i + 1);
+                    la[i].next_ms = now_ms + 60000u;
+                } else {
+                    la[i].next_ms = now_ms + 1800000u;
+                    if (ip != la[i].ip) {
+                        la[i].ip = ip; net_dirty = 1;
+                        logf_(CFG_LOG_INFO, "port %d: the console is %s on the network", i + 1, ip_str(ip, a));
+                    }
+                }
+            }
+            continue;
+        }
+        if (!lan_wanted(i)) { if (la[i].ip) { la[i].ip = 0; net_dirty = 1; } la[i].started = 0; continue; }
+        if (la[i].started && (int32_t)(now_ms - la[i].next_ms) < 0) continue;
+        la[i].started = 1; la[i].next_ms = now_ms + 60000u;
+        {
+            int pp[2]; char cmd[256];
+            if (la_cmd) snprintf(cmd, sizeof cmd, "%s", la_cmd);
+            else snprintf(cmd, sizeof cmd, "udhcpc -i %s -f -n -q -t 4 -T 2 -x 0x3d:007639306464632d%02x -s /etc/dclease.script 2>/dev/null",
+                          lan_if, 0x31 + i);        /* client name "v90ddc-1", "v90ddc-2" */
+            if (pipe2(pp, O_CLOEXEC | O_NONBLOCK) < 0) continue;
+            la[i].len = 0;
+            la[i].pid = fork();
+            if (la[i].pid == 0) {
+                struct sched_param sp;
+                memset(&sp, 0, sizeof sp);
+                (void)sched_setscheduler(0, SCHED_OTHER, &sp);
+                (void)munlockall();
+                (void)fcntl(pp[1], F_SETFL, 0);
+                if (dup2(pp[1], 1) < 0) _exit(126);
+                execl("/bin/sh", "sh", "-c", cmd, (char *)NULL);
+                _exit(127);
+            }
+            close(pp[1]);
+            if (la[i].pid < 0) { la[i].pid = 0; close(pp[0]); continue; }
+            la[i].fd = pp[0];
+        }
+    }
+}
+/* the network side answers ARP for the console's address, or not */
+static void proxy_arp(int on)
+{
+    char path[80]; int fd;
+    snprintf(path, sizeof path, "/proc/sys/net/ipv4/conf/%s/proxy_arp", lan_if);
+    fd = open(path, O_WRONLY | O_CLOEXEC);
+    if (fd < 0) { if (on) logf_(CFG_LOG_WARN, "cannot switch proxy ARP on %s: %s", lan_if, strerror(errno)); return; }
+    if (write(fd, on ? "1\n" : "0\n", 2) != 2 && on) logf_(CFG_LOG_WARN, "cannot switch proxy ARP on %s: %s", lan_if, strerror(errno));
+    close(fd);
+}
+
 static int all_onhook(void)
 {
     int i;
@@ -354,7 +437,12 @@ static void net_apply(void)
     int i;
     net_dirty = 0;
     for (i = 0; i < n_ports; i++) {
-        const cfg_t *c = &S[i].cfg;
+        cfg_t *c = &S[i].cfg;
+        if (lan_wanted(i) && la[i].ip && c->ppp_peer != la[i].ip) {
+            static cfg_t v;
+            v = *c; v.ppp_peer = la[i].ip;
+            srv_reconfigure(&S[i], &v);
+        }
         if (tun_fd[i] >= 0) close(tun_fd[i]);
         tun_fd[i] = tun_open(tun_name[i], c->ppp_local, c->ppp_peer, c->mru);
         if (tun_fd[i] < 0) logf_(CFG_LOG_ERROR, "cannot set up %s: %s (callers will get PPP but no network)", tun_name[i], strerror(errno));
@@ -369,6 +457,7 @@ static void net_apply(void)
         p.masquerade = S[0].cfg.nat;
         for (i = 0; i < n_ports; i++) p.archive[i] = S[i].cfg.service == CFG_SERVICE_ARCHIVE;
         for (i = 0; i < n_ports; i++) p.console[i] = S[i].cfg.service == CFG_SERVICE_DREAMCAST;
+        for (i = 0; i < n_ports; i++) p.lan[i] = lan_wanted(i) && la[i].ip;
         p.rewrite = dc_rw; p.n_rewrite = dc_n;
         p.n_open = dclist_ports(&p.open);
         strncpy(p.wan, lan_if, sizeof p.wan - 1);
@@ -385,6 +474,7 @@ static void net_apply(void)
     } else if (nat_remove() < 0 && errno != ENOENT) {
         logf_(CFG_LOG_WARN, "cannot remove the NAT rule: %s", strerror(errno));
     }
+    proxy_arp(any_lan());
     arch_apply(any_archive());
 }
 
@@ -396,6 +486,8 @@ static void adopt(const cfg_t *n)
     if (!force_debug) log_level = n->log_level;
     for (i = 0; i < n_ports; i++) {
         cfg_for_port(n, i, &view);
+        if (view.service == CFG_SERVICE_DREAMCAST && view.dc_lan && la[i].ip) view.ppp_peer = la[i].ip;
+        if (view.dc_lan != S[i].cfg.dc_lan) net_dirty = 1;
         if (view.ppp_local != S[i].cfg.ppp_local || view.ppp_peer != S[i].cfg.ppp_peer || view.nat != S[i].cfg.nat || view.service != S[i].cfg.service || view.mru != S[i].cfg.mru)
             net_dirty = 1;
         srv_reconfigure(&S[i], &view);
@@ -483,7 +575,7 @@ static void log_last_call(int port)
 
 static void usage(void)
 {
-    fprintf(stderr, "usage: v90d [-c FILE] -l LINE [-l LINE2] [-d N] [-i LAN-IF] [-t TUN] [-A GATEWAY] [-D FETCH-COMMAND] [-G REPORT-PROGRAM] [-v]\n       v90d [-c FILE] -p\n"
+    fprintf(stderr, "usage: v90d [-c FILE] -l LINE [-l LINE2] [-d N] [-i LAN-IF] [-t TUN] [-A GATEWAY] [-D FETCH-COMMAND] [-G REPORT-PROGRAM] [-E LEASE-COMMAND] [-v]\n       v90d [-c FILE] -p\n"
                     "bench: [-R l|c per port, e.g. lc] [-P 1..31: maximum downstream power code] [-w|-W FILE: record port 1|2]\n");
     exit(2);
 }
@@ -506,7 +598,7 @@ int main(int argc, char **argv)
     /* the telephone lights: <prefix><port>/brightness, lit while the port is off hook */
     const char *led_prefix = "/sys/class/leds/ht802:phone"; int led_fd[PORTS] = { -1, -1 }, led_on[PORTS] = { -1, -1 };
 
-    while ((opt = getopt(argc, argv, "c:l:d:i:t:vpw:W:L:A:N:R:P:D:G:")) != -1) {
+    while ((opt = getopt(argc, argv, "c:l:d:i:t:vpw:W:L:A:N:R:P:D:G:E:")) != -1) {
         switch (opt) {
         case 'c': cfg_path = optarg; break;
         case 'l': if (n_ports >= PORTS) usage(); line_spec[n_ports++] = optarg; break;
@@ -525,6 +617,7 @@ int main(int argc, char **argv)
         case 'p': print_net = 1; break;
         case 'L': led_prefix = optarg; break;
         case 'N': fw_tool = optarg; break;      /* the flash tool behind the Firmware page */
+        case 'E': la_cmd = optarg; break;       /* prints the console's address on the network (instead of udhcpc) */
         case 'G': dn_prog = optarg; break;      /* run instead of wget for the Dreamcast Now report: PROG URL BODY */
         case 'D': dc_cmd = optarg; break;       /* the command that fetches the console address list; "" = none */
         case 'A': arch_path = optarg; break;  /* the archive gateway program; "" = do not start one */
@@ -666,7 +759,7 @@ int main(int argc, char **argv)
             }
             arch_clock = now_ms;
             if (now_ms % 2000 == 0) arch_poll(now_ms);
-            if (now_ms % 1000 == 0) { dc_poll(now_ms); dn_poll(now_ms); }
+            if (now_ms % 1000 == 0) { dc_poll(now_ms); dn_poll(now_ms); la_poll(now_ms); }
             if (fw_pid > 0 && now_ms % 1000 == 0 && waitpid(fw_pid, NULL, WNOHANG) == fw_pid) fw_pid = 0;
             /* the Restart button, once its answer has gone out */
             if (H.restart_asked && httpd_active(&H) == 0) {
@@ -714,6 +807,7 @@ int main(int argc, char **argv)
     httpd_close(&H);
     arch_stop();
     if (S[0].cfg.nat || any_archive() || any_console()) (void)nat_remove();
+    if (any_lan()) proxy_arp(0);
     for (p = 0; p < n_ports; p++) line_close(&line[p]);
     logf_(CFG_LOG_INFO, "stopped");
     return 0;
