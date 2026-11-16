@@ -647,6 +647,15 @@ static void test_saturn_words(void)
         CHECK_EQ_I(saturn_unpack(&r, in, m + 21, out, sizeof out), 1024);
         CHECK(r.expect == 4000000001u);
     }
+    /* a number far ahead of what is expected is not believed (one forged
+     * datagram must not silence the real ones that follow); a gap that a
+     * bad stretch of network can make is */
+    saturn_rx_init(&r); r.expect = 10;
+    CHECK_EQ_I(saturn_unpack(&r, (const uint8_t *)"zz<dataSplit>4000000", 20, out, sizeof out), 0);
+    CHECK(r.expect == 10);
+    CHECK_EQ_I(saturn_unpack(&r, (const uint8_t *)"zz<dataSplit>4106", 17, out, sizeof out), 2);
+    CHECK(r.expect == 4107);
+    CHECK_EQ_I(saturn_unpack(&r, (const uint8_t *)"zz<dataSplit>8204", 17, out, sizeof out), 0);
     /* rubbish */
     saturn_rx_init(&r);
     CHECK_EQ_I(saturn_unpack(&r, (const uint8_t *)"abc", 3, out, sizeof out), 0);

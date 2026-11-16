@@ -805,6 +805,10 @@ int main(int argc, char **argv)
         udp_to(udp, SATURN_UDP_WAIT, " you<dataSplit>1<packetSplit>hello<dataSplit>0", 46);
         run_ms(1000);
         CHECK_EQ_I(sat_dn_n, 9); CHECK(memcmp(sat_dn, "hello you", 9) == 0);
+        /* the other player's address from another port, once its port is
+         * known: not heard either */
+        { int other = udp_at(IP4(127, 0, 0, 1), 20555); udp_to(other, SATURN_UDP_WAIT, "EVIL2<dataSplit>2", 17); run_ms(500); close(other); }
+        CHECK_EQ_I(sat_dn_n, 9);
         /* and the octets of the console here go out, numbered from 0 */
         sat_n = 200;
         run_ms(3000); udp_drain(udp);
@@ -862,6 +866,59 @@ int main(int argc, char **argv)
         CHECK(file_has(lanlog, "port 1: nobody called"));
         hang_up();
 
+        quiet_exit = 1;
+        kill(pid, SIGTERM);
+        for (i = 0; i < 400 && !dead; i++) step(0);
+        close(line_fd);
+        CHECK_EQ_I(waitpid(pid, &st, 0), pid);
+        CHECK(WIFEXITED(st) && WEXITSTATUS(st) == 0);
+    }
+    /* 9. the three switches of the dreamcast service on a port that has
+     * another service: nothing of it happens. No lease is asked for, no
+     * report sent, no router searched, no address list fetched, no rules. */
+    {
+        static char lanlog[300], mark[320], leasecmd[400], listcmd[400], nowcmd[400]; struct ifreq ifr; int sk;
+        snprintf(mark, sizeof mark, "%s/ns_inert.mark", argv[2]); unlink(mark);
+        snprintf(leasecmd, sizeof leasecmd, ": > %s; echo 192.0.2.77 600", mark);
+        snprintf(listcmd, sizeof listcmd, ": > %s; echo 172.17.18.2 192.0.2.9 9500", mark);
+        snprintf(nowcmd, sizeof nowcmd, "%s/ns_inert.sh", argv[2]);
+        { FILE *f = fopen(nowcmd, "w"); if (f) { fprintf(f, "#!/bin/sh\n: > %s\n", mark); fclose(f); chmod(nowcmd, 0755); } }
+        cfg_default(&c);
+        strcpy(c.line_number, "5551234"); c.rings = 1;
+        c.n_users = 1; strcpy(c.users[0].name, "alice"); strcpy(c.users[0].secret, "wonderland"); c.auth = CFG_AUTH_CHAP;
+        c.service = CFG_SERVICE_INTERNET; c.dc_now = 1; c.dc_lan = 1; c.dc_upnp = 1;
+        c.status_port = 8080;
+        CHECK_EQ_I(cfg_save(&c, conf, err, sizeof err), CFG_OK);
+        CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
+        snprintf(lanlog, sizeof lanlog, "%s/ns_inert.log", argv[2]);
+        pid = fork();
+        if (pid == 0) {
+            int a = fcntl(sv[1], F_DUPFD, 20), lfd = open(lanlog, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            dup2(a, 3); if (lfd >= 0) dup2(lfd, 2);
+            for (i = 4; i < 64; i++) close(i);
+            execl(argv[1], "v90d", "-c", conf, "-l", "fd:3", "-i", "lo", "-t", "ppp0", "-A", "", "-D", listcmd, "-E", leasecmd, "-G", nowcmd, (char *)NULL);
+            _exit(127);
+        }
+        close(sv[1]);
+        line_fd = sv[0]; idle_fd = -1;
+        dead = quiet_exit = 0; hook = modem_on = 0; blk_n = 0; c_tx = 0; c_rx_pw = 0;
+        channel_init(&CH, &cc);
+        memset(prev_tx, 0xFF, sizeof prev_tx);
+        run_ms(3000);
+        /* a whole call with IP up, the moment a console's port would report */
+        hook = 1; run_ms(500); dial("5551234"); run_ms(3000 + 2000 + 300);
+        start_modem(0);
+        CHECK(wait_ip(40000) > 0);
+        run_ms(3000); usleep(300000);
+        memset(&ifr, 0, sizeof ifr); strcpy(ifr.ifr_name, "ppp0");
+        sk = socket(AF_INET, SOCK_DGRAM, 0);
+        CHECK_EQ_I(ioctl(sk, SIOCGIFDSTADDR, &ifr), 0);
+        CHECK(ntohl(((struct sockaddr_in *)(void *)&ifr.ifr_dstaddr)->sin_addr.s_addr) == IP4(10, 64, 64, 2));
+        close(sk);
+        hang_up();
+        CHECK(access(mark, F_OK) != 0);
+        CHECK(file_has("/proc/sys/net/ipv4/conf/lo/proxy_arp", "0"));
+        CHECK(!file_has(lanlog, "console")); CHECK(!file_has(lanlog, "game ports")); CHECK(!file_has(lanlog, "Dreamcast"));
         quiet_exit = 1;
         kill(pid, SIGTERM);
         for (i = 0; i < 400 && !dead; i++) step(0);

@@ -40,6 +40,7 @@ enum { SATURN_NONE = 0, SATURN_WAIT, SATURN_CALL };
 
 #define SATURN_KEEP       5         /* records in a datagram: the newest and the four before it */
 #define SATURN_REC_MAX    256       /* octets we put into one record */
+#define SATURN_JUMP_MAX   4096      /* a record number further ahead than this is not believed */
 #define SATURN_DGRAM_MAX  (SATURN_KEEP * (SATURN_REC_MAX + 11 + 10) + (SATURN_KEEP - 1) * 13)
 
 /* What the dialled digits (as tel.h collects them: a closing # is not
@@ -67,7 +68,8 @@ void   saturn_rx_init(saturn_rx *r);
 size_t saturn_pack(saturn_tx *t, const uint8_t *oct, size_t n, uint8_t *out);
 /* A data datagram from the other side: the octets for our modem that it
  * brings (none when all of it was seen before), in order, into out; at most
- * cap, what does not fit is lost. Returns how many. */
+ * cap, what does not fit is lost. A datagram whose newest record is more
+ * than SATURN_JUMP_MAX ahead is dropped whole. Returns how many. */
 size_t saturn_unpack(saturn_rx *r, const uint8_t *dg, size_t len, uint8_t *out, size_t cap);
 
 #endif

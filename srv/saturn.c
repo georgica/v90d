@@ -95,7 +95,7 @@ size_t saturn_unpack(saturn_rx *r, const uint8_t *dg, size_t len, uint8_t *out, 
     }
     if (!nrec) return 0;
     newest = rec[0].seq;
-    if (newest < r->expect) return 0;
+    if (newest < r->expect || newest - r->expect > SATURN_JUMP_MAX) return 0;
     for (;;) {
         int use = 0, last;
         for (i = 0; i < nrec; i++) if (rec[i].seq == r->expect) { use = i; break; }

@@ -392,8 +392,16 @@ static void up_poll(uint32_t now_ms)
 
 /* ---- service = saturn: the network side of a console-to-console call
  * (saturn.h). Nothing here waits: every socket is non-blocking and looked
- * at once per block of the line. One conversation per port; the two ports
- * of one box can even call each other. ---- */
+ * at once per block of the line. One conversation per port.
+ *
+ * The tunnel's words are another project's and carry no proof of who is
+ * speaking, so what can be done without changing them is done: the sockets
+ * exist only while a console's call is up, they are tied to the network
+ * interface (a caller on the other port cannot reach them), only the
+ * address that greeted us is heard, from the port its first datagram came
+ * from, and a record number far ahead is not believed (saturn.h). Somebody
+ * who can forge that address and port on the way can still put octets into
+ * the game. ---- */
 enum { SL_IDLE = 0, SL_LISTEN, SL_HELLO_IN, SL_CONNECT, SL_HELLO_OUT, SL_LINKED, SL_OVER };
 #define SL_WAIT_MS   120000u    /* waiting for the other player's call */
 #define SL_REACH_MS   60000u    /* trying to reach the other player's box */
@@ -401,7 +409,7 @@ enum { SL_IDLE = 0, SL_LISTEN, SL_HELLO_IN, SL_CONNECT, SL_HELLO_OUT, SL_LINKED,
 #define SL_SILENT_MS  30000u    /* the other box sends a ping every second */
 static struct sat_link {
     int      st, lis, tcp, udp;
-    uint32_t peer; uint16_t peer_port;
+    uint32_t peer; uint16_t peer_port; int port_known;
     uint32_t t0, t_hello, next_try, ping_at, heard;
     char     hello[8]; size_t hello_n;
     saturn_tx tx; saturn_rx rx;
@@ -454,6 +462,7 @@ static int sl_tcp(void)
 {
     int fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0), one = 1;
     if (fd >= 0) (void)setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+    if (fd >= 0) (void)setsockopt(fd, SOL_SOCKET, SO_BINDTODEVICE, lan_if, (socklen_t)strlen(lan_if) + 1);
     return fd;
 }
 /* the two boxes have greeted each other: datagrams from now on */
@@ -467,9 +476,10 @@ static void sl_linked(int k, uint32_t now_ms, int local_port, int peer_port)
     memset(&sa, 0, sizeof sa);
     sa.sin_family = AF_INET; sa.sin_port = htons((uint16_t)local_port);
     if (l->udp >= 0) (void)setsockopt(l->udp, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+    if (l->udp >= 0) (void)setsockopt(l->udp, SOL_SOCKET, SO_BINDTODEVICE, lan_if, (socklen_t)strlen(lan_if) + 1);
     if (l->udp < 0 || bind(l->udp, (struct sockaddr *)(void *)&sa, sizeof sa) < 0) { sl_over(k, "no UDP port for the game's octets"); return; }
     (void)setsockopt(l->udp, IPPROTO_IP, IP_TOS, &tos, sizeof tos);
-    l->peer_port = (uint16_t)peer_port;
+    l->peer_port = (uint16_t)peer_port; l->port_known = 0;
     saturn_tx_init(&l->tx); saturn_rx_init(&l->rx);
     l->up_n = 0; l->dn_n = 0;
     l->heard = l->ping_at = now_ms;
@@ -559,7 +569,9 @@ static void sl_poll(uint32_t now_ms)
                 r = recvfrom(l->udp, dg, sizeof dg, 0, (struct sockaddr *)(void *)&sa, &sl_n);
                 if (r <= 0) break;
                 if (ntohl(sa.sin_addr.s_addr) != l->peer) continue;     /* only the other player is heard */
-                l->peer_port = ntohs(sa.sin_port);                      /* as its router shows it to us */
+                /* its port as its router shows it to us: the first one heard, and no other after */
+                if (!l->port_known) { l->peer_port = ntohs(sa.sin_port); l->port_known = 1; }
+                else if (ntohs(sa.sin_port) != l->peer_port) continue;
                 l->heard = now_ms;
                 switch (saturn_control(dg, (size_t)r)) {
                 case 1: sl_send(l, SATURN_PONG, sizeof SATURN_PONG - 1); break;
