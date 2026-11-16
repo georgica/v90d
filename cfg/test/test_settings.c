@@ -497,6 +497,48 @@ static void test_ethernet(void)
 }
 
 /* the settings are spread over five pages, each with its own form */
+/* the Dreamcast tab: the switches of the dreamcast service on a page of
+ * their own, one per port, and no longer on the Line page */
+static void test_dreamcast_page(void)
+{
+    cfg_t c, out;
+
+    CHECK_EQ_I(settings_page_of("/dreamcast", 10), SETTINGS_DREAMCAST);
+    CHECK_EQ_I(settings_page_of("/dreamcast2", 11), SETTINGS_DREAMCAST2);
+    CHECK(strcmp(settings_page_path(SETTINGS_DREAMCAST2), "/dreamcast2") == 0);
+    /* the tab is there only while a port has the service */
+    base(&c);
+    CHECK(settings_render_page(&c, SETTINGS_LINE, 0, NULL, html, sizeof html) > 0);
+    CHECK(!has(html, "/dreamcast"));
+    c.port2.service = CFG_SERVICE_DREAMCAST;
+    CHECK(settings_render_page(&c, SETTINGS_LINE, 0, NULL, html, sizeof html) > 0);
+    CHECK(has(html, "<a href=\"/dreamcast\">Dreamcast</a>"));
+    base(&c);
+    c.service = CFG_SERVICE_DREAMCAST; c.dc_lan = 1; c.port2.dc_now = 1;
+    CHECK(settings_render_page(&c, SETTINGS_LINE, 0, NULL, html, sizeof html) > 0);
+    CHECK(!has(html, "name=\"dreamcast_now\"")); CHECK(!has(html, "name=\"dreamcast_lan\"")); CHECK(!has(html, "name=\"dreamcast_upnp\""));
+    CHECK(has(html, "<select name=\"service\">"));
+    CHECK(has(html, "<a href=\"/dreamcast\">Dreamcast</a>"));           /* the tab */
+    CHECK(settings_render_page(&c, SETTINGS_DREAMCAST, 0, NULL, html, sizeof html) > 0);
+    CHECK(has(html, "<b>Dreamcast</b>")); CHECK(!has(html, "<a href=\"/dreamcast\">Dreamcast</a>"));
+    CHECK(has(html, "<p class=\"sw\"><b>Port 1</b> <a href=\"/dreamcast2\">Port 2</a></p>"));
+    CHECK(has(html, "<form method=\"post\" action=\"/dreamcast\">"));
+    CHECK(has(html, "<select name=\"dreamcast_now\">")); CHECK(has(html, "<select name=\"dreamcast_lan\">"));
+    CHECK(has(html, "<select name=\"dreamcast_upnp\">"));
+    CHECK(has(html, "<option value=\"on\" selected>On: the console gets an address"));
+    CHECK(!has(html, "name=\"service\"")); CHECK(!has(html, "name=\"number\""));
+    CHECK(has(html, "The service of this port is Dreamcast"));
+    CHECK(settings_render_page(&c, SETTINGS_DREAMCAST2, 0, NULL, html, sizeof html) > 0);
+    CHECK(has(html, "<p class=\"sw\"><a href=\"/dreamcast\">Port 1</a> <b>Port 2</b></p>"));
+    CHECK(has(html, "<input type=\"hidden\" name=\"port\" value=\"2\">"));
+    CHECK(has(html, "<option value=\"on\" selected>On: tell the Dreamcast Now"));
+    CHECK(has(html, "The service of this port is not Dreamcast"));
+    /* its post changes the switches and nothing else */
+    CHECK_EQ_I(apply(&c, "dreamcast_now=on&dreamcast_lan=off&dreamcast_upnp=on", &out), SETTINGS_OK);
+    CHECK_EQ_I(out.dc_now, 1); CHECK_EQ_I(out.dc_lan, 0); CHECK_EQ_I(out.dc_upnp, 1);
+    CHECK_EQ_I(out.service, CFG_SERVICE_DREAMCAST); CHECK(strcmp(out.line_number, c.line_number) == 0);
+}
+
 /* port 2 has a Line and a Modem page of its own */
 static void test_port2(void)
 {
@@ -589,7 +631,7 @@ static void test_port2(void)
     /* untouched forms of port 2 post back to the config they came from */
     CHECK(settings_render_page(&c, SETTINGS_LINE2, 0, NULL, html, sizeof html) > 0);
     n = submit(html, body, sizeof body);
-    CHECK_EQ_I(n, 12);
+    CHECK_EQ_I(n, 9);                       /* the three switches of the Dreamcast tab are not among them */
     CHECK_EQ_I(apply(&c, body, &out), SETTINGS_OK);
     CHECK(memcmp(&out, &c, sizeof c) == 0);
     CHECK(settings_render_page(&c, SETTINGS_MODEM2, 0, NULL, html, sizeof html) > 0);
@@ -1120,6 +1162,7 @@ int main(void)
     test_ethernet();
     test_pages();
     test_port2();
+    test_dreamcast_page();
     test_apply();
     test_users();
     test_invalid();

@@ -1614,6 +1614,16 @@ static void test_two_ports(void)
     CHECK(strstr(resp, "<a href=\"/calls\">Calls</a>") == NULL);     /* the active tab is no link */
     len = exchange("GET / HTTP/1.0\r\n\r\n", resp, sizeof resp);
     CHECK(strstr(resp, "<a href=\"/calls\">Calls</a>") != NULL);
+    /* the Dreamcast tab: on every page, and only while a port has that service */
+    CHECK(strstr(resp, "/dreamcast") == NULL);
+    C.port2.service = CFG_SERVICE_DREAMCAST;
+    len = exchange("GET / HTTP/1.0\r\n\r\n", resp, sizeof resp);
+    CHECK(strstr(resp, "<a href=\"/dreamcast\">Dreamcast</a>") != NULL);
+    len = exchange("GET /dreamcast2 HTTP/1.0\r\n\r\n", resp, sizeof resp);
+    CHECK(parse_resp(resp, len, &r) && r.code == 200 && strstr(resp, "<select name=\"dreamcast_lan\">") != NULL);
+    C.port2.service = CFG_SERVICE_INTERNET;
+    len = exchange("GET /firmware HTTP/1.0\r\n\r\n", resp, sizeof resp);
+    CHECK(strstr(resp, "/dreamcast") == NULL);
     CHECK_EQ_I(code_of("POST /calls HTTP/1.0\r\nContent-Length: 0\r\n\r\n"), 405);
     /* behind the login like the rest */
     strcpy(C.admin_password, "pw");

@@ -93,14 +93,21 @@
  * or, for a page outside the login, alone = the one tab it shows. */
 #define PAGE_TAB_FIRMWARE 6
 #define PAGE_TAB_CALLS 7
+#define PAGE_TAB_DREAMCAST 8
+/* The Dreamcast tab is shown only while a port has that service. Whoever
+ * knows the settings says so before a page is made (the settings pages by
+ * themselves, the server for the others); defined in status.c. */
+extern int page_dreamcast_tab;
 static inline void page_top(sbuf_t *b, const char *title, const char *head, int active, const char *alone)
 {
     static const struct { const char *href, *label; } tabs[] = {
         { "/", "Dashboard" }, { "/line", "Line" }, { "/modem", "Modem" }, { "/users", "Users" },
         { "/network", "Network" }, { "/system", "System" }, { "/firmware", "Firmware" },
-        { "/calls", "Calls" },
+        { "/calls", "Calls" }, { "/dreamcast", "Dreamcast" },
     };
-    int i;
+    /* the order they are shown in */
+    static const unsigned char order[] = { 0, 1, 2, 3, 4, 8, 5, 6, 7 };
+    int i, k;
 
     sb_puts(b, "<!DOCTYPE html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">\n");
     sb_puts(b, head);
@@ -111,7 +118,9 @@ static inline void page_top(sbuf_t *b, const char *title, const char *head, int 
     if (alone) {
         sb_puts(b, "<b>"); sb_puts(b, alone); sb_puts(b, "</b>");
     } else {
-        for (i = 0; i < (int)(sizeof tabs / sizeof tabs[0]); i++) {
+        for (k = 0; k < (int)sizeof order; k++) {
+            i = order[k];
+            if (i == PAGE_TAB_DREAMCAST && !page_dreamcast_tab && i != active) continue;
             if (i == active) { sb_puts(b, "<b>"); sb_puts(b, tabs[i].label); sb_puts(b, "</b>"); }
             else {
                 sb_puts(b, "<a href=\""); sb_puts(b, tabs[i].href); sb_puts(b, "\">");

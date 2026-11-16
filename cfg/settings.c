@@ -159,6 +159,7 @@ static const struct { const char *path, *title; } pages[SETTINGS_PAGES] = {
     { "/settings", "settings" }, { "/line", "line" }, { "/modem", "modem" }, { "/users", "users" },
     { "/network", "network" }, { "/system", "system" },
     { "/line2", "line, port 2" }, { "/modem2", "modem, port 2" },
+    { "/dreamcast", "Dreamcast" }, { "/dreamcast2", "Dreamcast, port 2" },
 };
 
 const char *settings_page_path(int page)
@@ -188,13 +189,14 @@ int settings_render_page(const cfg_t *c, int page, int saved, const char *error,
 
     sb_init(&b, buf, cap);
     if (page < 0 || page >= SETTINGS_PAGES) page = own = SETTINGS_ALL;
-    if (page == SETTINGS_LINE2 || page == SETTINGS_MODEM2) {
+    page_dreamcast_tab = c->service == CFG_SERVICE_DREAMCAST || c->port2.service == CFG_SERVICE_DREAMCAST;
+    if (page == SETTINGS_LINE2 || page == SETTINGS_MODEM2 || page == SETTINGS_DREAMCAST2) {
         /* port 2: the same sections, filled from its settings */
         port2 = 1;
         cfg_for_port(c, 1, &two); c = &two;
-        page = page == SETTINGS_LINE2 ? SETTINGS_LINE : SETTINGS_MODEM;
+        page = page == SETTINGS_LINE2 ? SETTINGS_LINE : page == SETTINGS_MODEM2 ? SETTINGS_MODEM : SETTINGS_DREAMCAST;
     }
-    page_top(&b, pages[own].title, "", page ? page : -1, NULL);
+    page_top(&b, pages[own].title, "", page == SETTINGS_DREAMCAST ? PAGE_TAB_DREAMCAST : page ? page : -1, NULL);
     if (error) {
         sb_puts(&b, "<p><b>Not saved:</b> ");
         sb_html(&b, error, SETTINGS_MSG_MAX, 0);
@@ -202,7 +204,7 @@ int settings_render_page(const cfg_t *c, int page, int saved, const char *error,
     } else if (saved) {
         sb_puts(&b, "<p><b>Settings saved.</b></p>\n");
     }
-    if (page == SETTINGS_LINE || page == SETTINGS_MODEM) {
+    if (page == SETTINGS_LINE || page == SETTINGS_MODEM || page == SETTINGS_DREAMCAST) {
         const char *base = pages[page].path;
         sb_puts(&b, "<p class=\"sw\">");
         if (port2) { sb_puts(&b, "<a href=\""); sb_puts(&b, base); sb_puts(&b, "\">Port 1</a> <b>Port 2</b>"); }
@@ -222,9 +224,6 @@ int settings_render_page(const cfg_t *c, int page, int saved, const char *error,
     sb_puts(&b, " value=\""); sb_html(&b, c->line_number, sizeof c->line_number, 0); sb_puts(&b, "\">");
     row_close(&b, "digits, * and #; empty: every number connects");
     in_select(&b, "Service", F_SERVICE, c->service, n_service, t_service, CFG_SERVICE_COUNT);
-    in_select(&b, "Dreamcast Now", F_DCNOW, c->dc_now, n_v92, t_dcnow, 2);
-    in_select(&b, "Console on the network", F_DCLAN, c->dc_lan, n_v92, t_dclan, 2);
-    in_select(&b, "Game ports from the router", F_DCUPNP, c->dc_upnp, n_v92, t_dcupnp, 2);
     in_select(&b, "Tones", F_TONES, c->line_tones, n_tones, t_tones, 2);
     in_int(&b, "Rings before answer", F_RINGS, c->rings, "1 to 10");
     in_int(&b, "Busy signal", F_BUSY, c->busy_chance, "percent of calls, 0 to 100");
@@ -238,9 +237,27 @@ int settings_render_page(const cfg_t *c, int page, int saved, const char *error,
                 " secure sites do not work. Dreamcast: set the console to dial this port's number"
                 " with a user name and password of the PPP page; PPP compression and V.92 are off"
                 " for this port and the console is given the name servers of the game revival"
-                " projects, whatever the other pages say. The three switches under Service only matter for a Dreamcast port: Dreamcast Now sends a report to dcnow-2016.appspot.com every 15 seconds during a call (a hash of this box's hardware address and a hash of the game server's name), which is how the site shows who is online; it is off unless you turn it on. This one has not been tried with a real"
+                " projects, whatever the other pages say. Its further switches are on the Dreamcast tab. Saturn: two consoles that telephone each other, each on a box of its own; dial 0 to wait for the other player, #a*b*c*d# to call the one at that address. The last two have not been tried with a real"
                 " console. A change takes effect when the lines are free.</p></section>\n");
 
+    }
+    if (ON(SETTINGS_DREAMCAST)) {
+    sb_puts(&b, "<section><h2>Dreamcast</h2>\n<table>\n");
+    in_select(&b, "Dreamcast Now", F_DCNOW, c->dc_now, n_v92, t_dcnow, 2);
+    in_select(&b, "Console on the network", F_DCLAN, c->dc_lan, n_v92, t_dclan, 2);
+    in_select(&b, "Game ports from the router", F_DCUPNP, c->dc_upnp, n_v92, t_dcupnp, 2);
+    sb_puts(&b, "</table>\n<p>");
+    if (page == SETTINGS_DREAMCAST)
+        sb_puts(&b, c->service == CFG_SERVICE_DREAMCAST ? "The service of this port is Dreamcast: these switches are in force. "
+                                                         : "The service of this port is not Dreamcast (Line tab): these switches do nothing until it is. ");
+    sb_puts(&b, "They only act on a port whose service is Dreamcast. Dreamcast Now sends a report to"
+                " dcnow-2016.appspot.com every 15 seconds during a call (a hash of this box's hardware address"
+                " and a hash of the game server's name), which is how that site shows who is online. Console on"
+                " the network: the box asks the network's DHCP server for a second address and hands it to the"
+                " console, which is then a host of its own and not behind this box's address. Game ports from"
+                " the router: the network's router is asked by UPnP to pass the games' ports on, to the console"
+                " when it has an address of its own, else to this box. All three are off unless turned on. A"
+                " change takes effect when the lines are free.</p></section>\n");
     }
     if (ON(SETTINGS_MODEM)) {
     sb_puts(&b, "<section><h2>Modem</h2>\n<table>\n");

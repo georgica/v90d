@@ -87,7 +87,10 @@ enum { SETTINGS_ALL, SETTINGS_LINE, SETTINGS_MODEM, SETTINGS_USERS, SETTINGS_NET
        /* the Line and Modem pages of port 2 (/line2, /modem2): the same
         * fields with a hidden port=2, which makes settings_apply() put them
         * into cfg_t.port2. They sit under the Line and Modem tabs. */
-       SETTINGS_LINE2, SETTINGS_MODEM2, SETTINGS_PAGES };
+       SETTINGS_LINE2, SETTINGS_MODEM2,
+       /* the Dreamcast tab (/dreamcast, /dreamcast2): the switches of the
+        * dreamcast service, per port */
+       SETTINGS_DREAMCAST, SETTINGS_DREAMCAST2, SETTINGS_PAGES };
 int settings_render_page(const cfg_t *c, int page, int saved, const char *error, char *buf, size_t cap);
 const char *settings_page_path(int page);
 /* the page whose path is path[0..len), -1 if it is none */

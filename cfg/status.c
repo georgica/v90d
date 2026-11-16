@@ -5,6 +5,8 @@
 #include "sbuf.h"
 #include "page.h"
 
+int page_dreamcast_tab;     /* page.h */
+
 #define COUNT(a) ((int)(sizeof(a) / sizeof((a)[0])))
 
 /* names: machine form for JSON, display form for HTML */
