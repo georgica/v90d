@@ -26,8 +26,10 @@ the stock firmware stays in the box, one click away.
   - **Dreamcast**: what a Dreamcast's built-in modem needs: no compression,
     the DNS servers of the Dreamcast Live community, the packet fixes, the
     games' dead server addresses turned to today's, the games' ports let
-    in. Optional: the console as a host of its own on the network, port
-    mapping on the router by UPnP, reporting to "Dreamcast Now".
+    in. Optional switches (per port, off unless you turn them on): the
+    console as a host of its own on the network (DHCP), port mapping on the
+    router by UPnP, reporting to "Dreamcast Now", and a VPN for the IWANGO
+    games (below).
   - **Saturn**: two consoles that telephone each other (NetLink), each
     dialling into its own box, joined over the network. Dial `0` to wait,
     `#a*b*c*d#` to call the player at that address. Speaks the DreamPi
@@ -35,10 +37,15 @@ the stock firmware stays in the box, one click away.
 
   The two console services are written from the DreamPi project's
   published behaviour and tested against simulations; neither has been
-  tried with a real console yet. Not done: DreamPi's matchmaking numbers,
-  its VPN for the IWANGO games and its closed helper programs.
+  tried with a real console yet. The IWANGO games (Sega Tetris, Aero
+  Dancing, Golf Shiyouyo 2, Daytona USA) reach their servers through an
+  OpenVPN tunnel: turn the switch on and paste your own `.ovpn` profile on
+  the Dreamcast page. v90d ships no profile or keys of its own; bring one
+  from whoever runs that network. Not done: DreamPi's matchmaking numbers
+  and its closed helper programs.
 - A web interface ("Nestaliga") for all of it: dashboard, line, modem,
-  users, network, system, firmware.
+  users, network, system, firmware and calls, with a Dreamcast page when a
+  port is set to that service.
 
 ## What it is made of
 
@@ -47,7 +54,9 @@ image is written here from the ITU-T recommendations and the RFCs: the board
 support and drivers for the HT802's chips, the telephony, the modem itself
 (the signal processing of every modulation above, in fixed-point C99), the
 link layers, the PPP server, the web interface, the loader and the build.
-There is no Grandstream code or binary in the image and no closed blob.
+The one other outside part is OpenVPN (with mbed TLS), built unchanged from
+source for the optional IWANGO tunnel. There is no Grandstream code or
+binary in the image and no closed blob.
 
 `DESIGN.md` says how it is built and why, `HARDWARE.md` what was learned
 about the box, `PROGRESS.md` what was measured and when, with the test
@@ -73,7 +82,8 @@ Download `v90d-ht802fw.bin` from the releases page and see
 [FLASHING.md](FLASHING.md). In short: log in to the stock web page, wait two
 minutes after the box has started, upload the file on the firmware upload
 page, wait three minutes. The box comes back on the same address with the
-v90d pages (user `admin`, password `admin`; change it).
+v90d pages (user `admin`, password `admin`; change it). An existing v90d is
+upgraded the same way from its own Firmware page, and the settings are kept.
 
 ## Building
 
@@ -81,7 +91,7 @@ A Linux PC with the usual build tools (gcc, make, python3, curl, bc, flex,
 bison) is enough.
 
 ```
-sh fw/setup.sh          # fetches the cross toolchain, Linux and busybox (checked by SHA-256)
+sh fw/setup.sh          # fetches the cross toolchain, Linux, busybox, OpenVPN and mbed TLS (checked by SHA-256) and builds them
 make -C fw release      # fw/build/release/v90d-ht802fw.bin
 ```
 
