@@ -42,12 +42,13 @@ the stock firmware stays in the box, one click away.
   tried with a real console yet. The IWANGO games (Sega Tetris, Aero
   Dancing, Golf Shiyouyo 2, Daytona USA) reach their servers through an
   OpenVPN tunnel: turn the switch on and paste your own `.ovpn` profile on
-  the Dreamcast page. v90d ships no profile or keys of its own; bring one
+  the Consoles page. v90d ships no profile or keys of its own; bring one
   from whoever runs that network. Not done: DreamPi's closed helper programs.
 - A web interface ("Nestaliga") for all of it: dashboard, line, modem,
-  users, network, system, firmware and calls, with a Dreamcast page when a
-  port is set to that service. The pages follow the box: both phone ports on
-  an HT802, a single port on a one-port box.
+  users, network, system, firmware and calls, with a Consoles page (the
+  Dreamcast switches and the Saturn matchmaking switch) when a port uses one
+  of those services. The pages follow the box: both phone ports on an HT802,
+  a single port on a one-port box.
 
 ## What it is made of
 
