@@ -43,6 +43,8 @@ int srv_link(const srv_t *s, uint32_t *addr, int *online)
     return s->link;
 }
 
+const char *srv_link_game(const srv_t *s) { return s->link_game; }
+
 size_t srv_send_raw(srv_t *s, const uint8_t *oct, size_t n)
 {
     size_t r;
@@ -150,7 +152,8 @@ static void call_start(srv_t *s)
     s->link = SATURN_NONE;
     s->call_start = s->clock; s->call_s = 0;
     if (for_link(c)) {
-        s->link = saturn_number(s->tel.dialed, &s->link_addr);
+        s->link = saturn_number(s->tel.dialed, &s->link_addr, s->link_game);
+        if ((s->link == SATURN_MATCH_WAIT || s->link == SATURN_MATCH_CALL) && !c->sat_match) s->link = SATURN_NONE;
         if (s->link == SATURN_NONE) {
             /* not a number of this service: no call. (The telephony layer
              * takes any number on such a port; it cannot know them.) */

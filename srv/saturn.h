@@ -7,15 +7,22 @@
  * just as well have one of those.
  *
  * What is dialled says which side we are:
- *     0 or 00              wait for the other player to call
- *     #a*b*c*d#            call the player at IPv4 address a.b.c.d
+ *     0 or 00              wait for the other player to call (direct)
+ *     #a*b*c*d#            call the player at IPv4 address a.b.c.d (direct)
  *     # twelve digits #    the same, each part written with three digits
- * (The numbers that ask a matchmaking service for an opponent are not
- * understood.)
+ *     #0NN#                wait to be paired for game NN (matchmaking)
+ *     any other #...#      call, paired for game = the last two characters
  *
- * The caller's box opens a TCP connection to the waiting one, port 65432,
- * and says `readyip`; the answer is `g2gip`. From then on UDP: the waiting
- * side from port 20001 to the caller's 20002 and back.
+ * Direct: the caller's box opens a TCP connection to the waiting one, port
+ * 65432, and says `readyip`; the answer is `g2gip`. From then on UDP: the
+ * waiting side from port 20001 to the caller's 20002 and back.
+ *
+ * Matchmaking: each side learns its own public address and port by STUN
+ * (srv/stun.h) and asks a match server (saturn.dreampipe.net) to pair it
+ * with another box dialling the same game. There is no TCP; both sides go
+ * straight to UDP against the public address the server returns. It is off
+ * unless the owner turns it on, since it makes the box a client of that
+ * server.
  *
  * This file is the words only: no sockets. Portable C99, no allocation. */
 #ifndef V90D_SATURN_H
@@ -23,7 +30,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-enum { SATURN_NONE = 0, SATURN_WAIT, SATURN_CALL };
+enum { SATURN_NONE = 0, SATURN_WAIT, SATURN_CALL, SATURN_MATCH_WAIT, SATURN_MATCH_CALL };
 
 #define SATURN_TCP_PORT   65432
 #define SATURN_UDP_WAIT   20001     /* the waiting side's port */
@@ -43,10 +50,33 @@ enum { SATURN_NONE = 0, SATURN_WAIT, SATURN_CALL };
 #define SATURN_JUMP_MAX   4096      /* a record number further ahead than this is not believed */
 #define SATURN_DGRAM_MAX  (SATURN_KEEP * (SATURN_REC_MAX + 11 + 10) + (SATURN_KEEP - 1) * 13)
 
-/* What the dialled digits (as tel.h collects them: a closing # is not
- * among them) ask for: SATURN_WAIT, SATURN_CALL with the address in *addr
- * (host order), or SATURN_NONE. */
-int saturn_number(const char *dialed, uint32_t *addr);
+/* saturn.dreampipe.net: the match server, reached over HTTPS. The query is
+ * GET SATURN_MATCH_PATH?action=...&gameID=GG&client_ip=DDDDDDDDDDDD&port=P&key=...
+ * with a browser-like User-Agent (a short one is refused). client_ip is the
+ * public address as twelve digits, each octet three digits, no dots. */
+#define SATURN_MATCH_HOST  "saturn.dreampipe.net"
+#define SATURN_MATCH_PATH  "/match_service.php"
+#define SATURN_MATCH_KEY   "9c472a1b"        /* the fixed key, from the public NetLink source */
+#define SATURN_MATCH_AGENT "Mozilla/5.0 (compatible; v90d NetLink)"
+#define SATURN_STUN_HOST   "stun.l.google.com"
+#define SATURN_STUN_PORT   19302
+
+/* What the dialled digits (as tel.h collects them: a closing # is not among
+ * them) ask for: SATURN_WAIT or SATURN_CALL (direct) with the address in
+ * *addr (host order); SATURN_MATCH_WAIT or SATURN_MATCH_CALL (matchmaking)
+ * with the two-character game id in game[0..2] (NUL-terminated); or
+ * SATURN_NONE. game may be NULL if the caller does not want it. */
+int saturn_number(const char *dialed, uint32_t *addr, char game[3]);
+
+/* An answer from the match server (JSON). When its "status" equals
+ * want_status, the opponent's "ip_address" (twelve digits, a space, the
+ * port) is read into *addr (host order) and *port, and 1 is returned; else
+ * 0. Robust to spaces and key order; no allocation. */
+int saturn_match_parse(const char *json, size_t len, const char *want_status, uint32_t *addr, uint16_t *port);
+
+/* The twelve-digit form of an address (each octet three digits, no dots)
+ * into out[0..13). */
+void saturn_ip12(uint32_t addr, char out[13]);
 
 /* a datagram that is not data: 1 = ping (answer with SATURN_PONG), 2 =
  * anything else to be ignored (pong, open); 0 = data */

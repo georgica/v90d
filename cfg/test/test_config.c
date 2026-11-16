@@ -683,7 +683,7 @@ static void test_write(void)
                     "max_upstream = 33600\ntx_level = -12\nv42 = on\nv42bis = on\nv92 = off\nrings = 1\n") != NULL);
     CHECK(strstr(a, "\n[log]\nlevel = info\n") != NULL);
     CHECK(strstr(a, "\n[line]\nnumber = any\ntones = us\nbusy_chance = 0\ndrop_mean = 0\n"
-                    "session_limit = 0\nidle_timeout = 0\nservice = internet\ndreamcast_now = off\ndreamcast_lan = off\ndreamcast_upnp = off\ndreamcast_iwango = off\n\n[modem2]\n") != NULL);
+                    "session_limit = 0\nidle_timeout = 0\nservice = internet\ndreamcast_now = off\ndreamcast_lan = off\ndreamcast_upnp = off\ndreamcast_iwango = off\nsaturn_matchmaking = off\n\n[modem2]\n") != NULL);
     CHECK(strstr(a, "port = 80\nadmin_password = \"\"\n") != NULL);
     CHECK_EQ_I(parse(&d, a), CFG_OK);
     CHECK(memcmp(&c, &d, sizeof c) == 0);

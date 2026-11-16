@@ -173,6 +173,7 @@ typedef struct {
     int        line_tones, busy_chance, drop_mean_min, session_limit_min, idle_timeout_min;
     int        service;
     int        dc_iwango;       /* 0/1, for the dreamcast service: the VPN that the IWANGO games' servers are behind (srv/main.c, OpenVPN) */
+    int        sat_match;       /* 0/1, for the saturn service: pair players through the match server (srv/saturn.h); off = direct only */
     int        dc_now, dc_lan, dc_upnp;    /* 0/1, for the dreamcast service: report to Dreamcast Now; the console
                                             * as a host on the LAN; ask the router for the game ports (UPnP) */
 } cfg_port_t;
@@ -216,6 +217,7 @@ typedef struct {
     int        idle_timeout_min;    /* minutes, 0 = none */
     int        service;         /* CFG_SERVICE_* */
     int        dc_iwango;       /* 0/1, for the dreamcast service: the VPN that the IWANGO games' servers are behind (srv/main.c, OpenVPN) */
+    int        sat_match;       /* 0/1, for the saturn service: pair players through the match server (srv/saturn.h); off = direct only */
     int        dc_now, dc_lan, dc_upnp;    /* 0/1, for the dreamcast service: report to Dreamcast Now; the console
                                             * as a host on the LAN; ask the router for the game ports (UPnP) */
     /* [status] */

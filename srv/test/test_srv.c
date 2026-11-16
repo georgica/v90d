@@ -13,6 +13,7 @@
 #include "dcnow.h"
 #include "upnp.h"
 #include "saturn.h"
+#include "stun.h"
 #include "caller.h"
 #include "channel.h"
 #include "g711.h"
@@ -583,22 +584,47 @@ static void test_saturn_words(void)
     uint32_t a = 0; static saturn_tx t; saturn_rx r; static uint8_t dg[SATURN_DGRAM_MAX], dg2[SATURN_DGRAM_MAX], out[4096];
     static uint8_t big[SATURN_REC_MAX]; size_t n, n2, i; int k;
 
-    CHECK_EQ_I(saturn_number("0", &a), SATURN_WAIT);
-    CHECK_EQ_I(saturn_number("00", &a), SATURN_WAIT);
-    CHECK_EQ_I(saturn_number("#192*0*2*7", &a), SATURN_CALL); CHECK(a == 0xC0000207u);
-    CHECK_EQ_I(saturn_number("#192000002007", &a), SATURN_CALL); CHECK(a == 0xC0000207u);
-    CHECK_EQ_I(saturn_number("#010020030040", &a), SATURN_CALL); CHECK(a == 0x0A141E28u);
-    CHECK_EQ_I(saturn_number("#192*0*2*256", &a), SATURN_NONE);
-    CHECK_EQ_I(saturn_number("#192*0*2", &a), SATURN_NONE);
-    CHECK_EQ_I(saturn_number("#192*0*2*7*1", &a), SATURN_NONE);
-    CHECK_EQ_I(saturn_number("#192**2*7", &a), SATURN_NONE);
-    CHECK_EQ_I(saturn_number("#0*0*0*0", &a), SATURN_NONE);
-    CHECK_EQ_I(saturn_number("#300000002007", &a), SATURN_NONE);
-    CHECK_EQ_I(saturn_number("#001", &a), SATURN_NONE);            /* matchmaking: not understood */
-    CHECK_EQ_I(saturn_number("#12345", &a), SATURN_NONE);
-    CHECK_EQ_I(saturn_number("", &a), SATURN_NONE);
-    CHECK_EQ_I(saturn_number("000", &a), SATURN_NONE);
-    CHECK_EQ_I(saturn_number("5551234", &a), SATURN_NONE);
+    char g[3];
+    CHECK_EQ_I(saturn_number("0", &a, g), SATURN_WAIT);
+    CHECK_EQ_I(saturn_number("00", &a, g), SATURN_WAIT);
+    CHECK_EQ_I(saturn_number("#192*0*2*7", &a, g), SATURN_CALL); CHECK(a == 0xC0000207u);
+    CHECK_EQ_I(saturn_number("#192000002007", &a, g), SATURN_CALL); CHECK(a == 0xC0000207u);
+    CHECK_EQ_I(saturn_number("#010020030040", &a, g), SATURN_CALL); CHECK(a == 0x0A141E28u);
+    CHECK_EQ_I(saturn_number("#192*0*2*256", &a, g), SATURN_NONE);
+    CHECK_EQ_I(saturn_number("#192*0*2", &a, g), SATURN_NONE);     /* a broken * form is not matchmaking */
+    CHECK_EQ_I(saturn_number("#192*0*2*7*1", &a, g), SATURN_NONE);
+    CHECK_EQ_I(saturn_number("#192**2*7", &a, g), SATURN_NONE);
+    CHECK_EQ_I(saturn_number("#0*0*0*0", &a, g), SATURN_NONE);
+    CHECK_EQ_I(saturn_number("", &a, g), SATURN_NONE);
+    CHECK_EQ_I(saturn_number("000", &a, g), SATURN_NONE);          /* no #: not a wait, not an address */
+    CHECK_EQ_I(saturn_number("5551234", &a, g), SATURN_NONE);
+    /* matchmaking: #0NN# waits for game NN, any other #...# calls, game = last two */
+    CHECK_EQ_I(saturn_number("#001", &a, g), SATURN_MATCH_WAIT); CHECK(strcmp(g, "01") == 0);
+    CHECK_EQ_I(saturn_number("#042", &a, g), SATURN_MATCH_WAIT); CHECK(strcmp(g, "42") == 0);
+    CHECK_EQ_I(saturn_number("#12345", &a, g), SATURN_MATCH_CALL); CHECK(strcmp(g, "45") == 0);
+    CHECK_EQ_I(saturn_number("#99", &a, g), SATURN_MATCH_CALL); CHECK(strcmp(g, "99") == 0);
+    CHECK_EQ_I(saturn_number("#300000002007", &a, g), SATURN_MATCH_CALL); CHECK(strcmp(g, "07") == 0);  /* 12 digits but 300>255 */
+    CHECK_EQ_I(saturn_number("#", &a, g), SATURN_NONE);
+    CHECK_EQ_I(saturn_number("#5a", &a, g), SATURN_NONE);          /* game must be digits */
+    CHECK_EQ_I(saturn_number("#5", &a, NULL), SATURN_MATCH_CALL);  /* game buffer may be NULL */
+    /* the twelve-digit form of an address */
+    { char ip[13]; saturn_ip12(0xCB007109u, ip); CHECK(strcmp(ip, "203000113009") == 0); }
+
+    /* the match server's answer: opponent read only when the status matches */
+    {
+        uint32_t ma = 0; uint16_t mp = 0;
+        static const char w[] = "{\"status\": \"matched\", \"opponent ip_address\": \"203000113009 50000\"}";
+        static const char f[] = "{ \"opponent ip_address\" : \"010020030040 7\", \"status\":\"found opponent\" }";
+        CHECK_EQ_I(saturn_match_parse(w, sizeof w - 1, "matched", &ma, &mp), 1);
+        CHECK(ma == 0xCB007109u); CHECK_EQ_I(mp, 50000);
+        CHECK_EQ_I(saturn_match_parse(w, sizeof w - 1, "found opponent", &ma, &mp), 0);   /* wrong status */
+        ma = 0; mp = 0;
+        CHECK_EQ_I(saturn_match_parse(f, sizeof f - 1, "found opponent", &ma, &mp), 1);
+        CHECK(ma == 0x0A141E28u); CHECK_EQ_I(mp, 7);
+        CHECK_EQ_I(saturn_match_parse("{\"status\":\"waiting\"}", 20, "matched", &ma, &mp), 0);
+        CHECK_EQ_I(saturn_match_parse("garbage", 7, "matched", &ma, &mp), 0);
+        CHECK_EQ_I(saturn_match_parse("{\"status\":\"matched\",\"opponent ip_address\":\"999000000000 1\"}", 61, "matched", &ma, &mp), 0);  /* bad octet */
+    }
 
     CHECK_EQ_I(saturn_control((const uint8_t *)"PING_SHIRO", 10), 1);
     CHECK_EQ_I(saturn_control((const uint8_t *)"PONG_SHIRO", 10), 2);
@@ -937,6 +963,52 @@ static void test_dreamcast_call(void)
     lan_bad = 0;
 }
 
+/* STUN (stun.h): a binding request, and the mapped address out of a reply */
+static void test_stun(void)
+{
+    static const uint8_t txid[12] = { 1,2,3,4,5,6,7,8,9,10,11,12 };
+    uint8_t req[STUN_REQ_LEN]; uint32_t a = 0; uint16_t port = 0;
+    static uint8_t ok[32] = {
+        0x01,0x01, 0x00,0x0C,                       /* binding success, length 12 */
+        0x21,0x12,0xA4,0x42,                         /* magic */
+        1,2,3,4,5,6,7,8,9,10,11,12,                  /* our txid */
+        0x00,0x20, 0x00,0x08,                        /* XOR-MAPPED-ADDRESS, len 8 */
+        0x00, 0x01, 0x00,0x00, 0x00,0x00,0x00,0x00   /* filled below */
+    };
+    uint16_t xport; uint32_t xaddr;
+
+    stun_request(req, txid);
+    CHECK_EQ_I(req[0], 0x00); CHECK_EQ_I(req[1], 0x01);          /* binding request */
+    CHECK_EQ_I(req[2], 0x00); CHECK_EQ_I(req[3], 0x00);          /* no attributes */
+    CHECK(req[4]==0x21 && req[5]==0x12 && req[6]==0xA4 && req[7]==0x42);
+    CHECK(memcmp(req + 8, txid, 12) == 0);
+
+    /* 203.0.113.9 : 50000, XOR-encoded */
+    xport = (uint16_t)(50000u ^ (STUN_MAGIC >> 16));
+    xaddr = 0xCB007109u ^ STUN_MAGIC;
+    ok[26] = (uint8_t)(xport >> 8); ok[27] = (uint8_t)xport;
+    ok[28] = (uint8_t)(xaddr >> 24); ok[29] = (uint8_t)(xaddr >> 16); ok[30] = (uint8_t)(xaddr >> 8); ok[31] = (uint8_t)xaddr;
+    CHECK_EQ_I(stun_parse(ok, sizeof ok, txid, &a, &port), 1);
+    CHECK(a == 0xCB007109u); CHECK_EQ_I(port, 50000);
+
+    /* a reply for another transaction is not ours */
+    { uint8_t other[12] = { 9 }; CHECK_EQ_I(stun_parse(ok, sizeof ok, other, &a, &port), 0); }
+    /* plain MAPPED-ADDRESS (0x0001) is read too */
+    {
+        static uint8_t m[32] = { 0x01,0x01, 0x00,0x0C, 0x21,0x12,0xA4,0x42, 1,2,3,4,5,6,7,8,9,10,11,12,
+                                 0x00,0x01, 0x00,0x08, 0x00,0x01, 0x00,0x00, 0x00,0x00,0x00,0x00 };
+        m[26]=0xC3; m[27]=0x50;                      /* 50000 */
+        m[28]=203; m[29]=0; m[30]=113; m[31]=9;
+        CHECK_EQ_I(stun_parse(m, sizeof m, txid, &a, &port), 1);
+        CHECK(a == 0xCB007109u); CHECK_EQ_I(port, 50000);
+    }
+    /* rubbish and truncation */
+    CHECK_EQ_I(stun_parse(ok, 10, txid, &a, &port), 0);
+    CHECK_EQ_I(stun_parse((const uint8_t *)"not stun at all!....", 20, txid, &a, &port), 0);
+    { uint8_t err[20] = { 0x01,0x11, 0,0, 0x21,0x12,0xA4,0x42, 1,2,3,4,5,6,7,8,9,10,11,12 };
+      CHECK_EQ_I(stun_parse(err, sizeof err, txid, &a, &port), 0); }   /* binding error */
+}
+
 /* service = saturn: the dialled digits say which side of a console-to-
  * console call this is, the call carries octets and no PPP (srv.h) */
 static uint8_t sat_up[2048], sat_dn[2048]; static size_t sat_up_n, sat_dn_n, sat_cli_at, sat_cli_n;
@@ -1012,8 +1084,24 @@ static void test_saturn_call(void)
     hang_up();
     place_call("#001#", 6000);
     run_ms(200);
-    CHECK_EQ_I(S.tel.state, TEL_ENDED); CHECK_EQ_I(srv_link(&S, &a, &on), SATURN_NONE);
+    CHECK_EQ_I(S.tel.state, TEL_ENDED); CHECK_EQ_I(srv_link(&S, &a, &on), SATURN_NONE);  /* matchmaking off: not answered */
     hang_up();
+
+    /* with matchmaking on, #0NN# is answered and reported as a wait for game NN */
+    c.sat_match = 1;
+    line_init();
+    srv_init(&S, &c, 93, lan_rx, NULL);
+    srv_set_raw(&S, sat_srv_rx);
+    place_call("#042#", 6000);
+    CHECK_EQ_I(S.tel.state, TEL_ANSWERED);
+    CHECK_EQ_I(srv_link(&S, &a, &on), SATURN_MATCH_WAIT); CHECK(strcmp(srv_link_game(&S), "42") == 0);
+    hang_up();
+    place_call("#7788#", 6000);
+    CHECK_EQ_I(S.tel.state, TEL_ANSWERED);
+    CHECK_EQ_I(srv_link(&S, &a, &on), SATURN_MATCH_CALL); CHECK(strcmp(srv_link_game(&S), "88") == 0);
+    hang_up();
+    c.sat_match = 0;
+
     /* on a port with another service these are ordinary wrong numbers */
     c.service = CFG_SERVICE_INTERNET;
     line_init();
@@ -1326,6 +1414,7 @@ int main(void)
     test_dcnow();
     test_upnp_words();
     test_saturn_words();
+    test_stun();
     test_dreamcast_call();
     test_saturn_call();
     test_v34_call();
