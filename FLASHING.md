@@ -54,10 +54,12 @@ are kept.
 - **The power went during the install or an upgrade.** The box starts the
   stock firmware (an incomplete copy is never started). Upload the file
   again.
-- **A different board revision.** The loader knows the board it was tried
-  on by its part number. On any other it does not start v90d and gives the
-  box back to the stock firmware. Please open an issue with the part number
-  printed on the label.
+- **A different board revision, or an HT801.** The loader knows the board it
+  was tried on by its part number. On any other it does not start v90d and
+  gives the box back to the stock firmware, so trying is safe. The HT801 and
+  other HT802 revisions are expected to work but are not listed yet; see
+  [BOARDS.md](BOARDS.md). Please open an issue with the part number printed
+  on the label.
 
 No serial cable should be needed for any of this. The pulled-power cases
 have been tested against models of the box's boot loader, not yet by pulling

@@ -68,7 +68,8 @@ Tried on one unit: HT802 hardware V2.5A, part number 9610003725A, coming
 from stock firmware 1.0.65. The loader refuses to start on a board whose
 part number it does not know and hands the box back to the stock firmware,
 so an untried revision should end up where it started; that path has been
-tested on models only.
+tested on models only. The HT801 and other HT802 revisions are expected to
+work but are not yet tested; see [BOARDS.md](BOARDS.md).
 
 Tested with a Conexant USB modem on every modulation in the list, from
 Linux pppd and from Dial-Up Networking in Windows 98 SE and Windows XP
