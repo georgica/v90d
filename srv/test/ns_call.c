@@ -974,6 +974,7 @@ int main(int argc, char **argv)
         { struct stat sb; CHECK(stat(vpnf, &sb) == 0 && (sb.st_mode & 0777) == 0600); }
         CHECK(file_has(argsf, "--config ")); CHECK(file_has(argsf, "--dev v90vpn --dev-type tun"));
         CHECK(file_has(argsf, "--script-security 1")); CHECK(file_has(argsf, "--pull-filter ignore redirect-gateway"));
+        CHECK(file_has(argsf, "--pull-filter ignore redirect-private --pull-filter ignore ifconfig-ipv6"));
         CHECK(file_has(argsf, "--pull-filter accept route-gateway --pull-filter ignore route --route 10.200.0.0 255.255.255.0 "));
         CHECK(!file_has(argsf, "accept route 10."));
         CHECK(file_has(argsf, "remote vpn.example 1194"));

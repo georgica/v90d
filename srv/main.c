@@ -688,12 +688,14 @@ static void vp_poll(uint32_t now_ms)
         if (vp_routes)
             execl(vp_prog, "openvpn", "--config", vp_path, "--dev", VPN_DEV, "--dev-type", "tun", "--script-security", "1",
                   "--pull-filter", "ignore", "redirect-gateway", "--pull-filter", "ignore", "dhcp-option",
-                  "--pull-filter", "ignore", "block-outside-dns", "--pull-filter", "accept", "route-gateway",
+                  "--pull-filter", "ignore", "block-outside-dns", "--pull-filter", "ignore", "redirect-private",
+                  "--pull-filter", "ignore", "ifconfig-ipv6", "--pull-filter", "accept", "route-gateway",
                   "--pull-filter", "ignore", "route", "--connect-retry", "5", "60", "--verb", "1", (char *)NULL);
         else
             execl(vp_prog, "openvpn", "--config", vp_path, "--dev", VPN_DEV, "--dev-type", "tun", "--script-security", "1",
                   "--pull-filter", "ignore", "redirect-gateway", "--pull-filter", "ignore", "dhcp-option",
-                  "--pull-filter", "ignore", "block-outside-dns", "--pull-filter", "accept", "route-gateway",
+                  "--pull-filter", "ignore", "block-outside-dns", "--pull-filter", "ignore", "redirect-private",
+                  "--pull-filter", "ignore", "ifconfig-ipv6", "--pull-filter", "accept", "route-gateway",
                   "--pull-filter", "ignore", "route", "--route", "10.200.0.0", "255.255.255.0",
                   "--connect-retry", "5", "60", "--verb", "1", (char *)NULL);
         _exit(127);
