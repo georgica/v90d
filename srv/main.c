@@ -61,6 +61,7 @@
 #include "nat.h"
 #include "dclist.h"
 #include "dcnow.h"
+#include "upnp.h"
 
 #define PORTS CFG_PORTS
 static srv_t    S[PORTS];
@@ -264,7 +265,9 @@ static void dn_poll(uint32_t now_ms)
  * half hour, which also keeps the lease. Without an answer the port stays
  * as the settings have it, behind this box's address. */
 static const char *la_cmd;              /* -E; null = udhcpc on lan_if */
-static struct { uint32_t ip; pid_t pid; int fd; uint32_t next_ms; int started; char text[64]; size_t len; } la[PORTS];
+static uint32_t peer_conf[PORTS];       /* the caller's address as the settings have it */
+static struct { uint32_t ip; pid_t pid; int fd; uint32_t next_ms; int started; char text[64]; size_t len;
+                uint32_t until_ms; int timed; } la[PORTS];     /* timed: the lease ends at until_ms */
 static int lan_wanted(int i) { return S[i].cfg.service == CFG_SERVICE_DREAMCAST && S[i].cfg.dc_lan; }
 static int any_lan(void)
 {
@@ -276,6 +279,12 @@ static void la_poll(uint32_t now_ms)
 {
     int i, st;
     for (i = 0; i < n_ports; i++) {
+        /* a lease that ran out without being renewed is not ours any more:
+         * the network may give the address to somebody else */
+        if (la[i].ip && la[i].timed && (int32_t)(now_ms - la[i].until_ms) >= 0) {
+            la[i].ip = 0; la[i].timed = 0; net_dirty = 1;
+            logf_(CFG_LOG_WARN, "port %d: the console's address on the network ran out and was not renewed; the port is behind this box's address again", i + 1);
+        }
         if (la[i].pid > 0) {
             ssize_t r;
             while (la[i].len < sizeof la[i].text - 1 && (r = read(la[i].fd, la[i].text + la[i].len, sizeof la[i].text - 1 - la[i].len)) > 0)
@@ -283,15 +292,25 @@ static void la_poll(uint32_t now_ms)
             if (waitpid(la[i].pid, &st, WNOHANG) != la[i].pid) continue;
             la[i].pid = 0; close(la[i].fd); la[i].fd = -1;
             la[i].text[la[i].len] = 0;
-            la[i].text[strcspn(la[i].text, " \r\n")] = 0;
             {
-                struct in_addr ia; uint32_t ip = 0; char a[16];
+                struct in_addr ia; uint32_t ip = 0; char a[16]; unsigned long secs = 0;
+                char *sp = la[i].text + strcspn(la[i].text, " \r\n");
+                if (*sp == ' ') secs = strtoul(sp + 1, NULL, 10);     /* "address seconds": how long the lease is */
+                *sp = 0;
                 if (WIFEXITED(st) && WEXITSTATUS(st) == 0 && inet_aton(la[i].text, &ia)) ip = ntohl(ia.s_addr);
                 if (!ip) {
-                    logf_(CFG_LOG_WARN, "port %d: no address for the console from the network; trying again in a minute", i + 1);
-                    la[i].next_ms = now_ms + 60000u;
+                    uint32_t again = 60000u;
+                    if (la[i].ip && la[i].timed && (uint32_t)(la[i].until_ms - now_ms) / 4u < again) again = (uint32_t)(la[i].until_ms - now_ms) / 4u + 1000u;
+                    logf_(CFG_LOG_WARN, "port %d: no address for the console from the network; trying again", i + 1);
+                    la[i].next_ms = now_ms + again;
                 } else {
-                    la[i].next_ms = now_ms + 1800000u;
+                    uint32_t again = 1800000u;
+                    la[i].timed = 0;
+                    if (secs && secs < 40u * 24u * 3600u) {
+                        la[i].timed = 1; la[i].until_ms = now_ms + (uint32_t)secs * 1000u;
+                        if (secs * 500u < again) again = (uint32_t)(secs * 500u);      /* at half time */
+                    }
+                    la[i].next_ms = now_ms + again;
                     if (ip != la[i].ip) {
                         la[i].ip = ip; net_dirty = 1;
                         logf_(CFG_LOG_INFO, "port %d: the console is %s on the network", i + 1, ip_str(ip, a));
@@ -300,7 +319,7 @@ static void la_poll(uint32_t now_ms)
             }
             continue;
         }
-        if (!lan_wanted(i)) { if (la[i].ip) { la[i].ip = 0; net_dirty = 1; } la[i].started = 0; continue; }
+        if (!lan_wanted(i)) { if (la[i].ip) { la[i].ip = 0; la[i].timed = 0; net_dirty = 1; } la[i].started = 0; continue; }
         if (la[i].started && (int32_t)(now_ms - la[i].next_ms) < 0) continue;
         la[i].started = 1; la[i].next_ms = now_ms + 60000u;
         {
@@ -327,6 +346,46 @@ static void la_poll(uint32_t now_ms)
         }
     }
 }
+/* Game ports from the router (dreamcast_upnp): a child process asks the
+ * network's router to pass the ports of dclist.h on, to the console itself
+ * when it is a host on the network and to this box otherwise (which passes
+ * them on). Asked again whenever the addresses change and every half hour;
+ * taken back when the switch goes off and when the daemon stops. */
+static pid_t    up_pid; static uint32_t up_ip, up_next_ms; static int up_dirty = 1;
+static void upnp_child(int add, uint32_t ip)
+{
+    static uint8_t proto[NAT_OPEN_MAX]; static uint16_t lo[NAT_OPEN_MAX], hi[NAT_OPEN_MAX];
+    const nat_open *t; int n = dclist_ports(&t), i, r; struct sched_param sp; char a[16];
+    /* this child does not become another program: it must let go of the
+     * daemon's lines, network devices and listening sockets itself */
+    for (i = 3; i < 1024; i++) (void)close(i);
+    memset(&sp, 0, sizeof sp);
+    (void)sched_setscheduler(0, SCHED_OTHER, &sp);
+    (void)munlockall();
+    for (i = 0; i < n; i++) { proto[i] = t[i].proto; lo[i] = t[i].lo; hi[i] = t[i].hi; }
+    r = upnp_run(if_address(lan_if), add, ip, proto, lo, hi, n, "v90d: Dreamcast");
+    if (r == -1) logf_(CFG_LOG_WARN, "game ports: no router answered the search (UPnP)");
+    else if (r == -2) logf_(CFG_LOG_WARN, "game ports: the router does not offer port mapping (UPnP)");
+    else if (add) logf_(CFG_LOG_INFO, "game ports: the router passes %d ports on to %s", r, ip_str(ip, a));
+    else logf_(CFG_LOG_INFO, "game ports: %d taken back from the router", r);
+    _exit(0);
+}
+static void up_poll(uint32_t now_ms)
+{
+    uint32_t want = 0; int i;
+    if (up_pid > 0) { if (waitpid(up_pid, NULL, WNOHANG) != up_pid) return; up_pid = 0; }
+    for (i = 0; i < n_ports && !want; i++)
+        if (S[i].cfg.service == CFG_SERVICE_DREAMCAST && S[i].cfg.dc_upnp)
+            want = lan_wanted(i) && la[i].ip ? la[i].ip : if_address(lan_if);
+    if (want == up_ip && !(want && (up_dirty || (int32_t)(now_ms - up_next_ms) >= 0))) return;
+    if (!want && !up_ip) return;
+    up_dirty = 0; up_next_ms = now_ms + 1800000u;
+    up_pid = fork();
+    if (up_pid == 0) upnp_child(want != 0, want);
+    if (up_pid < 0) { up_pid = 0; return; }
+    up_ip = want;
+}
+
 /* the network side answers ARP for the console's address, or not */
 static void proxy_arp(int on)
 {
@@ -438,10 +497,15 @@ static void net_apply(void)
     net_dirty = 0;
     for (i = 0; i < n_ports; i++) {
         cfg_t *c = &S[i].cfg;
-        if (lan_wanted(i) && la[i].ip && c->ppp_peer != la[i].ip) {
-            static cfg_t v;
-            v = *c; v.ppp_peer = la[i].ip;
-            srv_reconfigure(&S[i], &v);
+        {
+            uint32_t want;
+            if (!peer_conf[i]) peer_conf[i] = c->ppp_peer;      /* the first time: nothing has replaced it yet */
+            want = lan_wanted(i) && la[i].ip ? la[i].ip : peer_conf[i];
+            if (want && c->ppp_peer != want) {
+                static cfg_t v;
+                v = *c; v.ppp_peer = want;
+                srv_reconfigure(&S[i], &v);
+            }
         }
         if (tun_fd[i] >= 0) close(tun_fd[i]);
         tun_fd[i] = tun_open(tun_name[i], c->ppp_local, c->ppp_peer, c->mru);
@@ -464,8 +528,10 @@ static void net_apply(void)
         p.http_port = ARCH_HTTP; p.ftp_port = ARCH_FTP; p.dns_port = ARCH_DNS; p.pasv_lo = ARCH_PASV_LO; p.pasv_hi = ARCH_PASV_HI;
         if (nat_apply(&p) < 0) logf_(CFG_LOG_ERROR, "cannot install the NAT rules: %s", strerror(errno));
         else {
-            if (p.masquerade && p2) logf_(CFG_LOG_INFO, "NAT: %s and %s are masqueraded", ip_str(S[0].cfg.ppp_peer, a), ip_str(p2, b));
-            else if (p.masquerade) logf_(CFG_LOG_INFO, "NAT: %s is masqueraded", ip_str(S[0].cfg.ppp_peer, a));
+            for (i = 0; i < n_ports; i++) {
+                if (p.lan[i]) logf_(CFG_LOG_INFO, "port %d: %s is a host on the network, answered for on %s", i + 1, ip_str(p.peer[i], a), lan_if);
+                else if (p.masquerade) logf_(CFG_LOG_INFO, "NAT: %s is masqueraded", ip_str(p.peer[i], a));
+            }
             for (i = 0; i < n_ports; i++)
                 if (p.archive[i]) logf_(CFG_LOG_INFO, "archive mode: the web, FTP and name questions of port %d go to the gateway", i + 1);
             for (i = 0; i < n_ports; i++)
@@ -486,6 +552,7 @@ static void adopt(const cfg_t *n)
     if (!force_debug) log_level = n->log_level;
     for (i = 0; i < n_ports; i++) {
         cfg_for_port(n, i, &view);
+        peer_conf[i] = view.ppp_peer;
         if (view.service == CFG_SERVICE_DREAMCAST && view.dc_lan && la[i].ip) view.ppp_peer = la[i].ip;
         if (view.dc_lan != S[i].cfg.dc_lan) net_dirty = 1;
         if (view.ppp_local != S[i].cfg.ppp_local || view.ppp_peer != S[i].cfg.ppp_peer || view.nat != S[i].cfg.nat || view.service != S[i].cfg.service || view.mru != S[i].cfg.mru)
@@ -759,7 +826,7 @@ int main(int argc, char **argv)
             }
             arch_clock = now_ms;
             if (now_ms % 2000 == 0) arch_poll(now_ms);
-            if (now_ms % 1000 == 0) { dc_poll(now_ms); dn_poll(now_ms); la_poll(now_ms); }
+            if (now_ms % 1000 == 0) { dc_poll(now_ms); dn_poll(now_ms); la_poll(now_ms); up_poll(now_ms); }
             if (fw_pid > 0 && now_ms % 1000 == 0 && waitpid(fw_pid, NULL, WNOHANG) == fw_pid) fw_pid = 0;
             /* the Restart button, once its answer has gone out */
             if (H.restart_asked && httpd_active(&H) == 0) {
@@ -808,6 +875,10 @@ int main(int argc, char **argv)
     arch_stop();
     if (S[0].cfg.nat || any_archive() || any_console()) (void)nat_remove();
     if (any_lan()) proxy_arp(0);
+    if (up_ip) {            /* give the ports back; the child finishes by itself */
+        if (up_pid > 0) (void)waitpid(up_pid, NULL, 0);
+        if (fork() == 0) upnp_child(0, 0);
+    }
     for (p = 0; p < n_ports; p++) line_close(&line[p]);
     logf_(CFG_LOG_INFO, "stopped");
     return 0;

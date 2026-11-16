@@ -623,10 +623,14 @@ int main(int argc, char **argv)
      * its own) instead of the configured one, and the network side answers
      * ARP for it. */
     {
-        static char lanlog[300]; struct ifreq ifr; int sk;
+        static char lanlog[300], leasecmd[700]; struct ifreq ifr; int sk;
+        /* the lease command: an address for 5 seconds the first time it is
+         * asked, nothing after that (a network that stops answering) */
+        snprintf(leasecmd, sizeof leasecmd, "f=%s/ns_lease.once; if [ -e $f ]; then exit 1; fi; : > $f; echo 192.0.2.77 5", argv[2]);
+        { char once[320]; snprintf(once, sizeof once, "%s/ns_lease.once", argv[2]); unlink(once); }
         cfg_default(&c);
         strcpy(c.line_number, "5551234"); c.rings = 1;
-        c.service = CFG_SERVICE_DREAMCAST; c.dc_lan = 1;
+        c.service = CFG_SERVICE_DREAMCAST; c.dc_lan = 1; c.dc_upnp = 1;
         c.status_port = 8080;
         CHECK_EQ_I(cfg_save(&c, conf, err, sizeof err), CFG_OK);
         CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
@@ -636,7 +640,7 @@ int main(int argc, char **argv)
             int a = fcntl(sv[1], F_DUPFD, 20), lfd = open(lanlog, O_WRONLY | O_CREAT | O_TRUNC, 0644);
             dup2(a, 3); if (lfd >= 0) dup2(lfd, 2);
             for (i = 4; i < 64; i++) close(i);
-            execl(argv[1], "v90d", "-c", conf, "-l", "fd:3", "-i", "lo", "-t", "ppp0", "-A", "", "-D", "", "-E", "echo 192.0.2.77", (char *)NULL);
+            execl(argv[1], "v90d", "-c", conf, "-l", "fd:3", "-i", "lo", "-t", "ppp0", "-A", "", "-D", "", "-E", leasecmd, (char *)NULL);
             _exit(127);
         }
         close(sv[1]);
@@ -644,7 +648,7 @@ int main(int argc, char **argv)
         dead = quiet_exit = 0; hook = modem_on = 0; blk_n = 0; c_tx = 0; c_rx_pw = 0;
         channel_init(&CH, &cc);
         memset(prev_tx, 0xFF, sizeof prev_tx);
-        run_ms(3500);
+        run_ms(3200);
         memset(&ifr, 0, sizeof ifr); strcpy(ifr.ifr_name, "ppp0");
         sk = socket(AF_INET, SOCK_DGRAM, 0);
         CHECK_EQ_I(ioctl(sk, SIOCGIFDSTADDR, &ifr), 0);
@@ -654,6 +658,22 @@ int main(int argc, char **argv)
         CHECK(file_has(lanlog, "port 1: the console is 192.0.2.77 on the network"));
         CHECK(http("GET /status.json HTTP/1.0\r\n\r\n", resp, sizeof resp) > 0);
         CHECK(strstr(resp, "\"service\":\"dreamcast\"") != NULL);
+        /* the lease runs out and is not renewed: the address is given up, the
+         * port is back behind the box's own, nobody answers ARP for it */
+        run_ms(5500);
+        memset(&ifr, 0, sizeof ifr); strcpy(ifr.ifr_name, "ppp0");
+        sk = socket(AF_INET, SOCK_DGRAM, 0);
+        CHECK_EQ_I(ioctl(sk, SIOCGIFDSTADDR, &ifr), 0);
+        CHECK(ntohl(((struct sockaddr_in *)(void *)&ifr.ifr_dstaddr)->sin_addr.s_addr) == IP4(10, 64, 64, 2));
+        close(sk);
+        CHECK(file_has("/proc/sys/net/ipv4/conf/lo/proxy_arp", "0"));
+        CHECK(file_has(lanlog, "port 1: the console's address on the network ran out"));
+        /* the router was asked for the game ports; there is none in this
+         * namespace, and the daemon says so and carries on */
+        /* (the search waits four seconds of the clock on the wall, and this
+         * test's line runs faster than that) */
+        for (i = 0; i < 80 && !file_has(lanlog, "game ports: no router"); i++) { run_ms(100); usleep(100000); }
+        CHECK(file_has(lanlog, "game ports: no router answered the search (UPnP)"));
         quiet_exit = 1;
         kill(pid, SIGTERM);
         for (i = 0; i < 400 && !dead; i++) step(0);

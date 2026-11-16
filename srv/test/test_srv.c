@@ -11,6 +11,7 @@
 #include "console.h"
 #include "dclist.h"
 #include "dcnow.h"
+#include "upnp.h"
 #include "caller.h"
 #include "channel.h"
 #include "g711.h"
@@ -575,6 +576,87 @@ static void test_dcnow(void)
     CHECK_EQ_I(dcnow_body(&d, "master.quake3arena.com", body, 20), 0);
 }
 
+/* The words of UPnP port mapping (upnp.h): the answer to a search, the
+ * device's description, and the two requests. */
+static void test_upnp_words(void)
+{
+    static const char found[] =
+        "HTTP/1.1 200 OK\r\nCACHE-CONTROL: max-age=120\r\nST: urn:schemas-upnp-org:device:InternetGatewayDevice:1\r\n"
+        "USN: uuid:1::urn:schemas-upnp-org:device:InternetGatewayDevice:1\r\nEXT:\r\n"
+        "Location:  http://192.168.1.1:5000/rootDesc.xml\r\nSERVER: x\r\n\r\n";
+    static const char desc[] =
+        "<?xml version=\"1.0\"?><root><device><serviceList><service>"
+        "<serviceType>urn:schemas-upnp-org:service:WANCommonInterfaceConfig:1</serviceType>"
+        "<controlURL>/ctl/CmnIfCfg</controlURL></service></serviceList><deviceList><device><deviceList><device>"
+        "<serviceList><service>\n <serviceType>urn:schemas-upnp-org:service:WANIPConnection:1</serviceType>\n"
+        " <serviceId>urn:upnp-org:serviceId:WANIPConn1</serviceId>\n <controlURL>/ctl/IPConn</controlURL>\n"
+        " <eventSubURL>/evt/IPConn</eventSubURL></service></serviceList></device></deviceList></device></deviceList></device></root>";
+    static const char desc_ppp[] =
+        "<root><service><serviceType>urn:schemas-upnp-org:service:WANPPPConnection:1</serviceType>"
+        "<controlURL>http://192.168.1.1:5000/upnp/control/ppp</controlURL></service></root>";
+    static const char desc_rel[] =
+        "<root><service><serviceType>urn:schemas-upnp-org:service:WANIPConnection:2</serviceType>"
+        "<controlURL>ctl</controlURL></service></root>";
+    upnp_url u; upnp_ctl c; static char req[1500]; int n; const char *body;
+
+    CHECK(strncmp(UPNP_SEARCH, "M-SEARCH * HTTP/1.1\r\n", 21) == 0);
+    CHECK(strstr(UPNP_SEARCH, "MAN: \"ssdp:discover\"\r\n") != NULL);
+    CHECK(strstr(UPNP_SEARCH, "ST: urn:schemas-upnp-org:device:InternetGatewayDevice:1\r\n") != NULL);
+
+    CHECK_EQ_I(upnp_location(found, sizeof found - 1, &u), 0);
+    CHECK(strcmp(u.host, "192.168.1.1") == 0); CHECK_EQ_I(u.port, 5000); CHECK(strcmp(u.path, "/rootDesc.xml") == 0);
+    CHECK_EQ_I(upnp_location("HTTP/1.1 200 OK\r\nLOCATION: http://10.0.0.138/\r\n\r\n", sizeof "HTTP/1.1 200 OK\r\nLOCATION: http://10.0.0.138/\r\n\r\n" - 1, &u), 0);
+    CHECK(strcmp(u.host, "10.0.0.138") == 0); CHECK_EQ_I(u.port, 80); CHECK(strcmp(u.path, "/") == 0);
+    CHECK_EQ_I(upnp_location("HTTP/1.1 200 OK\r\nST: x\r\n\r\n", sizeof "HTTP/1.1 200 OK\r\nST: x\r\n\r\n" - 1, &u), -1);
+    CHECK_EQ_I(upnp_location("HTTP/1.1 200 OK\r\nLocation: https://10.0.0.1/x\r\n\r\n", sizeof "HTTP/1.1 200 OK\r\nLocation: https://10.0.0.1/x\r\n\r\n" - 1, &u), -1);
+    CHECK_EQ_I(upnp_location("HTTP/1.1 200 OK\r\nLocation: http://host name/x\r\n\r\n", sizeof "HTTP/1.1 200 OK\r\nLocation: http://host name/x\r\n\r\n" - 1, &u), -1);
+
+    CHECK_EQ_I(upnp_control(desc, sizeof desc - 1, &c), 0);
+    CHECK(strcmp(c.path, "/ctl/IPConn") == 0);
+    CHECK(strcmp(c.type, "urn:schemas-upnp-org:service:WANIPConnection:1") == 0);
+    CHECK_EQ_I(upnp_control(desc_ppp, sizeof desc_ppp - 1, &c), 0);
+    CHECK(strcmp(c.path, "/upnp/control/ppp") == 0);       /* a whole URL: its path */
+    CHECK(strcmp(c.type, "urn:schemas-upnp-org:service:WANPPPConnection:1") == 0);
+    CHECK_EQ_I(upnp_control(desc_rel, sizeof desc_rel - 1, &c), 0);
+    CHECK(strcmp(c.path, "/ctl") == 0);
+    CHECK(strcmp(c.type, "urn:schemas-upnp-org:service:WANIPConnection:2") == 0);
+    CHECK_EQ_I(upnp_control("<root><service><serviceType>urn:x:Layer3Forwarding:1</serviceType><controlURL>/l3</controlURL></service></root>", sizeof "<root><service><serviceType>urn:x:Layer3Forwarding:1</serviceType><controlURL>/l3</controlURL></service></root>" - 1, &c), -1);
+    CHECK_EQ_I(upnp_control("", sizeof "" - 1, &c), -1);
+
+    CHECK_EQ_I(upnp_location(found, sizeof found - 1, &u), 0);
+    CHECK_EQ_I(upnp_control(desc, sizeof desc - 1, &c), 0);
+    n = upnp_request(req, sizeof req, &u, &c, 1, 17, 7980, IPA(192, 168, 1, 50), "v90d: Dreamcast");
+    CHECK(n > 0 && (size_t)n == strlen(req));
+    CHECK(strstr(req, "POST /ctl/IPConn HTTP/1.1\r\nHost: 192.168.1.1:5000\r\n") == req);
+    CHECK(strstr(req, "\r\nSOAPAction: \"urn:schemas-upnp-org:service:WANIPConnection:1#AddPortMapping\"\r\n") != NULL);
+    CHECK(strstr(req, "\r\nContent-Type: text/xml; charset=\"utf-8\"\r\n") != NULL);
+    CHECK(strstr(req, "\r\nConnection: close\r\n") != NULL);
+    body = strstr(req, "\r\n\r\n");
+    CHECK(body != NULL);
+    if (body) {
+        char cl[40];
+        body += 4;
+        snprintf(cl, sizeof cl, "\r\nContent-Length: %d\r\n", (int)strlen(body));
+        CHECK(strstr(req, cl) != NULL);
+        CHECK(strstr(body, "<u:AddPortMapping xmlns:u=\"urn:schemas-upnp-org:service:WANIPConnection:1\">") != NULL);
+        CHECK(strstr(body, "<NewRemoteHost></NewRemoteHost><NewExternalPort>7980</NewExternalPort><NewProtocol>UDP</NewProtocol>"
+                           "<NewInternalPort>7980</NewInternalPort><NewInternalClient>192.168.1.50</NewInternalClient>"
+                           "<NewEnabled>1</NewEnabled><NewPortMappingDescription>v90d: Dreamcast</NewPortMappingDescription>"
+                           "<NewLeaseDuration>0</NewLeaseDuration>") != NULL);
+    }
+    n = upnp_request(req, sizeof req, &u, &c, 0, 6, 2300, 0, NULL);
+    CHECK(n > 0);
+    CHECK(strstr(req, "#DeletePortMapping\"\r\n") != NULL);
+    CHECK(strstr(req, "<NewRemoteHost></NewRemoteHost><NewExternalPort>2300</NewExternalPort><NewProtocol>TCP</NewProtocol></u:DeletePortMapping>") != NULL);
+    CHECK(strstr(req, "NewInternalClient") == NULL);
+    CHECK_EQ_I(upnp_request(req, 200, &u, &c, 1, 17, 7980, IPA(192, 168, 1, 50), "x"), -1);
+
+    CHECK_EQ_I(upnp_ok("HTTP/1.1 200 OK\r\n\r\n", sizeof "HTTP/1.1 200 OK\r\n\r\n" - 1), 1);
+    CHECK_EQ_I(upnp_ok("HTTP/1.0 200 OK\r\n", sizeof "HTTP/1.0 200 OK\r\n" - 1), 1);
+    CHECK_EQ_I(upnp_ok("HTTP/1.1 500 Internal Server Error\r\n", sizeof "HTTP/1.1 500 Internal Server Error\r\n" - 1), 0);
+    CHECK_EQ_I(upnp_ok("", sizeof "" - 1), 0);
+}
+
 /* Two more things a console's packets get (refs/dreampi-facts.md, second
  * pass): an opening packet that also carries PSH loses the PSH, and the
  * names it asks the name server for are remembered (for "Dreamcast Now"). */
@@ -1051,6 +1133,7 @@ int main(void)
     test_console_more();
     test_dclist();
     test_dcnow();
+    test_upnp_words();
     test_dreamcast_call();
     test_v34_call();
     test_v32bis_call();

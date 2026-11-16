@@ -1,6 +1,7 @@
 #!/bin/sh
 # Handed to busybox udhcpc when the daemon asks the network for an address
 # for a game console (dreamcast_lan). It changes nothing on the box: the
-# address that was leased is printed, and the daemon reads it.
-[ "$1" = bound ] && echo "$ip"
+# address that was leased is printed with the lease time in seconds, and the
+# daemon reads it.
+[ "$1" = bound ] && echo "$ip ${lease:-0}"
 exit 0
