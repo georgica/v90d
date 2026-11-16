@@ -1890,3 +1890,29 @@ So V.92 is proven to connect and carry PPP on real hardware; the headline
 PCM-upstream rate on this line/modem was ~32k, not 48k. Still open: a
 second modem brand, and whether another line/modem reaches a higher
 upstream.
+
+## Windows 98 dial-up re-verified on 0.2.3 (2026-11-16), driven headlessly
+
+The HT802 bench unit on the 0.2.3 release, port 2 (Conexant on /dev/ttyACM0).
+The Windows 98 SE VirtualBox VM was driven with no human at the keyboard:
+`VBoxManage controlvm WIn98 keyboardputscancode/keyboardputstring` for input
+and `screenshotpng` to read the screen. The modem reached the VM by wiring
+its COM1 to the host tty (`modifyvm --uartmode1 /dev/ttyACM0`).
+
+- The desktop's "Shortcut to Netstalgia" Dial-Up Networking connection dials
+  6387825442. First attempt: Windows error **691** (bad password) - the DUN
+  connection authenticates as user `netstalgia`, and the box was at its
+  bench config with only `guest`. So the modem trained fine (box went
+  ringing -> negotiating) and only PPP auth was refused.
+- With the box's PPP auth set to none for the test, the redial **connected**:
+  box line connected, **V.90, 52000 down / 28800 up, LAPM**, and the session
+  held steady. So Windows 98 dials the box and brings a PPP link up.
+- Afterwards: the VM was powered off, its COM1 put back to disconnected, and
+  the box's auth restored to CHAP. Powering off the VM did not drop the
+  Conexant's carrier; the modem was hung up from the host (drop DTR + ATH0)
+  and the box went idle.
+
+Note on the "691" path: it is an authentication result, not a modem or
+line failure - the two modems negotiated a V.90 carrier with LAPM before
+PPP auth ran. A real deployment just needs the DUN credentials to match a
+box user.
