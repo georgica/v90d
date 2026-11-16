@@ -381,7 +381,9 @@ static void up_poll(uint32_t now_ms)
     if (!want && !up_ip) return;
     up_dirty = 0; up_next_ms = now_ms + 1800000u;
     up_pid = fork();
-    if (up_pid == 0) upnp_child(want != 0, want);
+    /* a first or changed address: whatever the router still maps is taken
+     * away first, so that nothing stays open towards the old address */
+    if (up_pid == 0) upnp_child(!want ? 0 : want != up_ip ? 2 : 1, want);
     if (up_pid < 0) { up_pid = 0; return; }
     up_ip = want;
 }

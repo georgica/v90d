@@ -604,6 +604,22 @@ static void test_upnp_words(void)
     CHECK(strstr(UPNP_SEARCH, "ST: urn:schemas-upnp-org:device:InternetGatewayDevice:1\r\n") != NULL);
 
     CHECK_EQ_I(upnp_location(found, sizeof found - 1, &u), 0);
+    /* whose answer is taken: the device named in it, from the search port,
+     * and nothing that points back at ourselves or at no host at all */
+    CHECK_EQ_I(upnp_trust(0xC0A80132u, 0xC0A80101u, 1900, &u), 1);
+    CHECK_EQ_I(upnp_trust(0xC0A80132u, 0xC0A80107u, 1900, &u), 0);      /* somebody else names the router */
+    CHECK_EQ_I(upnp_trust(0xC0A80132u, 0xC0A80101u, 40000, &u), 0);     /* not from the search port */
+    CHECK_EQ_I(upnp_trust(0xC0A80101u, 0xC0A80101u, 1900, &u), 0);      /* ourselves */
+    strcpy(u.host, "127.0.0.1");
+    CHECK_EQ_I(upnp_trust(0xC0A80132u, 0x7F000001u, 1900, &u), 0);
+    CHECK_EQ_I(upnp_trust(0x7F000001u, 0x7F000001u, 1900, &u), 1);      /* a test on the loopback device */
+    strcpy(u.host, "239.255.255.250");
+    CHECK_EQ_I(upnp_trust(0xC0A80132u, 0xEFFFFFFAu, 1900, &u), 0);
+    strcpy(u.host, "169.254.1.1");
+    CHECK_EQ_I(upnp_trust(0xC0A80132u, 0xA9FE0101u, 1900, &u), 0);
+    strcpy(u.host, "router.lan");
+    CHECK_EQ_I(upnp_trust(0xC0A80132u, 0xC0A80101u, 1900, &u), 0);
+    CHECK_EQ_I(upnp_location(found, sizeof found - 1, &u), 0);
     CHECK(strcmp(u.host, "192.168.1.1") == 0); CHECK_EQ_I(u.port, 5000); CHECK(strcmp(u.path, "/rootDesc.xml") == 0);
     CHECK_EQ_I(upnp_location("HTTP/1.1 200 OK\r\nLOCATION: http://10.0.0.138/\r\n\r\n", sizeof "HTTP/1.1 200 OK\r\nLOCATION: http://10.0.0.138/\r\n\r\n" - 1, &u), 0);
     CHECK(strcmp(u.host, "10.0.0.138") == 0); CHECK_EQ_I(u.port, 80); CHECK(strcmp(u.path, "/") == 0);

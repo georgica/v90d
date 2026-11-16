@@ -20,6 +20,13 @@ typedef struct { char path[160]; char type[72]; } upnp_ctl;
 /* the LOCATION of an answer to the search: 0, or -1 when there is none or it
  * is not plain http */
 int upnp_location(const char *resp, size_t len, upnp_url *u);
+/* Is an answer to the search to be believed: it came from address `from`
+ * port `from_port`, was received on the interface with address `local`, and
+ * names the device u. Only a device that answers for itself from the search
+ * port is; never ourselves, a loopback, link-local or multicast address, or
+ * a host given by name. (A loopback device is accepted when `local` is one:
+ * the tests.) 1 or 0. */
+int upnp_trust(uint32_t local, uint32_t from, unsigned from_port, const upnp_url *u);
 /* in a device description: the control address and type of the service
  * that maps ports (WANIPConnection, else WANPPPConnection); 0 or -1 */
 int upnp_control(const char *xml, size_t len, upnp_ctl *c);
@@ -33,8 +40,10 @@ int upnp_ok(const char *resp, size_t len);
 
 /* The conversation: find the router from the interface with address
  * local_ip (2 s for an answer), read its description, and add or remove
- * every port of the n ranges (proto, lo, hi) for address ip. Blocking, for a
- * child process. Returns how many requests the router accepted, -1 when no
+ * every port of the n ranges (proto, lo, hi) for address ip (add: 1 = add,
+ * 0 = remove, 2 = remove whatever is mapped there and then add: the address
+ * has changed, and nothing may stay mapped to the old one). Blocking, for a
+ * child process. Returns how many requests the router accepted (of the additions when add is 2), -1 when no
  * router answered, -2 when its description names no service for this. */
 int upnp_run(uint32_t local_ip, int add, uint32_t ip, const uint8_t *proto, const uint16_t *lo, const uint16_t *hi, int n,
              const char *desc);

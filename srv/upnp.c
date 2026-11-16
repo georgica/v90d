@@ -60,6 +60,17 @@ int upnp_location(const char *resp, size_t len, upnp_url *u)
     return -1;
 }
 
+int upnp_trust(uint32_t local, uint32_t from, unsigned from_port, const upnp_url *u)
+{
+    struct in_addr a; uint32_t h; int loop = (local >> 24) == 127;
+    if (from_port != UPNP_PORT || inet_pton(AF_INET, u->host, &a) != 1) return 0;
+    h = ntohl(a.s_addr);
+    if (h != from || h == 0 || (h >> 28) >= 14) return 0;           /* multicast and above */
+    if ((h >> 16) == 0xA9FE) return 0;                              /* link-local */
+    if (loop) return (h >> 24) == 127;
+    return (h >> 24) != 127 && h != local;
+}
+
 /* the first place at or after `from` where text t stands, or len */
 static size_t find(const char *x, size_t len, size_t from, const char *t)
 {
@@ -202,8 +213,10 @@ int upnp_run(uint32_t local_ip, int add, uint32_t ip, const uint8_t *proto, cons
             ssize_t r;
             pf.fd = fd; pf.events = POLLIN;
             if (poll(&pf, 1, 2000) <= 0) break;
-            r = recv(fd, buf, sizeof buf - 1, 0);
-            if (r > 0 && upnp_ok(buf, (size_t)r) && upnp_location(buf, (size_t)r, &dev) == 0) { got = 1; break; }
+            struct sockaddr_in from; socklen_t fl = sizeof from;
+            r = recvfrom(fd, buf, sizeof buf - 1, 0, (struct sockaddr *)(void *)&from, &fl);
+            if (r > 0 && upnp_ok(buf, (size_t)r) && upnp_location(buf, (size_t)r, &dev) == 0 &&
+                upnp_trust(local_ip, ntohl(from.sin_addr.s_addr), ntohs(from.sin_port), &dev)) { got = 1; break; }
         }
     }
     close(fd);
@@ -215,6 +228,10 @@ int upnp_run(uint32_t local_ip, int add, uint32_t ip, const uint8_t *proto, cons
 
     for (i = 0; i < n; i++)
         for (port = lo[i]; port <= hi[i]; port++) {
+            if (add == 2) {
+                len = upnp_request(req, sizeof req, &dev, &ctl, 0, proto[i], port, 0, NULL);
+                if (len > 0) (void)http_talk(&dev, req, (size_t)len, buf, sizeof buf);
+            }
             len = upnp_request(req, sizeof req, &dev, &ctl, add, proto[i], port, ip, desc);
             if (len < 0) continue;
             len = http_talk(&dev, req, (size_t)len, buf, sizeof buf);

@@ -150,6 +150,12 @@ int main(int argc, char **argv)
     CHECK(file_has(logpath, "del UDP 7980  []\n"));
     CHECK(file_has(logpath, "del TCP 2351  []\n"));
 
+    /* the console has another address now: what was mapped is taken away
+     * before it is mapped again, in one conversation */
+    unlink(logpath);
+    CHECK_EQ_I(upnp_run(LO, 2, 0xC0000263u, proto, lo, hi, 1, "v90d: Dreamcast"), 1);
+    CHECK(file_has(logpath, "del UDP 7980  []\nadd UDP 7980 192.0.2.99 [v90d: Dreamcast]\n"));
+
     kill(pid, SIGKILL); waitpid(pid, NULL, 0);
     T_REPORT("ns_upnp");
 }
