@@ -1058,7 +1058,7 @@ int main(int argc, char **argv)
             for (i = 4; i < 64; i++) close(i);
             snprintf(mcmd, sizeof mcmd, "sh %s \"$@\"", script);
             execl(argv[1], "v90d", "-c", conf, "-l", "fd:3", "-i", "lo", "-t", "ppp0", "-A", "",
-                  "-S", "127.0.0.1:3478", "-M", mcmd, (char *)NULL);
+                  "-S", "127.0.0.1:3478", "-M", mcmd, "-X", (char *)NULL);
             _exit(127);
         }
         close(sv[1]);
@@ -1098,6 +1098,54 @@ int main(int argc, char **argv)
         (void)k;
         hang_up();
         close(peer);
+        if (stunpid > 0) { kill(stunpid, SIGKILL); waitpid(stunpid, NULL, 0); }
+        quiet_exit = 1;
+        kill(pid, SIGTERM);
+        for (i = 0; i < 400 && !dead; i++) step(0);
+        close(line_fd);
+        CHECK_EQ_I(waitpid(pid, &st, 0), pid);
+        CHECK(WIFEXITED(st) && WEXITSTATUS(st) == 0);
+    }
+    /* 12. the opponent address the match server returns is not trusted blindly:
+     * a loopback (or private) address is refused and the call ends (no -X) */
+    {
+        static char lanlog[300], script[320]; pid_t stunpid = -1; int sfd;
+        snprintf(script, sizeof script, "%s/ns_mm2.sh", argv[2]);
+        {
+            FILE *f = fopen(script, "w");
+            if (f) { fprintf(f, "#!/bin/sh\necho '{\"status\":\"matched\",\"opponent ip_address\":\"127000000001 34567\"}'\n"); fclose(f); chmod(script, 0755); }
+        }
+        sfd = udp_at(IP4(127, 0, 0, 1), 3478);
+        CHECK(sfd >= 0);
+        stunpid = fork();
+        if (stunpid == 0) { stun_responder(sfd); _exit(0); }
+        close(sfd);
+        cfg_default(&c);
+        strcpy(c.line_number, "5551234"); c.rings = 1;
+        c.service = CFG_SERVICE_SATURN; c.sat_match = 1; c.status_port = 8080;
+        CHECK_EQ_I(cfg_save(&c, conf, err, sizeof err), CFG_OK);
+        CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
+        snprintf(lanlog, sizeof lanlog, "%s/ns_mm2.log", argv[2]);
+        pid = fork();
+        if (pid == 0) {
+            char mcmd[360]; int a = fcntl(sv[1], F_DUPFD, 20), lfd = open(lanlog, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            dup2(a, 3); if (lfd >= 0) dup2(lfd, 2);
+            for (i = 4; i < 64; i++) close(i);
+            snprintf(mcmd, sizeof mcmd, "sh %s \"$@\"", script);
+            execl(argv[1], "v90d", "-c", conf, "-l", "fd:3", "-i", "lo", "-t", "ppp0", "-A", "",
+                  "-S", "127.0.0.1:3478", "-M", mcmd, (char *)NULL);   /* no -X: the address is checked */
+            _exit(127);
+        }
+        close(sv[1]);
+        line_fd = sv[0]; idle_fd = -1;
+        dead = quiet_exit = 0; hook = modem_on = 0; blk_n = 0; c_tx = 0; c_rx_pw = 0;
+        channel_init(&CH, &cc);
+        memset(prev_tx, 0xFF, sizeof prev_tx);
+        run_ms(1500);
+        sat_call("#077#");
+        for (i = 0; i < 60 && !file_has(lanlog, "cannot be a player"); i++) { run_ms(200); usleep(60000); }
+        CHECK(file_has(lanlog, "the match server gave an address that cannot be a player"));
+        CHECK(!file_has(lanlog, "the other player is"));
         if (stunpid > 0) { kill(stunpid, SIGKILL); waitpid(stunpid, NULL, 0); }
         quiet_exit = 1;
         kill(pid, SIGTERM);

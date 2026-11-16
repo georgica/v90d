@@ -433,6 +433,7 @@ static struct sat_link {
 /* the match server and STUN server; the test overrides them (-M, -S) so it
  * needs no internet and no DNS */
 static const char *mm_cmd = "";                    /* -M: run instead of wget; args: action game client_ip port */
+static int mm_any;                                 /* -X: accept any opponent address (testing only) */
 static uint32_t    stun_ip; static uint16_t stun_port = SATURN_STUN_PORT;   /* -S A.B.C.D[:port] */
 
 static void sl_close(struct sat_link *l)
@@ -530,17 +531,22 @@ static void sl_linked(int k, uint32_t now_ms, int local_port, int peer_port)
 }
 
 /* ---- matchmaking (saturn.h): STUN, then the match server ---- */
-static uint32_t sl_rng(void)
+/* a fresh, unguessable STUN transaction id (so a reply cannot be forged by
+ * an off-path sender): the kernel's random source, never a predictable PRNG */
+static void sl_random(uint8_t *b, size_t n)
 {
-    static uint32_t x;
-    if (!x) x = (uint32_t)time(NULL) ^ (uint32_t)getpid() ^ 0x9E3779B9u;
-    x = x * 1664525u + 1013904223u;
-    return x;
+    static int fd = -2;
+    size_t got = 0; ssize_t r;
+    if (fd == -2) fd = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
+    while (fd >= 0 && got < n && (r = read(fd, b + got, n - got)) > 0) got += (size_t)r;
+    /* /dev/urandom should never fail on Linux; if it did, at least do not
+     * reuse a fixed id */
+    for (; got < n; got++) { static uint32_t x; x = x * 1664525u + 1013904223u + (uint32_t)time(NULL); b[got] = (uint8_t)(x >> 16); }
 }
 static void sl_stun_send(struct sat_link *l)
 {
-    uint8_t req[STUN_REQ_LEN]; struct sockaddr_in sa; unsigned i;
-    for (i = 0; i < STUN_TXID_LEN; i++) l->txid[i] = (uint8_t)(sl_rng() >> 16);
+    uint8_t req[STUN_REQ_LEN]; struct sockaddr_in sa;
+    sl_random(l->txid, STUN_TXID_LEN);
     stun_request(req, l->txid);
     memset(&sa, 0, sizeof sa);
     sa.sin_family = AF_INET; sa.sin_port = htons(stun_port); sa.sin_addr.s_addr = htonl(stun_ip);
@@ -591,6 +597,24 @@ static void sl_qdrain(struct sat_link *l)
            (r = read(l->q_fd, l->q_text + l->q_len, sizeof l->q_text - 1 - l->q_len)) > 0)
         l->q_len += (size_t)r;
 }
+/* an address the match server returns may be a player on the public
+ * internet and nothing else: never loopback, a private or CGNAT range,
+ * link-local, multicast, broadcast, or this box's own public address. A
+ * server that is confused or hostile must not aim the game's UDP at an
+ * address inside the network. */
+static int sl_peer_ok(uint32_t a, uint32_t pub)
+{
+    unsigned hi = a >> 24;
+    if (mm_any) return 1;                                   /* the test uses loopback */
+    if (a == 0 || a == 0xFFFFFFFFu || a == pub) return 0;
+    if (hi == 127 || hi == 10 || hi >= 224) return 0;       /* loopback, 10/8, multicast and up */
+    if ((a & 0xFFF00000u) == 0xAC100000u) return 0;         /* 172.16/12 */
+    if ((a & 0xFFFF0000u) == 0xC0A80000u) return 0;         /* 192.168/16 */
+    if ((a & 0xFFC00000u) == 0x64400000u) return 0;         /* 100.64/10 (CGNAT) */
+    if ((a & 0xFFFF0000u) == 0xA9FE0000u) return 0;         /* 169.254/16 (link-local) */
+    return 1;
+}
+
 static void sl_poll(uint32_t now_ms)
 {
     int k;
@@ -684,6 +708,7 @@ static void sl_poll(uint32_t now_ms)
             static uint8_t dg[512];
             sl_n = sizeof sa;
             while ((r = recvfrom(l->udp, dg, sizeof dg, 0, (struct sockaddr *)(void *)&sa, &sl_n)) > 0) {
+                if (ntohl(sa.sin_addr.s_addr) != stun_ip || ntohs(sa.sin_port) != stun_port) continue;  /* only the STUN server */
                 if (stun_parse(dg, (size_t)r, l->txid, &l->pub, &l->pub_port)) break;
             }
             if (l->pub) {
@@ -709,6 +734,7 @@ static void sl_poll(uint32_t now_ms)
                     const char *want = l->mm_wait ? "matched" : "found opponent";
                     if (WIFEXITED(st2) && WEXITSTATUS(st2) == 0 &&
                         saturn_match_parse(l->q_text, l->q_len, want, &opp, &op)) {
+                        if (op < 1024 || !sl_peer_ok(opp, l->pub)) { sl_over(k, "the match server gave an address that cannot be a player"); break; }
                         l->peer = opp; l->peer_port = op;
                         sl_begin(k, now_ms, l->mm_wait, 1);  /* the waiting game is shown RING + CONNECT */
                         break;
@@ -1144,7 +1170,7 @@ int main(int argc, char **argv)
     /* the telephone lights: <prefix><port>/brightness, lit while the port is off hook */
     const char *led_prefix = "/sys/class/leds/ht802:phone"; int led_fd[PORTS] = { -1, -1 }, led_on[PORTS] = { -1, -1 };
 
-    while ((opt = getopt(argc, argv, "c:l:d:i:t:vpw:W:L:A:N:R:P:D:G:E:O:V:M:S:")) != -1) {
+    while ((opt = getopt(argc, argv, "c:l:d:i:t:vpw:W:L:A:N:R:P:D:G:E:O:V:M:S:X")) != -1) {
         switch (opt) {
         case 'c': cfg_path = optarg; break;
         case 'l': if (n_ports >= PORTS) usage(); line_spec[n_ports++] = optarg; break;
@@ -1165,6 +1191,7 @@ int main(int argc, char **argv)
         case 'N': fw_tool = optarg; break;      /* the flash tool behind the Firmware page */
         case 'O': vp_prog = optarg; break;      /* the OpenVPN program; "" = none */
         case 'M': mm_cmd = optarg; break;       /* run instead of wget for a match query: CMD action game ip port */
+        case 'X': mm_any = 1; break;            /* accept any matchmaking opponent address (testing only) */
         case 'S': {                              /* the STUN server as A.B.C.D[:port] (the test gives a stand-in) */
             unsigned q0, q1, q2, q3, pp = SATURN_STUN_PORT;
             if (sscanf(optarg, "%u.%u.%u.%u:%u", &q0, &q1, &q2, &q3, &pp) >= 4 && q0 < 256 && q1 < 256 && q2 < 256 && q3 < 256) {
