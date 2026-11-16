@@ -11,10 +11,10 @@ ARM_CC  ?= $(wildcard $(CURDIR)/../toolchain/*/bin/arm-linux-gcc)
 QEMU    ?= qemu-arm-static
 
 INC     := -I. -I../test
-LIB_SRC := config.c status.c settings.c firmware.c httpd.c
-LIB_HDR := config.h status.h settings.h firmware.h httpd.h sbuf.h page.h
+LIB_SRC := config.c status.c settings.c firmware.c httpd.c vpn.c
+LIB_HDR := config.h status.h settings.h firmware.h httpd.h sbuf.h page.h vpn.h
 SUP_HDR := ../test/test.h
-TESTS   := test_config test_status test_settings test_firmware test_httpd
+TESTS   := test_config test_status test_settings test_firmware test_httpd test_vpn
 
 .PHONY: all test test-arm clean
 all: test

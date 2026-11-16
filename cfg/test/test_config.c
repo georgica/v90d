@@ -683,7 +683,7 @@ static void test_write(void)
                     "max_upstream = 33600\ntx_level = -12\nv42 = on\nv42bis = on\nv92 = off\nrings = 1\n") != NULL);
     CHECK(strstr(a, "\n[log]\nlevel = info\n") != NULL);
     CHECK(strstr(a, "\n[line]\nnumber = any\ntones = us\nbusy_chance = 0\ndrop_mean = 0\n"
-                    "session_limit = 0\nidle_timeout = 0\nservice = internet\ndreamcast_now = off\ndreamcast_lan = off\ndreamcast_upnp = off\n\n[modem2]\n") != NULL);
+                    "session_limit = 0\nidle_timeout = 0\nservice = internet\ndreamcast_now = off\ndreamcast_lan = off\ndreamcast_upnp = off\ndreamcast_iwango = off\n\n[modem2]\n") != NULL);
     CHECK(strstr(a, "port = 80\nadmin_password = \"\"\n") != NULL);
     CHECK_EQ_I(parse(&d, a), CFG_OK);
     CHECK(memcmp(&c, &d, sizeof c) == 0);
@@ -941,6 +941,17 @@ static void test_console_switches(void)
     CHECK(strstr(text, "\nservice = internet\ndreamcast_now = off\ndreamcast_lan = on\ndreamcast_upnp = on\n") != NULL);
     CHECK_EQ_I(parse(&d, text), CFG_OK);
     CHECK_EQ_I(d.dc_now, 1); CHECK_EQ_I(d.port2.dc_lan, 1); CHECK_EQ_I(d.port2.dc_upnp, 1); CHECK_EQ_I(d.port2.dc_now, 0);
+    /* a fourth: the VPN for the IWANGO games */
+    cfg_default(&c);
+    CHECK_EQ_I(c.dc_iwango, 0); CHECK_EQ_I(c.port2.dc_iwango, 0);
+    CHECK_EQ_I(parse(&c, "[line2]\ndreamcast_iwango = on\n"), CFG_OK);
+    CHECK_EQ_I(c.dc_iwango, 0); CHECK_EQ_I(c.port2.dc_iwango, 1);
+    cfg_for_port(&c, 1, &v); CHECK_EQ_I(v.dc_iwango, 1);
+    CHECK(cfg_write(&c, 1, text, sizeof text) > 0);
+    CHECK(strstr(text, "dreamcast_upnp = off\ndreamcast_iwango = off\n") != NULL);
+    CHECK(strstr(text, "dreamcast_upnp = off\ndreamcast_iwango = on\n") != NULL);
+    CHECK_EQ_I(parse(&d, text), CFG_OK); CHECK_EQ_I(d.port2.dc_iwango, 1); CHECK_EQ_I(d.dc_iwango, 0);
+    CHECK_EQ_I(parse(&c, "[line]\ndreamcast_iwango = 1\n"), CFG_ERR);
     CHECK_EQ_I(parse(&c, "[line]\ndreamcast_now = maybe\n"), CFG_ERR);
     CHECK_EQ_S(err, "t.conf:2: [line] dreamcast_now: 'maybe' is not one of: on, off");
     cfg_default(&c); c.port2.dc_upnp = 2;

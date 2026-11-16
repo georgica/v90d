@@ -26,6 +26,7 @@
 #include "httpd.h"
 #include "sbuf.h"
 #include "page.h"
+#include "vpn.h"
 
 enum { HC_FREE = 0, HC_RECV, HC_BODY, HC_SEND, HC_LINGER };
 enum { V_ERROR = 0, V_HTML, V_JSON, V_CONFIG, V_HTML2, V_JSON2 /* port 2 */, V_CALLS };
@@ -474,6 +475,52 @@ static void login_done(httpd_t *h, httpd_conn_t *c, uint32_t now)
 
 /* ---- the settings form ----------------------------------------------------- */
 
+/* The body of a post to /dreamcast/vpn is complete in tx[0..body_want): as
+ * a form of type text/plain sends it, `profile=` and the text and CR LF, or
+ * `remove=1`. */
+static void vpn_done(httpd_t *h, httpd_conn_t *c, uint32_t now)
+{
+    static char text[VPN_PROFILE_MAX + 1];
+    char *body = c->tx + HTTPD_HDR_RESERVE;
+    char msg[VPN_MSG_MAX], remote[48];
+    size_t n = c->body_want, len = 0;
+    int page = h->cfg->service != CFG_SERVICE_DREAMCAST && h->cfg->port2.service == CFG_SERVICE_DREAMCAST
+               ? SETTINGS_DREAMCAST2 : SETTINGS_DREAMCAST;
+
+    while (n && (c->tx[n - 1] == '\n' || c->tx[n - 1] == '\r')) n--;
+    if (n == 8 && memcmp(c->tx, "remove=1", 8) == 0) {
+        len = 0;
+    } else if (n >= 8 && memcmp(c->tx, "profile=", 8) == 0) {
+        len = n - 8;
+        if (len > VPN_PROFILE_MAX) { respond_text(h, c, 413, NULL, NULL, 0, now); return; }
+        memcpy(text, c->tx + 8, len);
+        text[len++] = '\n';                 /* the end of its last line */
+        if (vpn_profile_check(text, len, msg, sizeof msg) != 0) {
+            finish(h, c, 400, CT_HTML, NULL, settings_render_page(h->cfg, page, 0, msg, body, HTTPD_BODY_MAX), 0, now);
+            return;
+        }
+    } else {
+        respond_text(h, c, 400, NULL, NULL, 0, now);
+        return;
+    }
+    if (h->vpn(h->vpn_ctx, text, len) != 0) {
+        respond_text(h, c, 500, NULL, "The profile could not be kept.", 0, now);
+        return;
+    }
+    settings_set_vpn(len && vpn_profile_remote(text, len, remote, sizeof remote) == 0 ? remote : len ? "" : NULL);
+    {
+        char at[64]; sbuf_t l, s; int blen;
+        sb_init(&s, body, HTTPD_BODY_MAX);
+        sb_puts(&s, "<!DOCTYPE html>\n<html lang=\"en\"><head><title>" PAGE_NAME " settings</title></head><body>\n<p>Done. <a href=\"");
+        sb_puts(&s, settings_page_path(page)); sb_puts(&s, "?saved=1\">Continue</a></p>\n</body></html>\n");
+        blen = sb_end(&s);
+        sb_init(&l, at, sizeof at);
+        sb_puts(&l, "Location: "); sb_puts(&l, settings_page_path(page)); sb_puts(&l, "?saved=1\r\n");
+        sb_end(&l);
+        finish(h, c, 303, CT_HTML, at, blen, 0, now);
+    }
+}
+
 /* The body of a post is complete in tx[0..body_want): decode it, and save
  * or say why not. */
 static void post_done(httpd_t *h, httpd_conn_t *c, uint32_t now)
@@ -484,7 +531,8 @@ static void post_done(httpd_t *h, httpd_conn_t *c, uint32_t now)
     sbuf_t s;
     int r;
 
-    if (c->post_login) { login_done(h, c, now); return; }
+    if (c->post_login == 1) { login_done(h, c, now); return; }
+    if (c->post_login == 2) { vpn_done(h, c, now); return; }
     r = settings_apply(h->cfg, c->tx, c->body_want, &cand, err, sizeof err);
 
     /* from here on the posted octets are no longer needed and the answer
@@ -610,6 +658,12 @@ static void take_body(httpd_t *h, httpd_conn_t *c, size_t n, size_t max, int log
     if (hd.count) goto bad;
     hdr_find(p, n, "content-type", &hd);
     if (hd.count > 1) goto bad;
+    if (login == 2) {
+        if (hd.count == 0 || hd.len < 10 || !ieq(hd.v, "text/plain", 10) || (hd.len > 10 && hd.v[10] != ';' && !is_blank(hd.v[10]))) {
+            respond_text(h, c, 415, NULL, NULL, 0, now);
+            return;
+        }
+    } else
     if (hd.count == 0 || hd.len < 33 || !ieq(hd.v, "application/x-www-form-urlencoded", 33) ||
         (hd.len > 33 && hd.v[33] != ';' && !is_blank(hd.v[33]))) {
         respond_text(h, c, 415, NULL, NULL, 0, now);
@@ -771,6 +825,16 @@ static void handle(httpd_t *h, httpd_conn_t *c, size_t n, uint32_t now)
         settings_request(h, c, n, method, settings_page_of(uri, plen), q ? q + 1 : NULL, q ? ulen - plen - 1 : 0, now);
         return;
     }
+    if (plen == 14 && memcmp(uri, "/dreamcast/vpn", 14) == 0) {
+        int a;
+        if (method != M_POST) { respond_text(h, c, 405, "Allow: POST\r\n", NULL, method == M_HEAD, now); return; }
+        a = authorised(h, c->rx, n, now);
+        if (a != 1) { refuse(h, c, a, 0, 0, now); return; }
+        if (!h->cfg->admin_password[0] && !host_is_address(c->rx, n)) { respond_text(h, c, 403, NULL, BY_ADDRESS, 0, now); return; }
+        if (!h->vpn) { respond_text(h, c, 403, NULL, "A profile cannot be kept here.", 0, now); return; }
+        take_body(h, c, n, VPN_PROFILE_MAX + 12, 2, now);
+        return;
+    }
     if (plen == 8 && memcmp(uri, "/restart", 8) == 0) {
         char *body = c->tx + HTTPD_HDR_RESERVE;
         hdr_t og, host;
@@ -912,6 +976,12 @@ void httpd_on_firmware(httpd_t *h, const httpd_fw_t *fw)
 {
     if (fw) h->fw = *fw;
     else memset(&h->fw, 0, sizeof h->fw);
+}
+
+void httpd_on_vpn(httpd_t *h, int (*keep)(void *ctx, const char *profile, size_t len), void *ctx)
+{
+    h->vpn = keep;
+    h->vpn_ctx = ctx;
 }
 
 void httpd_on_save(httpd_t *h, int (*save)(void *ctx, const cfg_t *newcfg), void *ctx)

@@ -13,11 +13,12 @@ enum {
     F_NUMBER, F_TONES, F_RINGS, F_BUSY, F_DROP, F_SESSION, F_IDLE, F_AUTH,
     F_MODS, F_V90, F_V34, F_V32BIS, F_V22BIS, F_V22, F_V21, F_DOWN, F_UP, F_ADMINPW, F_ADMINCLR,
     F_LAN, F_ADDRESS, F_NETMASK, F_GATEWAY, F_DNS1, F_DNS2, F_PORT, F_SERVICE, F_V92, F_COMPRESSION,
-    F_DCNOW, F_DCLAN, F_DCUPNP,
+    F_DCNOW, F_DCLAN, F_DCUPNP, F_DCIWANGO,
     F_COUNT,
     F_USER = 100, F_PASS = 200      /* plus the row */
 };
 /* name on the wire, and the config section for messages */
+typedef char fields_fit_the_seen_bits[F_COUNT <= 64 ? 1 : -1];
 static const struct { const char *name; const char *sec; } fields[F_COUNT] = {
     { "number", "line" }, { "tones", "line" }, { "rings", "modem" }, { "busy_chance", "line" },
     { "drop_mean", "line" }, { "session_limit", "line" }, { "idle_timeout", "line" },
@@ -29,7 +30,7 @@ static const struct { const char *name; const char *sec; } fields[F_COUNT] = {
     { "lan", "network" }, { "address", "network" }, { "netmask", "network" },
     { "gateway", "network" }, { "dns1", "network" }, { "dns2", "network" },
     { "port", "line" }, { "service", "line" }, { "v92", "modem" }, { "compression", "ppp" },
-    { "dreamcast_now", "line" }, { "dreamcast_lan", "line" }, { "dreamcast_upnp", "line" },
+    { "dreamcast_now", "line" }, { "dreamcast_lan", "line" }, { "dreamcast_upnp", "line" }, { "dreamcast_iwango", "line" },
 };
 
 static const char *const n_tones[] = { "us", "eu" };
@@ -45,6 +46,7 @@ static const char *const n_v92[]   = { "off", "on" };
 static const char *const t_dcnow[]  = { "Off", "On: tell the Dreamcast Now site that a console is online and which game server it asked for" };
 static const char *const t_dclan[]  = { "Off: the console is behind this box's address", "On: the console gets an address of its own on the network" };
 static const char *const t_dcupnp[] = { "Off", "On: ask the router to send the game ports here (UPnP)" };
+static const char *const t_dciwango[] = { "Off", "On: reach the IWANGO games' servers through the VPN (needs a profile, below)" };
 static const char *const t_v92[]   = { "Off: V.90 upstream (V.34, up to 33600 bit/s)",
                                        "On: offer PCM upstream to V.92 callers (experimental)" };
 static const char *const n_comp[]  = { "off", "on" };
@@ -175,6 +177,13 @@ int settings_page_of(const char *path, size_t len)
     return -1;
 }
 
+static char vpn_remote[48]; static int vpn_stored;
+void settings_set_vpn(const char *remote)
+{
+    vpn_stored = remote != NULL;
+    snprintf(vpn_remote, sizeof vpn_remote, "%s", remote ? remote : "");
+}
+
 int settings_render_html(const cfg_t *c, int saved, const char *error, char *buf, size_t cap)
 {
     return settings_render_page(c, SETTINGS_ALL, saved, error, buf, cap);
@@ -246,6 +255,7 @@ int settings_render_page(const cfg_t *c, int page, int saved, const char *error,
     in_select(&b, "Dreamcast Now", F_DCNOW, c->dc_now, n_v92, t_dcnow, 2);
     in_select(&b, "Console on the network", F_DCLAN, c->dc_lan, n_v92, t_dclan, 2);
     in_select(&b, "Game ports from the router", F_DCUPNP, c->dc_upnp, n_v92, t_dcupnp, 2);
+    in_select(&b, "IWANGO games", F_DCIWANGO, c->dc_iwango, n_v92, t_dciwango, 2);
     sb_puts(&b, "</table>\n<p>");
     if (page == SETTINGS_DREAMCAST)
         sb_puts(&b, c->service == CFG_SERVICE_DREAMCAST ? "The service of this port is Dreamcast: these switches are in force. "
@@ -256,7 +266,9 @@ int settings_render_page(const cfg_t *c, int page, int saved, const char *error,
                 " the network: the box asks the network's DHCP server for a second address and hands it to the"
                 " console, which is then a host of its own and not behind this box's address. Game ports from"
                 " the router: the network's router is asked by UPnP to pass the games' ports on, to the console"
-                " when it has an address of its own, else to this box. All three are off unless turned on. A"
+                " when it has an address of its own, else to this box. IWANGO games (Sega Tetris, Aero Dancing, Golf Shiyouyo 2, Daytona USA): their servers of today stand"
+                " inside a private network that is reached through an OpenVPN tunnel; with the switch on and a profile"
+                " for that network stored (below), the box keeps the tunnel up. All four are off unless turned on. A"
                 " change takes effect when the lines are free.</p></section>\n");
     }
     if (ON(SETTINGS_MODEM)) {
@@ -343,6 +355,23 @@ int settings_render_page(const cfg_t *c, int page, int saved, const char *error,
     sb_puts(&b, "</table></section>\n");
     }
     sb_puts(&b, "<p><input type=\"submit\" value=\"Save\"></p>\n</form>\n");
+    if (page == SETTINGS_DREAMCAST) {
+        /* one profile for the box, whichever port's page this is; posted as
+         * it is (text/plain), since it is longer than a form field may be */
+        sb_puts(&b, "<form method=\"post\" action=\"/dreamcast/vpn\" enctype=\"text/plain\">\n"
+                    "<section><h2>VPN profile for the IWANGO games</h2>\n<p>");
+        if (vpn_stored) { sb_puts(&b, "A profile is stored (server "); sb_html(&b, vpn_remote, sizeof vpn_remote, 0); sb_puts(&b, ")."); }
+        else sb_puts(&b, "No profile is stored.");
+        sb_puts(&b, " It is an OpenVPN client profile (.ovpn) with its certificates and keys inside it, from whoever"
+                    " runs the network the games' servers are in; this firmware does not come with one. Paste it"
+                    " here. It is checked, kept with the settings, and not shown again. One profile serves both"
+                    " ports.</p>\n<p><textarea name=\"profile\" rows=\"8\" cols=\"70\" spellcheck=\"false\"></textarea></p>\n"
+                    "<p><input type=\"submit\" value=\"Store the profile\"></p></section>\n</form>\n");
+        if (vpn_stored)
+            sb_puts(&b, "<form method=\"post\" action=\"/dreamcast/vpn\" enctype=\"text/plain\">\n"
+                        "<p><input type=\"hidden\" name=\"remove\" value=\"1\">"
+                        "<input type=\"submit\" value=\"Remove the stored profile\"></p>\n</form>\n");
+    }
     if (ON(SETTINGS_SYSTEM))
         sb_puts(&b, "<form method=\"post\" action=\"/restart\">\n"
                     "<section><h2>Restart</h2>\n<p>Restarts the box. A call in progress is cut off;"
@@ -358,7 +387,7 @@ int settings_render_page(const cfg_t *c, int page, int saved, const char *error,
 
 typedef struct {
     cfg_t      *out;
-    uint32_t    seen;                       /* bit per fixed field */
+    uint64_t    seen;                       /* bit per fixed field (F_COUNT of them: at most 64) */
     unsigned    user_seen, pass_seen;       /* bit per row */
     cfg_user_t  row[CFG_MAX_USERS];         /* names and passwords as posted */
     int         sw[F_COUNT];                /* the 0/1 fields: -1 = not posted */
@@ -543,6 +572,7 @@ static void set_field(form_t *f, int fi, const char *v, size_t len)
     case F_DCNOW:   set_enum(f, fi, &c->dc_now, v, n_v92, 2, "on, off"); break;
     case F_DCLAN:   set_enum(f, fi, &c->dc_lan, v, n_v92, 2, "on, off"); break;
     case F_DCUPNP:  set_enum(f, fi, &c->dc_upnp, v, n_v92, 2, "on, off"); break;
+    case F_DCIWANGO: set_enum(f, fi, &c->dc_iwango, v, n_v92, 2, "on, off"); break;
     case F_COMPRESSION: set_enum(f, fi, &c->compression, v, n_comp, 2, "on, off"); break;
     case F_ADDRESS: set_addr(f, fi, &c->lan_addr, v, 0); break;
     case F_NETMASK: set_addr(f, fi, &c->lan_netmask, v, 0); break;
@@ -649,7 +679,7 @@ int settings_apply(const cfg_t *cur, const char *body, size_t len, cfg_t *out,
             f.user_seen |= 1u << (fi - F_USER);
         } else {
             if ((f.seen >> fi) & 1u) goto bad;
-            f.seen |= (uint32_t)1 << fi;
+            f.seen |= (uint64_t)1 << fi;
         }
         if (decode(eq + 1, pl - (size_t)(eq + 1 - pair), val, &vlen)) goto bad;
         set_field(&f, fi, val, vlen);

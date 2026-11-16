@@ -230,10 +230,13 @@ service = internet
 # for service = dreamcast, all off unless asked for: tell the "Dreamcast
 # Now" site which game is being played; make the console a host of its own
 # on the network (an address by DHCP) instead of hiding it behind the box;
-# ask the network's router to pass the games' ports on (UPnP)
+# ask the network's router to pass the games' ports on (UPnP); keep an
+# OpenVPN tunnel up to the network the IWANGO games' servers are in (needs
+# a profile, given on the Dreamcast page)
 #dreamcast_now = off
 #dreamcast_lan = off
 #dreamcast_upnp = off
+#dreamcast_iwango = off
 
 [status]
 # lan (default) or off

@@ -92,6 +92,10 @@ enum { SETTINGS_ALL, SETTINGS_LINE, SETTINGS_MODEM, SETTINGS_USERS, SETTINGS_NET
         * dreamcast service, per port */
        SETTINGS_DREAMCAST, SETTINGS_DREAMCAST2, SETTINGS_PAGES };
 int settings_render_page(const cfg_t *c, int page, int saved, const char *error, char *buf, size_t cap);
+/* What the Dreamcast page says about the VPN profile (vpn.h) that the
+ * owner keeps: "host port" of its server, or NULL when none is stored. The
+ * profile itself is never shown. */
+void settings_set_vpn(const char *remote);
 const char *settings_page_path(int page);
 /* the page whose path is path[0..len), -1 if it is none */
 int settings_page_of(const char *path, size_t len);

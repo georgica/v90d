@@ -12,6 +12,7 @@
 #include <unistd.h>
 #include "test.h"
 #include "httpd.h"
+#include "vpn.h"
 #include "settings.h"
 #include "page.h"
 
@@ -2171,6 +2172,92 @@ static void test_settings_fuzz(void)
     C = before;
 }
 
+/* The VPN profile of the Dreamcast page: posted as plain text to
+ * /dreamcast/vpn, checked (vpn.h), handed to whoever keeps it. */
+static char vpn_got[VPN_PROFILE_MAX + 1]; static size_t vpn_len; static int vpn_calls, vpn_fail;
+static int on_vpn(void *ctx, const char *t, size_t n)
+{
+    (void)ctx; vpn_calls++;
+    vpn_len = n; memcpy(vpn_got, t, n); vpn_got[n] = 0;
+    return vpn_fail ? -1 : 0;
+}
+static int vpn_post(const char *ctype, const char *body, char *out, size_t cap)
+{
+    static char req[20000];
+    int n = snprintf(req, sizeof req, "POST /dreamcast/vpn HTTP/1.0\r\nHost: 192.168.1.2\r\nContent-Type: %s\r\nContent-Length: %u\r\n\r\n%s",
+                     ctype, (unsigned)strlen(body), body);
+    return exchange_n(req, (size_t)n, out, cap);
+}
+static void test_vpn_profile(void)
+{
+    resp_t r; int len; static char big[VPN_PROFILE_MAX + 600]; size_t i;
+
+    fixture();
+    C.service = CFG_SERVICE_DREAMCAST;
+    vpn_calls = 0; vpn_fail = 0;
+    /* nobody keeps profiles here: refused */
+    len = vpn_post("text/plain", "profile=client\r\nremote a 1\r\n\r\n", resp, sizeof resp);
+    CHECK(parse_resp(resp, len, &r) && r.code == 403);
+    httpd_on_vpn(&H, on_vpn, NULL);
+    /* the page: a form for it, and what is known about the stored one */
+    settings_set_vpn(NULL);
+    len = exchange("GET /dreamcast HTTP/1.0\r\nHost: 192.168.1.2\r\n\r\n", resp, sizeof resp);
+    CHECK(parse_resp(resp, len, &r) && r.code == 200);
+    CHECK(strstr(resp, "<form method=\"post\" action=\"/dreamcast/vpn\" enctype=\"text/plain\">") != NULL);
+    CHECK(strstr(resp, "<textarea name=\"profile\"") != NULL);
+    CHECK(strstr(resp, "No profile is stored.") != NULL);
+    /* a good one */
+    len = vpn_post("text/plain", "profile=client\r\nremote vpn.example 1194\r\n<ca>\r\nabc\r\n</ca>\r\n\r\n", resp, sizeof resp);
+    CHECK(parse_resp(resp, len, &r) && r.code == 303);
+    CHECK(strstr(resp, "Location: /dreamcast?saved=1\r\n") != NULL);
+    CHECK_EQ_I(vpn_calls, 1);
+    CHECK(strcmp(vpn_got, "client\r\nremote vpn.example 1194\r\n<ca>\r\nabc\r\n</ca>\n") == 0);   /* one line end at the end */
+    len = exchange("GET /dreamcast HTTP/1.0\r\nHost: 192.168.1.2\r\n\r\n", resp, sizeof resp);
+    CHECK(strstr(resp, "A profile is stored (server vpn.example 1194).") != NULL);
+    CHECK(strstr(resp, "abc") == NULL);                     /* never shown again */
+    /* one that is not let through: said why, nothing kept */
+    len = vpn_post("text/plain; charset=UTF-8", "profile=client\r\nremote a 1\r\nup /bin/sh\r\n\r\n", resp, sizeof resp);
+    CHECK(parse_resp(resp, len, &r) && r.code == 400);
+    CHECK(strstr(resp, "<b>Not saved:</b> line 3: &#39;up&#39; is not allowed in a profile here") != NULL ||
+          strstr(resp, "<b>Not saved:</b> line 3: 'up' is not allowed in a profile here") != NULL);
+    CHECK_EQ_I(vpn_calls, 1);
+    /* taking it away */
+    len = vpn_post("text/plain", "remove=1\r\n", resp, sizeof resp);
+    CHECK(parse_resp(resp, len, &r) && r.code == 303);
+    CHECK_EQ_I(vpn_calls, 2); CHECK_EQ_I(vpn_len, 0);
+    len = exchange("GET /dreamcast HTTP/1.0\r\nHost: 192.168.1.2\r\n\r\n", resp, sizeof resp);
+    CHECK(strstr(resp, "No profile is stored.") != NULL);
+    /* the keeper fails */
+    vpn_fail = 1;
+    len = vpn_post("text/plain", "profile=remote a 1\r\n\r\n", resp, sizeof resp);
+    CHECK(parse_resp(resp, len, &r) && r.code == 500);
+    vpn_fail = 0;
+    /* other shapes */
+    len = vpn_post("application/x-www-form-urlencoded", "profile=remote+a+1", resp, sizeof resp);
+    CHECK(parse_resp(resp, len, &r) && r.code == 415);
+    len = vpn_post("text/plain", "something=else\r\n", resp, sizeof resp);
+    CHECK(parse_resp(resp, len, &r) && r.code == 400);
+    memcpy(big, "profile=", 8);
+    for (i = 8; i < sizeof big - 1; i++) big[i] = i % 50 == 49 ? '\n' : '#';
+    big[sizeof big - 1] = 0;
+    len = vpn_post("text/plain", big, resp, sizeof resp);
+    CHECK(parse_resp(resp, len, &r) && r.code == 413);
+    CHECK_EQ_I(code_of("GET /dreamcast/vpn HTTP/1.0\r\nHost: 192.168.1.2\r\n\r\n"), 405);
+    /* from another site's page: no */
+    {
+        static const char x[] = "POST /dreamcast/vpn HTTP/1.0\r\nHost: 192.168.1.2\r\nOrigin: http://evil.example\r\n"
+                                "Content-Type: text/plain\r\nContent-Length: 12\r\n\r\nremove=1\r\n\r\n";
+        len = exchange(x, resp, sizeof resp);
+        CHECK(parse_resp(resp, len, &r) && r.code == 403);
+    }
+    /* behind the login like every setting */
+    strcpy(C.admin_password, "pw");
+    len = vpn_post("text/plain", "remove=1\r\n", resp, sizeof resp);
+    CHECK(parse_resp(resp, len, &r) && r.code != 303 && r.code != 200);
+    CHECK_EQ_I(vpn_calls, 3);
+    settings_set_vpn(NULL);
+}
+
 int main(void)
 {
     int fds = count_fds();
@@ -2196,6 +2283,7 @@ int main(void)
     test_firmware();
     test_pages();
     test_two_ports();
+    test_vpn_profile();
     test_settings_fuzz();
     httpd_close(&H);
     CHECK_EQ_I(httpd_active(&H), 0);

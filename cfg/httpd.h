@@ -122,7 +122,7 @@ typedef struct {
     size_t   body_len, body_want;  /* posted body so far and in all; it is
                                     collected in tx[] */
     int      post_page;          /* ... or the settings page (settings.h) it came from */
-    int      post_login;         /* the body being collected is a login form */
+    int      post_login;         /* the body being collected is a login form (1) or a VPN profile (2) */
     char     rx[HTTPD_REQ_MAX];
     char     tx[HTTPD_TX_MAX];
 } httpd_conn_t;
@@ -168,6 +168,7 @@ typedef struct httpd {
     const status_t *status;
     const status_t *status2;        /* port 2, or NULL */
     int           (*save)(void *ctx, const cfg_t *newcfg);
+    int           (*vpn)(void *ctx, const char *profile, size_t len); void *vpn_ctx;
     void           *save_ctx;
     int             listen_fd;   /* -1 when there is none */
     uint32_t        rx_timeout_ms, tx_timeout_ms, linger_ms;
@@ -212,6 +213,13 @@ void httpd_status2(httpd_t *h, const status_t *status2);
  * Without a callback (the state after httpd_init, or save = NULL) the form
  * is shown but a post is answered 403. */
 void httpd_on_save(httpd_t *h, int (*save)(void *ctx, const cfg_t *newcfg), void *ctx);
+/* POST /dreamcast/vpn (text/plain, from the form of the Dreamcast page, at
+ * most VPN_PROFILE_MAX octets of profile): a profile that passes
+ * vpn_profile_check() is handed to keep(), len 0 = the stored one is to be
+ * removed; 0 from it is answered with 303 to the page, anything else with
+ * 500. A profile that does not pass is 400 with the page and the reason.
+ * Login, Host and Origin rules as for the settings; 403 without a keep. */
+void httpd_on_vpn(httpd_t *h, int (*keep)(void *ctx, const char *profile, size_t len), void *ctx);
 
 /* Register the Firmware page's helpers (copied; NULL takes them away).
  * Without `text` the page shows the version only; without `take` it offers
