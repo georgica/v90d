@@ -45,7 +45,8 @@ the stock firmware stays in the box, one click away.
   and its closed helper programs.
 - A web interface ("Nestaliga") for all of it: dashboard, line, modem,
   users, network, system, firmware and calls, with a Dreamcast page when a
-  port is set to that service.
+  port is set to that service. The pages follow the box: both phone ports on
+  an HT802, a single port on a one-port box.
 
 ## What it is made of
 
