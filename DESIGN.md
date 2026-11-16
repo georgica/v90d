@@ -344,7 +344,7 @@ way of working (`dce_cfg_t.raw_rx`): no error control is offered, V.42 goes
 straight to its start-stop mode, and the octets go to the owner instead of
 to PPP, with a 2 kB queue towards the modem. The telephony layer accepts
 any number on such a port and the server reads the digits as an
-instruction (`srv/saturn.c`: wait, or call an address); a number that is
+instruction (`srv/saturn.c`: wait, call an address, or -- with the off-by-default matchmaking switch -- be paired for a game through STUN (`srv/stun.c`) and the match server at saturn.dreampipe.net); a number that is
 neither gets no call. The network side lives in the daemon (`sl_poll` in
 `srv/main.c`), non-blocking sockets looked at once per 10 ms block: TCP
 65432 for the greeting, then UDP 20001 / 20002 with the tunnel's records

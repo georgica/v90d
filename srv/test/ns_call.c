@@ -31,6 +31,7 @@
 #include "channel.h"
 #include "tun.h"
 #include "saturn.h"
+#include "stun.h"
 
 #define FS 8000
 #define BLK 80
@@ -185,6 +186,27 @@ static void udp_drain(int fd)
             if (!sat_first[0]) { size_t k = (size_t)r < sizeof sat_first - 1 ? (size_t)r : sizeof sat_first - 1; memcpy(sat_first, dg, k); sat_first[k] = 0; }
             sat_got_n += saturn_unpack(&sat_peer_rx, dg, (size_t)r, sat_got + sat_got_n, sizeof sat_got - sat_got_n);
         }
+    }
+}
+
+/* a stand-in STUN server: it echoes the sender's address back as the
+ * mapped address, so the daemon learns its own 127.0.0.1:port */
+static void stun_responder(int fd)
+{
+    uint8_t b[512], out[32]; struct sockaddr_in from; socklen_t fl; ssize_t r;
+    for (;;) {
+        fl = sizeof from;
+        r = recvfrom(fd, b, sizeof b, 0, (struct sockaddr *)(void *)&from, &fl);
+        if (r < 20 || b[0] != 0x00 || b[1] != 0x01) continue;
+        out[0] = 0x01; out[1] = 0x01; out[2] = 0x00; out[3] = 0x0C;
+        memcpy(out + 4, b + 4, 4); memcpy(out + 8, b + 8, 12);
+        out[20] = 0x00; out[21] = 0x20; out[22] = 0x00; out[23] = 0x08;
+        out[24] = 0x00; out[25] = 0x01;
+        { uint16_t xp = (uint16_t)(ntohs(from.sin_port) ^ (STUN_MAGIC >> 16));
+          uint32_t xa = ntohl(from.sin_addr.s_addr) ^ STUN_MAGIC;
+          out[26] = (uint8_t)(xp >> 8); out[27] = (uint8_t)xp;
+          out[28] = (uint8_t)(xa >> 24); out[29] = (uint8_t)(xa >> 16); out[30] = (uint8_t)(xa >> 8); out[31] = (uint8_t)xa; }
+        (void)sendto(fd, out, sizeof out, 0, (struct sockaddr *)(void *)&from, fl);
     }
 }
 
@@ -993,6 +1015,90 @@ int main(int argc, char **argv)
         for (i = 0; i < 50 && !file_has(lanlog, "IWANGO games: the VPN is stopped"); i++) { run_ms(200); usleep(50000); }
         CHECK(file_has(lanlog, "IWANGO games: the VPN is stopped"));
         CHECK(access(vpnf, F_OK) != 0);
+        quiet_exit = 1;
+        kill(pid, SIGTERM);
+        for (i = 0; i < 400 && !dead; i++) step(0);
+        close(line_fd);
+        CHECK_EQ_I(waitpid(pid, &st, 0), pid);
+        CHECK(WIFEXITED(st) && WEXITSTATUS(st) == 0);
+    }
+    /* 11. matchmaking (saturn.h): dial #0NN#, the box learns its public
+     * address by a stand-in STUN server, asks a stand-in match server (via
+     * -M) which pairs it, then plays the opponent over UDP. */
+    {
+        static char lanlog[300], script[320], mlog[320]; pid_t stunpid = -1; int sfd, peer, k; size_t z; int bad = 0;
+        snprintf(script, sizeof script, "%s/ns_mm.sh", argv[2]);
+        snprintf(mlog, sizeof mlog, "%s/ns_mm.args", argv[2]); unlink(mlog);
+        {
+            FILE *f = fopen(script, "w");
+            if (f) {
+                fprintf(f, "#!/bin/sh\necho \"$1 $2 $3 $4\" >> %s\n", mlog);
+                fprintf(f, "case \"$1\" in\n status) echo '{\"status\":\"matched\",\"opponent ip_address\":\"127000000001 34567\"}' ;;\n");
+                fprintf(f, " *) echo '{\"status\":\"waiting\"}' ;;\nesac\n");
+                fclose(f); chmod(script, 0755);
+            }
+        }
+        /* the stand-in STUN server on 127.0.0.1:3478 */
+        sfd = udp_at(IP4(127, 0, 0, 1), 3478);
+        CHECK(sfd >= 0);
+        stunpid = fork();
+        if (stunpid == 0) { stun_responder(sfd); _exit(0); }
+        close(sfd);
+        cfg_default(&c);
+        strcpy(c.line_number, "5551234"); c.rings = 1;
+        c.service = CFG_SERVICE_SATURN; c.sat_match = 1;
+        c.status_port = 8080;
+        CHECK_EQ_I(cfg_save(&c, conf, err, sizeof err), CFG_OK);
+        CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
+        snprintf(lanlog, sizeof lanlog, "%s/ns_mm.log", argv[2]);
+        pid = fork();
+        if (pid == 0) {
+            char mcmd[360]; int a = fcntl(sv[1], F_DUPFD, 20), lfd = open(lanlog, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            dup2(a, 3); if (lfd >= 0) dup2(lfd, 2);
+            for (i = 4; i < 64; i++) close(i);
+            snprintf(mcmd, sizeof mcmd, "sh %s \"$@\"", script);
+            execl(argv[1], "v90d", "-c", conf, "-l", "fd:3", "-i", "lo", "-t", "ppp0", "-A", "",
+                  "-S", "127.0.0.1:3478", "-M", mcmd, (char *)NULL);
+            _exit(127);
+        }
+        close(sv[1]);
+        line_fd = sv[0]; idle_fd = -1;
+        dead = quiet_exit = 0; hook = modem_on = 0; blk_n = 0; c_tx = 0; c_rx_pw = 0;
+        channel_init(&CH, &cc);
+        memset(prev_tx, 0xFF, sizeof prev_tx);
+        run_ms(1500);
+        /* the opponent's box, at the address the match server will hand out */
+        peer = udp_at(IP4(127, 0, 0, 1), 34567);
+        CHECK(peer >= 0);
+        saturn_rx_init(&sat_peer_rx); sat_got_n = 0; sat_pings = sat_pongs = 0; sat_first[0] = 0; sat_from = 0;
+        sat_call("#042#");                          /* wait to be paired for game 42 */
+        /* STUN (0.5s) + wait query + 2s + status query: give it time */
+        for (i = 0; i < 80 && !file_has(lanlog, "the other player is 127.0.0.1"); i++) { run_ms(200); usleep(60000); }
+        CHECK(file_has(lanlog, "our public address is 127.0.0.1:20001 (STUN)"));
+        CHECK(file_has(lanlog, "the other player is 127.0.0.1"));
+        CHECK(file_has(mlog, "wait 42 127000000001 20001"));    /* game id and public address were sent */
+        CHECK(file_has(mlog, "status 42 127000000001 20001"));
+        run_ms(800);
+        /* the waiting game is shown RING + CONNECT */
+        CHECK_EQ_I(sat_dn_n, 15); CHECK(memcmp(sat_dn, "RING\r\nCONNECT\r\n", 15) == 0);
+        /* a PING reaches the opponent from the box's port (give it wall time) */
+        for (i = 0; i < 40 && sat_pings < 1; i++) { run_ms(100); usleep(60000); udp_drain(peer); }
+        CHECK(sat_pings >= 1); CHECK_EQ_I(sat_from, 20001);
+        udp_to(peer, 20001, "hi<dataSplit>0", 14);
+        for (i = 0; i < 20 && sat_dn_n < 17; i++) { run_ms(100); usleep(30000); }
+        CHECK_EQ_I(sat_dn_n, 15 + 2); CHECK(memcmp(sat_dn + 15, "hi", 2) == 0);
+        /* and the box's octets reach the opponent */
+        sat_n = 120;
+        for (i = 0; i < 40 && sat_got_n < 120; i++) { run_ms(100); usleep(30000); udp_drain(peer); }
+        CHECK_EQ_I(sat_got_n, 120);
+        for (z = 0; z < sat_got_n; z++) if (sat_got[z] != (uint8_t)(z * 9 + 2)) bad++;
+        CHECK_EQ_I(bad, 0);
+        CHECK(http("GET /status.json HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n", resp, sizeof resp) > 0);
+        CHECK(strstr(resp, "\"service\":\"saturn\"") != NULL);
+        (void)k;
+        hang_up();
+        close(peer);
+        if (stunpid > 0) { kill(stunpid, SIGKILL); waitpid(stunpid, NULL, 0); }
         quiet_exit = 1;
         kill(pid, SIGTERM);
         for (i = 0; i < 400 && !dead; i++) step(0);

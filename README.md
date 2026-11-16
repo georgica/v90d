@@ -32,7 +32,9 @@ the stock firmware stays in the box, one click away.
     games (below).
   - **Saturn**: two consoles that telephone each other (NetLink), each
     dialling into its own box, joined over the network. Dial `0` to wait,
-    `#a*b*c*d#` to call the player at that address. Speaks the DreamPi
+    `#a*b*c*d#` to call the player at that address. An optional matchmaking
+    mode (off by default) pairs players who dial the same game through a
+    match server and works through home routers. Speaks the DreamPi
     tunnel's protocol, so the other side can be a DreamPi.
 
   The two console services are written from the DreamPi project's
@@ -41,8 +43,7 @@ the stock firmware stays in the box, one click away.
   Dancing, Golf Shiyouyo 2, Daytona USA) reach their servers through an
   OpenVPN tunnel: turn the switch on and paste your own `.ovpn` profile on
   the Dreamcast page. v90d ships no profile or keys of its own; bring one
-  from whoever runs that network. Not done: DreamPi's matchmaking numbers
-  and its closed helper programs.
+  from whoever runs that network. Not done: DreamPi's closed helper programs.
 - A web interface ("Nestaliga") for all of it: dashboard, line, modem,
   users, network, system, firmware and calls, with a Dreamcast page when a
   port is set to that service. The pages follow the box: both phone ports on
