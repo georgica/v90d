@@ -315,7 +315,7 @@ static void test_escaping(void)
 
     /* fields outside their range do not index anything */
     base(&c);
-    c.line_tones = 7; c.auth = -3; c.lan_dhcp = 5; c.service = 9; c.v92 = 9; c.compression = 9; c.n_users = 1000; c.modulations = 0xffffffffu;
+    c.line_tones = 7; c.auth = -3; c.lan_dhcp = 5; c.service = 9; c.dc_now = c.dc_lan = c.dc_upnp = 9; c.v92 = 9; c.compression = 9; c.n_users = 1000; c.modulations = 0xffffffffu;
     c.rings = -2147483647 - 1; c.max_down = 2147483647;
     CHECK(settings_render_html(&c, 0, NULL, html, sizeof html) > 0);
     CHECK(has(html, "name=\"rings\" size=\"6\" maxlength=\"5\" value=\"-2147483648\">"));
@@ -415,6 +415,16 @@ static void test_ethernet(void)
     c.service = CFG_SERVICE_INTERNET;
     CHECK_EQ_I(apply(&c, "service=netlink", &out), SETTINGS_INVALID);
     CHECK(strcmp(err, "[line] service: 'netlink' is not one of: internet, archive, dreamcast") == 0);
+    /* three switches for a console's port, off unless asked, one set per port */
+    n = settings_render_html(&c, 0, NULL, html, sizeof html);
+    CHECK(has(html, "<select name=\"dreamcast_now\">")); CHECK(has(html, "<select name=\"dreamcast_lan\">"));
+    CHECK(has(html, "<select name=\"dreamcast_upnp\">"));
+    CHECK(has(html, "Dreamcast Now"));
+    CHECK_EQ_I(apply(&c, "dreamcast_now=on&dreamcast_upnp=on", &out), SETTINGS_OK);
+    CHECK_EQ_I(out.dc_now, 1); CHECK_EQ_I(out.dc_lan, 0); CHECK_EQ_I(out.dc_upnp, 1); CHECK_EQ_I(out.port2.dc_now, 0);
+    CHECK_EQ_I(apply(&c, "port=2&dreamcast_lan=on", &out), SETTINGS_OK);
+    CHECK_EQ_I(out.dc_lan, 0); CHECK_EQ_I(out.port2.dc_lan, 1);
+    CHECK_EQ_I(apply(&c, "dreamcast_lan=perhaps", &out), SETTINGS_INVALID);
     /* V.92: the same kind of switch, on the modem page */
     CHECK_EQ_I(apply(&c, "v92=on", &out), SETTINGS_OK);
     CHECK_EQ_I(out.v92, 1); CHECK_EQ_I(out.service, CFG_SERVICE_INTERNET);
@@ -575,7 +585,7 @@ static void test_port2(void)
     /* untouched forms of port 2 post back to the config they came from */
     CHECK(settings_render_page(&c, SETTINGS_LINE2, 0, NULL, html, sizeof html) > 0);
     n = submit(html, body, sizeof body);
-    CHECK_EQ_I(n, 9);
+    CHECK_EQ_I(n, 12);
     CHECK_EQ_I(apply(&c, body, &out), SETTINGS_OK);
     CHECK(memcmp(&out, &c, sizeof c) == 0);
     CHECK(settings_render_page(&c, SETTINGS_MODEM2, 0, NULL, html, sizeof html) > 0);
@@ -969,7 +979,7 @@ static void test_round_trip(void)
     cfg_default(&c);
     CHECK(settings_render_html(&c, 0, NULL, html, sizeof html) > 0);
     n = submit(html, body, sizeof body);
-    CHECK_EQ_I(n, 7 + 1 + 1 + 6 + 2 + 2 * CFG_MAX_USERS + 6 + 1 + 1 + 1 + 1);     /* the last three: service, v92, compression */
+    CHECK_EQ_I(n, 7 + 1 + 1 + 6 + 2 + 2 * CFG_MAX_USERS + 6 + 1 + 1 + 1 + 1 + 3);     /* service, v92, compression, and the three console switches */
     CHECK_EQ_I(apply(&c, body, &out), SETTINGS_OK);
     CHECK(memcmp(&c, &out, sizeof c) == 0);
 
@@ -991,7 +1001,7 @@ static void test_round_trip(void)
     strcpy(c.users[1].name, "caf\xe9\x01");
     CHECK(settings_render_html(&c, 0, NULL, html, sizeof html) > 0);
     n = submit(html, body, sizeof body);
-    CHECK_EQ_I(n, 7 + 1 + 1 + 1 + 2 + 2 * CFG_MAX_USERS - 1 + 6 + 1 + 1 + 1 + 1);
+    CHECK_EQ_I(n, 7 + 1 + 1 + 1 + 2 + 2 * CFG_MAX_USERS - 1 + 6 + 1 + 1 + 1 + 1 + 3);
     CHECK_EQ_I(apply(&c, body, &out), SETTINGS_OK);
     CHECK(memcmp(&c, &out, sizeof c) == 0);
 

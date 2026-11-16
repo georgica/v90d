@@ -59,6 +59,7 @@
 #include "tun.h"
 #include "nat.h"
 #include "dclist.h"
+#include "dcnow.h"
 
 #define PORTS CFG_PORTS
 static srv_t    S[PORTS];
@@ -142,24 +143,36 @@ static int any_console(void)
 }
 
 /* The address list of the game revival projects (dclist.h): fetched by a
- * child process into a file while a port has the console service, read when
- * the child is done, in force from the next time the line is idle. A fetch
- * that fails leaves the list as it was. */
-#define DC_FILE "/tmp/v90d.dclist"
-static const char *dc_cmd = "wget -q -T 8 -O " DC_FILE ".new " DCLIST_URL " && mv " DC_FILE ".new " DC_FILE;
+ * child process while a port has the console service. The child writes the
+ * list to its standard output, a pipe we read as it comes (no file, so
+ * nothing in /tmp to be put in its way); it is parsed when the child is
+ * done and in force from the next time the line is idle. A fetch that fails
+ * leaves the list as it was. */
+static const char *dc_cmd = "wget -q -T 8 -O - " DCLIST_URL;
 static nat_rewrite dc_rw[NAT_REWRITE_MAX]; static int dc_n;
 static pid_t    dc_pid; static uint32_t dc_next_ms; static int dc_started;
+static int      dc_fd = -1; static char dc_text[8192]; static size_t dc_len;
+static void dc_drain(void)
+{
+    char junk[512]; ssize_t r;
+    while (dc_fd >= 0) {
+        if (dc_len < sizeof dc_text) r = read(dc_fd, dc_text + dc_len, sizeof dc_text - dc_len);
+        else r = read(dc_fd, junk, sizeof junk);            /* more than a list can be: read and dropped */
+        if (r <= 0) break;
+        if (dc_len < sizeof dc_text) dc_len += (size_t)r;
+    }
+}
 static void dc_poll(uint32_t now_ms)
 {
     int st;
     if (dc_pid > 0) {
+        dc_drain();
         if (waitpid(dc_pid, &st, WNOHANG) != dc_pid) return;
-        dc_pid = 0;
+        dc_drain();
+        dc_pid = 0; close(dc_fd); dc_fd = -1;
         if (WIFEXITED(st) && WEXITSTATUS(st) == 0) {
-            static char text[8192]; static nat_rewrite got[NAT_REWRITE_MAX];
-            int fd = open(DC_FILE, O_RDONLY | O_CLOEXEC), n = 0; ssize_t len = 0;
-            if (fd >= 0) { len = read(fd, text, sizeof text); close(fd); }
-            if (len > 0) n = dclist_parse(text, (size_t)len, got, NAT_REWRITE_MAX);
+            static nat_rewrite got[NAT_REWRITE_MAX];
+            int n = dclist_parse(dc_text, dc_len, got, NAT_REWRITE_MAX);
             if (n == 0) logf_(CFG_LOG_WARN, "console service: the address list that came holds no rule; keeping %d", dc_n);
             else if (n != dc_n || memcmp(got, dc_rw, (size_t)n * sizeof got[0]) != 0) {
                 memcpy(dc_rw, got, (size_t)n * sizeof got[0]); dc_n = n; net_dirty = 1;
@@ -175,16 +188,71 @@ static void dc_poll(uint32_t now_ms)
     if (!dc_cmd[0] || !any_console()) return;
     if (dc_started && (int32_t)(now_ms - dc_next_ms) < 0) return;
     dc_started = 1; dc_next_ms = now_ms + 300000u;
-    dc_pid = fork();
-    if (dc_pid == 0) {
-        struct sched_param sp;
-        memset(&sp, 0, sizeof sp);
-        (void)sched_setscheduler(0, SCHED_OTHER, &sp);
-        (void)munlockall();
-        execl("/bin/sh", "sh", "-c", dc_cmd, (char *)NULL);
-        _exit(127);
+    {
+        int pp[2];
+        if (pipe2(pp, O_CLOEXEC | O_NONBLOCK) < 0) return;
+        dc_len = 0;
+        dc_pid = fork();
+        if (dc_pid == 0) {
+            struct sched_param sp;
+            memset(&sp, 0, sizeof sp);
+            (void)sched_setscheduler(0, SCHED_OTHER, &sp);
+            (void)munlockall();
+            (void)fcntl(pp[1], F_SETFL, 0);                 /* the child writes without hurry */
+            if (dup2(pp[1], 1) < 0) _exit(126);
+            execl("/bin/sh", "sh", "-c", dc_cmd, (char *)NULL);
+            _exit(127);
+        }
+        close(pp[1]);
+        if (dc_pid < 0) { dc_pid = 0; close(pp[0]); return; }
+        dc_fd = pp[0];
     }
-    if (dc_pid < 0) dc_pid = 0;
+}
+
+/* "Dreamcast Now" (dcnow.h): while the caller of a console port that asks
+ * for it has its network up, a report every 15 s, sent by a child process
+ * (the image's wget; dn_prog, when set, is run instead as "prog URL BODY"). */
+static const char *dn_prog;
+static struct { dcnow_t d; int on; uint32_t next_ms; pid_t pid; } dn[PORTS];
+static void dn_poll(uint32_t now_ms)
+{
+    int i;
+    for (i = 0; i < n_ports; i++) {
+        int up = S[i].cfg.service == CFG_SERVICE_DREAMCAST && S[i].cfg.dc_now && srv_ip_up(&S[i]);
+        if (dn[i].pid > 0 && waitpid(dn[i].pid, NULL, WNOHANG) == dn[i].pid) dn[i].pid = 0;
+        if (!up) { dn[i].on = 0; continue; }
+        if (!dn[i].on) {
+            uint8_t mac[6]; char path[80], text[32]; unsigned m[6]; int fd, k; ssize_t r = 0;
+            memset(mac, 0, sizeof mac);
+            snprintf(path, sizeof path, "/sys/class/net/%s/address", lan_if);
+            fd = open(path, O_RDONLY | O_CLOEXEC);
+            if (fd >= 0) { r = read(fd, text, sizeof text - 1); close(fd); }
+            text[r > 0 ? r : 0] = 0;
+            if (sscanf(text, "%2x:%2x:%2x:%2x:%2x:%2x", &m[0], &m[1], &m[2], &m[3], &m[4], &m[5]) == 6)
+                for (k = 0; k < 6; k++) mac[k] = (uint8_t)m[k];
+            dcnow_start(&dn[i].d, mac);
+            dn[i].on = 1; dn[i].next_ms = now_ms;
+            logf_(CFG_LOG_INFO, "port %d: reporting to Dreamcast Now while this call lasts", i + 1);
+        }
+        if ((int32_t)(now_ms - dn[i].next_ms) < 0 || dn[i].pid > 0) continue;
+        dn[i].next_ms = now_ms + DCNOW_EVERY_MS;
+        {
+            char url[160], body[96];
+            (void)dcnow_body(&dn[i].d, console_name(&S[i].console, NULL), body, sizeof body);
+            snprintf(url, sizeof url, "https://" DCNOW_HOST "%s", dcnow_path(&dn[i].d));
+            dn[i].pid = fork();
+            if (dn[i].pid == 0) {
+                struct sched_param sp;
+                memset(&sp, 0, sizeof sp);
+                (void)sched_setscheduler(0, SCHED_OTHER, &sp);
+                (void)munlockall();
+                if (dn_prog) execl(dn_prog, dn_prog, url, body, (char *)NULL);
+                else execlp("wget", "wget", "-q", "-T", "15", "-O", "/dev/null", "-U", DCNOW_AGENT, "--post-data", body, url, (char *)NULL);
+                _exit(127);
+            }
+            if (dn[i].pid < 0) dn[i].pid = 0;
+        }
+    }
 }
 
 static int all_onhook(void)
@@ -415,7 +483,7 @@ static void log_last_call(int port)
 
 static void usage(void)
 {
-    fprintf(stderr, "usage: v90d [-c FILE] -l LINE [-l LINE2] [-d N] [-i LAN-IF] [-t TUN] [-A GATEWAY] [-D FETCH-COMMAND] [-v]\n       v90d [-c FILE] -p\n"
+    fprintf(stderr, "usage: v90d [-c FILE] -l LINE [-l LINE2] [-d N] [-i LAN-IF] [-t TUN] [-A GATEWAY] [-D FETCH-COMMAND] [-G REPORT-PROGRAM] [-v]\n       v90d [-c FILE] -p\n"
                     "bench: [-R l|c per port, e.g. lc] [-P 1..31: maximum downstream power code] [-w|-W FILE: record port 1|2]\n");
     exit(2);
 }
@@ -438,7 +506,7 @@ int main(int argc, char **argv)
     /* the telephone lights: <prefix><port>/brightness, lit while the port is off hook */
     const char *led_prefix = "/sys/class/leds/ht802:phone"; int led_fd[PORTS] = { -1, -1 }, led_on[PORTS] = { -1, -1 };
 
-    while ((opt = getopt(argc, argv, "c:l:d:i:t:vpw:W:L:A:N:R:P:D:")) != -1) {
+    while ((opt = getopt(argc, argv, "c:l:d:i:t:vpw:W:L:A:N:R:P:D:G:")) != -1) {
         switch (opt) {
         case 'c': cfg_path = optarg; break;
         case 'l': if (n_ports >= PORTS) usage(); line_spec[n_ports++] = optarg; break;
@@ -457,6 +525,7 @@ int main(int argc, char **argv)
         case 'p': print_net = 1; break;
         case 'L': led_prefix = optarg; break;
         case 'N': fw_tool = optarg; break;      /* the flash tool behind the Firmware page */
+        case 'G': dn_prog = optarg; break;      /* run instead of wget for the Dreamcast Now report: PROG URL BODY */
         case 'D': dc_cmd = optarg; break;       /* the command that fetches the console address list; "" = none */
         case 'A': arch_path = optarg; break;  /* the archive gateway program; "" = do not start one */
         case 'R': rx_formats = optarg; if (strlen(optarg) > PORTS || strspn(optarg, "lc") != strlen(optarg)) usage(); break;
@@ -597,7 +666,7 @@ int main(int argc, char **argv)
             }
             arch_clock = now_ms;
             if (now_ms % 2000 == 0) arch_poll(now_ms);
-            if (now_ms % 1000 == 0) dc_poll(now_ms);
+            if (now_ms % 1000 == 0) { dc_poll(now_ms); dn_poll(now_ms); }
             if (fw_pid > 0 && now_ms % 1000 == 0 && waitpid(fw_pid, NULL, WNOHANG) == fw_pid) fw_pid = 0;
             /* the Restart button, once its answer has gone out */
             if (H.restart_asked && httpd_active(&H) == 0) {

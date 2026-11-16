@@ -13,6 +13,7 @@ enum {
     F_NUMBER, F_TONES, F_RINGS, F_BUSY, F_DROP, F_SESSION, F_IDLE, F_AUTH,
     F_MODS, F_V90, F_V34, F_V32BIS, F_V22BIS, F_V22, F_V21, F_DOWN, F_UP, F_ADMINPW, F_ADMINCLR,
     F_LAN, F_ADDRESS, F_NETMASK, F_GATEWAY, F_DNS1, F_DNS2, F_PORT, F_SERVICE, F_V92, F_COMPRESSION,
+    F_DCNOW, F_DCLAN, F_DCUPNP,
     F_COUNT,
     F_USER = 100, F_PASS = 200      /* plus the row */
 };
@@ -28,6 +29,7 @@ static const struct { const char *name; const char *sec; } fields[F_COUNT] = {
     { "lan", "network" }, { "address", "network" }, { "netmask", "network" },
     { "gateway", "network" }, { "dns1", "network" }, { "dns2", "network" },
     { "port", "line" }, { "service", "line" }, { "v92", "modem" }, { "compression", "ppp" },
+    { "dreamcast_now", "line" }, { "dreamcast_lan", "line" }, { "dreamcast_upnp", "line" },
 };
 
 static const char *const n_tones[] = { "us", "eu" };
@@ -39,6 +41,9 @@ static const char *const t_lan[]   = { "Static address", "DHCP" };
 static const char *const n_service[] = { "internet", "archive", "dreamcast" };
 static const char *const t_service[] = { "Internet: as it is", "Archive: the old web (Protoweb)", "Dreamcast: for the game console" };
 static const char *const n_v92[]   = { "off", "on" };
+static const char *const t_dcnow[]  = { "Off", "On: tell the Dreamcast Now site that a console is online and which game server it asked for" };
+static const char *const t_dclan[]  = { "Off: the console is behind this box's address", "On: the console gets an address of its own on the network" };
+static const char *const t_dcupnp[] = { "Off", "On: ask the router to send the game ports here (UPnP)" };
 static const char *const t_v92[]   = { "Off: V.90 upstream (V.34, up to 33600 bit/s)",
                                        "On: offer PCM upstream to V.92 callers (experimental)" };
 static const char *const n_comp[]  = { "off", "on" };
@@ -216,6 +221,9 @@ int settings_render_page(const cfg_t *c, int page, int saved, const char *error,
     sb_puts(&b, " value=\""); sb_html(&b, c->line_number, sizeof c->line_number, 0); sb_puts(&b, "\">");
     row_close(&b, "digits, * and #; empty: every number connects");
     in_select(&b, "Service", F_SERVICE, c->service, n_service, t_service, CFG_SERVICE_COUNT);
+    in_select(&b, "Dreamcast Now", F_DCNOW, c->dc_now, n_v92, t_dcnow, 2);
+    in_select(&b, "Console on the network", F_DCLAN, c->dc_lan, n_v92, t_dclan, 2);
+    in_select(&b, "Game ports from the router", F_DCUPNP, c->dc_upnp, n_v92, t_dcupnp, 2);
     in_select(&b, "Tones", F_TONES, c->line_tones, n_tones, t_tones, 2);
     in_int(&b, "Rings before answer", F_RINGS, c->rings, "1 to 10");
     in_int(&b, "Busy signal", F_BUSY, c->busy_chance, "percent of calls, 0 to 100");
@@ -229,7 +237,7 @@ int settings_render_page(const cfg_t *c, int page, int saved, const char *error,
                 " secure sites do not work. Dreamcast: set the console to dial this port's number"
                 " with a user name and password of the PPP page; PPP compression and V.92 are off"
                 " for this port and the console is given the name servers of the game revival"
-                " projects, whatever the other pages say. This one has not been tried with a real"
+                " projects, whatever the other pages say. The three switches under Service only matter for a Dreamcast port: Dreamcast Now sends a report to dcnow-2016.appspot.com every 15 seconds during a call (a hash of this box's hardware address and a hash of the game server's name), which is how the site shows who is online; it is off unless you turn it on. This one has not been tried with a real"
                 " console. A change takes effect when the lines are free.</p></section>\n");
 
     }
@@ -514,6 +522,9 @@ static void set_field(form_t *f, int fi, const char *v, size_t len)
     case F_LAN:     set_enum(f, fi, &c->lan_dhcp, v, n_lan, 2, "dhcp, static"); break;
     case F_SERVICE: set_enum(f, fi, &c->service, v, n_service, CFG_SERVICE_COUNT, "internet, archive, dreamcast"); break;
     case F_V92:     set_enum(f, fi, &c->v92, v, n_v92, 2, "on, off"); break;
+    case F_DCNOW:   set_enum(f, fi, &c->dc_now, v, n_v92, 2, "on, off"); break;
+    case F_DCLAN:   set_enum(f, fi, &c->dc_lan, v, n_v92, 2, "on, off"); break;
+    case F_DCUPNP:  set_enum(f, fi, &c->dc_upnp, v, n_v92, 2, "on, off"); break;
     case F_COMPRESSION: set_enum(f, fi, &c->compression, v, n_comp, 2, "on, off"); break;
     case F_ADDRESS: set_addr(f, fi, &c->lan_addr, v, 0); break;
     case F_NETMASK: set_addr(f, fi, &c->lan_netmask, v, 0); break;

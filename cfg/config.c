@@ -17,13 +17,13 @@ enum {
     K_LAN, K_ADDRESS, K_NETMASK, K_GATEWAY, K_PPP_LOCAL, K_PPP_PEER, K_DNS1, K_DNS2, K_NAT,
     K_AUTH, K_MRU, K_ECHO, K_USER,
     K_MODS, K_MAXDOWN, K_MAXUP, K_TXLEVEL, K_V42, K_V42BIS, K_V92, K_RINGS, K_LAW,
-    K_NUMBER, K_TONES, K_BUSY, K_DROP, K_SESSION, K_IDLE, K_SERVICE,
+    K_NUMBER, K_TONES, K_BUSY, K_DROP, K_SESSION, K_IDLE, K_SERVICE, K_DCNOW, K_DCLAN, K_DCUPNP,
     K_LISTEN, K_PORT, K_ADMINPW,
     K_LEVEL,
     K_PPP_PEER2, K_ARCHIVE, K_COMPRESSION,
     /* port 2: the keys of [modem] and [line] again, in the same order */
     K2_MODS, K2_MAXDOWN, K2_MAXUP, K2_TXLEVEL, K2_V42, K2_V42BIS, K2_V92, K2_RINGS, K2_LAW,
-    K2_NUMBER, K2_TONES, K2_BUSY, K2_DROP, K2_SESSION, K2_IDLE, K2_SERVICE,
+    K2_NUMBER, K2_TONES, K2_BUSY, K2_DROP, K2_SESSION, K2_IDLE, K2_SERVICE, K2_DCNOW, K2_DCLAN, K2_DCUPNP,
     K_COUNT
 };
 #define K2_OFF (K2_MODS - K_MODS)
@@ -37,7 +37,7 @@ static const struct { int sec; const char *name; } keydefs[K_COUNT] = {
     { S_MODEM, "rings" }, { S_MODEM, "law" },
     { S_LINE, "number" }, { S_LINE, "tones" }, { S_LINE, "busy_chance" },
     { S_LINE, "drop_mean" }, { S_LINE, "session_limit" }, { S_LINE, "idle_timeout" },
-    { S_LINE, "service" },
+    { S_LINE, "service" }, { S_LINE, "dreamcast_now" }, { S_LINE, "dreamcast_lan" }, { S_LINE, "dreamcast_upnp" },
     { S_STATUS, "listen" }, { S_STATUS, "port" }, { S_STATUS, "admin_password" },
     { S_LOG, "level" },
     { S_NETWORK, "ppp_peer2" }, { S_NETWORK, "archive" }, { S_PPP, "compression" },
@@ -46,7 +46,7 @@ static const struct { int sec; const char *name; } keydefs[K_COUNT] = {
     { S_MODEM2, "rings" }, { S_MODEM2, "law" },
     { S_LINE2, "number" }, { S_LINE2, "tones" }, { S_LINE2, "busy_chance" },
     { S_LINE2, "drop_mean" }, { S_LINE2, "session_limit" }, { S_LINE2, "idle_timeout" },
-    { S_LINE2, "service" },
+    { S_LINE2, "service" }, { S_LINE2, "dreamcast_now" }, { S_LINE2, "dreamcast_lan" }, { S_LINE2, "dreamcast_upnp" },
 };
 
 /* value names; the index is the stored value */
@@ -80,7 +80,7 @@ static void port_take(cfg_port_t *p, const cfg_t *c)
     memcpy(p->line_number, c->line_number, sizeof p->line_number);
     p->line_tones = c->line_tones; p->busy_chance = c->busy_chance; p->drop_mean_min = c->drop_mean_min;
     p->session_limit_min = c->session_limit_min; p->idle_timeout_min = c->idle_timeout_min;
-    p->service = c->service;
+    p->service = c->service; p->dc_now = c->dc_now; p->dc_lan = c->dc_lan; p->dc_upnp = c->dc_upnp;
 }
 
 static void port_give(const cfg_port_t *p, cfg_t *c)
@@ -92,7 +92,7 @@ static void port_give(const cfg_port_t *p, cfg_t *c)
     memcpy(c->line_number, p->line_number, sizeof c->line_number);
     c->line_tones = p->line_tones; c->busy_chance = p->busy_chance; c->drop_mean_min = p->drop_mean_min;
     c->session_limit_min = p->session_limit_min; c->idle_timeout_min = p->idle_timeout_min;
-    c->service = p->service;
+    c->service = p->service; c->dc_now = p->dc_now; c->dc_lan = p->dc_lan; c->dc_upnp = p->dc_upnp;
 }
 
 void cfg_for_port(const cfg_t *c, int port, cfg_t *out)
@@ -232,6 +232,9 @@ static int validate_port(const cfg_t *c, int o, char *msg, int *k1)
     *k1 = K_SESSION + o;   if (rng(msg, K_SESSION + o, c->session_limit_min, 0, 10080)) return -1;
     *k1 = K_IDLE + o;      if (rng(msg, K_IDLE + o, c->idle_timeout_min, 0, 10080)) return -1;
     *k1 = K_SERVICE + o;   if (en(msg, K_SERVICE + o, c->service, CFG_SERVICE_COUNT)) return -1;
+    *k1 = K_DCNOW + o;     if (en(msg, K_DCNOW + o, c->dc_now, 2)) return -1;
+    *k1 = K_DCLAN + o;     if (en(msg, K_DCLAN + o, c->dc_lan, 2)) return -1;
+    *k1 = K_DCUPNP + o;    if (en(msg, K_DCUPNP + o, c->dc_upnp, 2)) return -1;
     return 0;
 }
 
@@ -656,6 +659,9 @@ static int set_value(cfg_t *c, pctx_t *px, int k, int mk, int line, const char *
     case K_SESSION:   return set_int(&c->session_limit_min, mk, v, msg);
     case K_IDLE:      return set_int(&c->idle_timeout_min, mk, v, msg);
     case K_SERVICE:   return set_enum(&c->service, mk, v, n_service, CFG_SERVICE_COUNT, l_service, msg);
+    case K_DCNOW:     return set_enum(&c->dc_now, mk, v, n_onoff, 2, l_onoff, msg);
+    case K_DCLAN:     return set_enum(&c->dc_lan, mk, v, n_onoff, 2, l_onoff, msg);
+    case K_DCUPNP:    return set_enum(&c->dc_upnp, mk, v, n_onoff, 2, l_onoff, msg);
     case K_LISTEN:    return set_enum(&c->status_listen, mk, v, n_listen, 2, l_listen, msg);
     case K_PORT:      return set_int(&c->status_port, mk, v, msg);
     case K_ADMINPW:   return set_password(c, v, msg);
@@ -907,6 +913,9 @@ static void w_port(sbuf_t *s, const cfg_t *c, int o)
     w_int(s, K_SESSION + o, c->session_limit_min);
     w_int(s, K_IDLE + o, c->idle_timeout_min);
     w_str(s, K_SERVICE + o, nm(n_service, CFG_SERVICE_COUNT, c->service));
+    w_str(s, K_DCNOW + o, nm(n_onoff, 2, c->dc_now));
+    w_str(s, K_DCLAN + o, nm(n_onoff, 2, c->dc_lan));
+    w_str(s, K_DCUPNP + o, nm(n_onoff, 2, c->dc_upnp));
 
 }
 

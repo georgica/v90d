@@ -165,6 +165,8 @@ typedef struct {
     char       line_number[CFG_NUMBER_MAX + 1];
     int        line_tones, busy_chance, drop_mean_min, session_limit_min, idle_timeout_min;
     int        service;
+    int        dc_now, dc_lan, dc_upnp;    /* 0/1, for the dreamcast service: report to Dreamcast Now; the console
+                                            * as a host on the LAN; ask the router for the game ports (UPnP) */
 } cfg_port_t;
 
 #define CFG_PORTS 2
@@ -205,6 +207,8 @@ typedef struct {
     int        session_limit_min;   /* minutes, 0 = none */
     int        idle_timeout_min;    /* minutes, 0 = none */
     int        service;         /* CFG_SERVICE_* */
+    int        dc_now, dc_lan, dc_upnp;    /* 0/1, for the dreamcast service: report to Dreamcast Now; the console
+                                            * as a host on the LAN; ask the router for the game ports (UPnP) */
     /* [status] */
     int        status_listen;   /* CFG_LISTEN_* */
     int        status_port;

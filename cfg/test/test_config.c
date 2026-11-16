@@ -683,7 +683,7 @@ static void test_write(void)
                     "max_upstream = 33600\ntx_level = -12\nv42 = on\nv42bis = on\nv92 = off\nrings = 1\n") != NULL);
     CHECK(strstr(a, "\n[log]\nlevel = info\n") != NULL);
     CHECK(strstr(a, "\n[line]\nnumber = any\ntones = us\nbusy_chance = 0\ndrop_mean = 0\n"
-                    "session_limit = 0\nidle_timeout = 0\nservice = internet\n\n[modem2]\n") != NULL);
+                    "session_limit = 0\nidle_timeout = 0\nservice = internet\ndreamcast_now = off\ndreamcast_lan = off\ndreamcast_upnp = off\n\n[modem2]\n") != NULL);
     CHECK(strstr(a, "port = 80\nadmin_password = \"\"\n") != NULL);
     CHECK_EQ_I(parse(&d, a), CFG_OK);
     CHECK(memcmp(&c, &d, sizeof c) == 0);
@@ -921,6 +921,32 @@ static void test_save(void)
 }
 
 /* [line] service: what kind of caller the port expects */
+/* What a game console's port can be asked for besides the service itself:
+ * three switches per port, all off unless asked. */
+static void test_console_switches(void)
+{
+    static char text[CFG_TEXT_MAX];
+    cfg_t c, d, v;
+
+    cfg_default(&c);
+    CHECK_EQ_I(c.dc_now, 0); CHECK_EQ_I(c.dc_lan, 0); CHECK_EQ_I(c.dc_upnp, 0);
+    CHECK_EQ_I(c.port2.dc_now, 0); CHECK_EQ_I(c.port2.dc_lan, 0); CHECK_EQ_I(c.port2.dc_upnp, 0);
+    CHECK_EQ_I(parse(&c, "[line]\nservice = dreamcast\ndreamcast_now = on\n[line2]\ndreamcast_lan = on\ndreamcast_upnp = on\n"), CFG_OK);
+    CHECK_EQ_I(c.dc_now, 1); CHECK_EQ_I(c.dc_lan, 0); CHECK_EQ_I(c.dc_upnp, 0);
+    CHECK_EQ_I(c.port2.dc_now, 0); CHECK_EQ_I(c.port2.dc_lan, 1); CHECK_EQ_I(c.port2.dc_upnp, 1);
+    cfg_for_port(&c, 1, &v);
+    CHECK_EQ_I(v.dc_now, 0); CHECK_EQ_I(v.dc_lan, 1); CHECK_EQ_I(v.dc_upnp, 1);
+    CHECK(cfg_write(&c, 1, text, sizeof text) > 0);
+    CHECK(strstr(text, "\nservice = dreamcast\ndreamcast_now = on\ndreamcast_lan = off\ndreamcast_upnp = off\n") != NULL);
+    CHECK(strstr(text, "\nservice = internet\ndreamcast_now = off\ndreamcast_lan = on\ndreamcast_upnp = on\n") != NULL);
+    CHECK_EQ_I(parse(&d, text), CFG_OK);
+    CHECK_EQ_I(d.dc_now, 1); CHECK_EQ_I(d.port2.dc_lan, 1); CHECK_EQ_I(d.port2.dc_upnp, 1); CHECK_EQ_I(d.port2.dc_now, 0);
+    CHECK_EQ_I(parse(&c, "[line]\ndreamcast_now = maybe\n"), CFG_ERR);
+    CHECK_EQ_S(err, "t.conf:2: [line] dreamcast_now: 'maybe' is not one of: on, off");
+    cfg_default(&c); c.port2.dc_upnp = 2;
+    CHECK_EQ_I(cfg_validate(&c, err, sizeof err), CFG_ERR);
+}
+
 static void test_service(void)
 {
     static char text[CFG_TEXT_MAX];
@@ -972,6 +998,7 @@ int main(void)
     test_more_mods();
     test_port2();
     test_service();
+    test_console_switches();
     test_full();
     test_errors();
     test_limits();

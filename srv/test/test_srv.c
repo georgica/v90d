@@ -10,6 +10,7 @@
 #include "line.h"
 #include "console.h"
 #include "dclist.h"
+#include "dcnow.h"
 #include "caller.h"
 #include "channel.h"
 #include "g711.h"
@@ -531,6 +532,49 @@ static void test_dclist(void)
     CHECK_EQ_I(wide, 2);                                /* Starlancer: TCP and UDP */
 }
 
+/* "Dreamcast Now" (refs/dreampi-facts.md): the hash, and what is reported
+ * when. */
+static void test_dcnow(void)
+{
+    static const uint8_t mac[6] = { 0xc0, 0x74, 0xad, 0x01, 0x02, 0x03 };
+    static char big[1001]; char hex[65], body[96]; dcnow_t d;
+
+    sha256_hex("", 0, hex);
+    CHECK(strcmp(hex, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855") == 0);
+    sha256_hex("abc", 3, hex);
+    CHECK(strcmp(hex, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad") == 0);
+    sha256_hex("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq", 56, hex);
+    CHECK(strcmp(hex, "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1") == 0);
+    memset(big, 'a', 1000);
+    sha256_hex(big, 1000, hex);
+    CHECK(strcmp(hex, "41edece42d63e8d9bf515a9ba6932e1c20cbc9f5a5d134645adb5db1b9737ea3") == 0);
+
+    /* the box is named by the hash of its hardware address as text */
+    dcnow_start(&d, mac);
+    CHECK(strcmp(dcnow_path(&d), "/api/update/5735e6ba4783c425216f577172aea3f8339c2d8263b7340fa8a7b2e57cfcaed0/") == 0);
+    /* nothing asked yet: an empty report */
+    CHECK_EQ_I(dcnow_body(&d, "", body, sizeof body), 0); CHECK(body[0] == 0);
+    /* a name: its hash, on every report while it is the last one */
+    CHECK_EQ_I(dcnow_body(&d, "master.quake3arena.com", body, sizeof body), 10 + 64);
+    CHECK(strcmp(body, "dns_query=dc27bdcf2e3a8fe15559cb6312c662ff9a2ea25fbb192bbd171698735a6531d9") == 0);
+    CHECK_EQ_I(dcnow_body(&d, "master.quake3arena.com", body, sizeof body), 74);
+    /* the report's own host is never reported: the name before it stays */
+    CHECK_EQ_I(dcnow_body(&d, "dcnow-2016.appspot.com", body, sizeof body), 74);
+    CHECK(strcmp(body, "dns_query=dc27bdcf2e3a8fe15559cb6312c662ff9a2ea25fbb192bbd171698735a6531d9") == 0);
+    /* two kinds of name are reported once a call */
+    CHECK_EQ_I(dcnow_body(&d, "ingame.gameloft.com", body, sizeof body), 74);
+    CHECK(strcmp(body, "dns_query=a83c1d4658130a1950f3966ce84fc14baae0ddc825ff782f86f9e288b57dc1cd") == 0);
+    CHECK_EQ_I(dcnow_body(&d, "ingame.gameloft.com", body, sizeof body), 0); CHECK(body[0] == 0);
+    CHECK_EQ_I(dcnow_body(&d, "onsen0.overworks.isao.net", body, sizeof body), 74);
+    CHECK(strcmp(body, "dns_query=4a5148cae3c5d40ede6e60286bd964fef2f01b515f6abf75d9d66f4e06ac5ea5") == 0);
+    CHECK_EQ_I(dcnow_body(&d, "onsen0.overworks.isao.net", body, sizeof body), 0);
+    /* a new call starts over */
+    dcnow_start(&d, mac);
+    CHECK_EQ_I(dcnow_body(&d, "ingame.gameloft.com", body, sizeof body), 74);
+    /* no room: nothing, and no overrun */
+    CHECK_EQ_I(dcnow_body(&d, "master.quake3arena.com", body, 20), 0);
+}
+
 /* Two more things a console's packets get (refs/dreampi-facts.md, second
  * pass): an opening packet that also carries PSH loses the PSH, and the
  * names it asks the name server for are remembered (for "Dreamcast Now"). */
@@ -1006,6 +1050,7 @@ int main(void)
     test_console_packets();
     test_console_more();
     test_dclist();
+    test_dcnow();
     test_dreamcast_call();
     test_v34_call();
     test_v32bis_call();

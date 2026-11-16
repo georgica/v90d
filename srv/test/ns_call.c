@@ -504,11 +504,12 @@ int main(int argc, char **argv)
      * hook; the call comes in on port 2, which has its own number, its own
      * network device and its own address for the caller. */
     {
-        int sv2[2]; static char ledp[300], led[2][340], dclog[300];
+        int sv2[2]; static char ledp[300], led[2][340], dclog[300], dnsh[300], dnout[300];
         cfg_default(&c);
         strcpy(c.line_number, "5551234"); c.rings = 1;
         strcpy(c.port2.line_number, "777"); c.port2.rings = 1;
         c.port2.service = CFG_SERVICE_DREAMCAST;   /* port 2 is a game console's */
+        c.port2.dc_now = 1;                         /* and reports to Dreamcast Now */
         c.auth = CFG_AUTH_CHAP; c.n_users = 1; strcpy(c.users[0].name, "alice"); strcpy(c.users[0].secret, "wonderland");
         c.status_port = 8080;
         CHECK_EQ_I(cfg_save(&c, conf, err, sizeof err), CFG_OK);
@@ -534,10 +535,18 @@ int main(int argc, char **argv)
                 lfd = open(dclog, O_WRONLY | O_CREAT | O_TRUNC, 0644);
                 if (lfd >= 0) { dup2(lfd, 2); close(lfd); }
             }
+            {   /* what would be sent to Dreamcast Now goes to a file instead */
+                FILE *sf;
+                snprintf(dnsh, sizeof dnsh, "%s/ns_dcnow.sh", argv[2]);
+                snprintf(dnout, sizeof dnout, "%s/ns_dcnow.out", argv[2]);
+                unlink(dnout);
+                sf = fopen(dnsh, "w");
+                if (sf) { fprintf(sf, "#!/bin/sh\necho \"$1 [$2]\" >> %s\n", dnout); fclose(sf); chmod(dnsh, 0755); }
+            }
             /* the address list of the console service comes from a command;
              * here one that writes two lines, one of them no rule */
             execl(argv[1], "v90d", "-c", conf, "-l", "fd:3", "-l", "fd:4", "-i", "lo", "-t", "ppp0", "-L", ledp,
-                  "-D", "printf '203.0.113.9 198.51.100.7 9500 udp\\nnonsense\\n' > /tmp/v90d.dclist", (char *)NULL);
+                  "-G", dnsh, "-D", "printf '203.0.113.9 198.51.100.7 9500 udp\\nnonsense\\n'", (char *)NULL);
             _exit(127);
         }
         close(sv[1]); close(sv2[1]);
@@ -583,6 +592,11 @@ int main(int argc, char **argv)
         CHECK(http("GET /status2.json HTTP/1.0\r\n\r\n", resp, sizeof resp) > 0);
         CHECK(strstr(resp, "\"line\":\"connected\"") != NULL && strstr(resp, "\"modulation\":\"v34\"") != NULL);
         CHECK(file_has(led[1], "1")); CHECK(file_has(led[0], "0"));     /* port 2's light is on, port 1's off */
+        /* Dreamcast Now: with the call up, the report went out, to the path
+         * that names this box (the hash of "lo"'s hardware address), with
+         * nothing in it since the caller has asked for no name */
+        snprintf(dnout, sizeof dnout, "%s/ns_dcnow.out", argv[2]);
+        CHECK(file_has(dnout, "https://dcnow-2016.appspot.com/api/update/38fbdde984330e50c02382e647c576b71f41cc5c45b193d4f3177e6ee8f22a78/ []"));
         /* port 2's Line page during its call */
         body = "port=2&number=778";
         snprintf(post, sizeof post, "POST /line2 HTTP/1.0\r\nHost: 127.0.0.1:8080\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: %d\r\n\r\n%s",
