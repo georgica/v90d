@@ -74,11 +74,13 @@ so an untried revision should end up where it started; that path has been
 tested on models only. The HT801 and other HT802 revisions are expected to
 work but are not yet tested; see [BOARDS.md](BOARDS.md).
 
-Tested with a Conexant USB modem on every modulation in the list, from
-Linux pppd and from Dial-Up Networking in Windows 98 SE and Windows XP
-(V.90 with MPPC compression in both). Not tested yet: other modem brands,
-two calls at the same time, a real Dreamcast or Saturn, Windows 95 and
-Windows Me.
+Tested with a Conexant USB modem on every modulation in the list except
+V.92, from Linux pppd and from Dial-Up Networking in Windows 98 SE and
+Windows XP (V.90 with MPPC compression in both). V.92 is written and passes
+in simulation, but it is off by default (`v92 = on` to offer it) and has
+not yet been proven on a real V.92 call. Not tested yet: V.92 on hardware,
+other modem brands, two calls at the same time, a real Dreamcast or Saturn,
+Windows 95 and Windows Me.
 
 ## Installing
 
