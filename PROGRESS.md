@@ -1869,3 +1869,24 @@ Not done: the power pulled in the middle of an upgrade on purpose (needs a
 hand at the box; covered on the models for every step), the loader started
 from set B (this unit installs into A), a second unit.
 
+
+## V.92 on real hardware (2026-11-15, late): connects on the Conexant
+
+Our own notes above said V.92 PCM upstream was simulation only and no real
+modem had been called with it. Done now, on the bench unit running the
+0.2.3 release, port 2 set `v92 = on`, `max_upstream = 48000`:
+
+- Conexant CX93001 dialled with `AT+PIG=0` (PCM upstream enabled). The box
+  answered and the call came up as **V.92** (status page `modulation` =
+  v92), LAPM error control, PPP/IPCP up (caller got 10.64.64.3).
+- Two calls: **52000 down / 32000 up** and **50666 / 30666**. The upstream
+  settled around 31-32 kbit/s on this line, not the 48k ceiling. Downstream
+  is the usual V.90-range PCM rate.
+- Data path good: ping to the box's PPP end 3/3, ~121 ms.
+- `v92` was put back to off (the default) and `max_upstream` to 33600 after
+  the test.
+
+So V.92 is proven to connect and carry PPP on real hardware; the headline
+PCM-upstream rate on this line/modem was ~32k, not 48k. Still open: a
+second modem brand, and whether another line/modem reaches a higher
+upstream.
