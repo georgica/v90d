@@ -153,6 +153,39 @@ static void sat_call(const char *num)
     CHECK(C.connected);
     run_ms(1500);
 }
+/* ---- a terminal program that calls a bulletin board (service = bbs) ---- */
+static char bt_q[256]; static size_t bt_at, bt_n;
+static uint8_t bt_got[8192]; static size_t bt_got_n;
+static void bt_rx(void *ctx, const uint8_t *b, size_t n) { (void)ctx; if (bt_got_n + n <= sizeof bt_got) { memcpy(bt_got + bt_got_n, b, n); bt_got_n += n; } }
+static size_t bt_tx(void *ctx, uint8_t *b, size_t max)
+{
+    size_t n = 0; (void)ctx;
+    while (n < max && bt_at < bt_n) b[n++] = (uint8_t)bt_q[bt_at++];
+    return n;
+}
+static void bt_type(const char *s) { bt_n = strlen(s); memcpy(bt_q, s, bt_n); bt_at = 0; }
+static int bt_saw(const char *needle) { return memmem(bt_got, bt_got_n, needle, strlen(needle)) != NULL; }
+static int bt_wait(const char *needle, int ms)
+{
+    int t;
+    for (t = 0; t < ms && !bt_saw(needle) && !dead; t += 20) run_ms(20);
+    return bt_saw(needle);
+}
+/* dial, and if the number answers bring the modem up; 1 = connected */
+static int bt_call(const char *num)
+{
+    caller_cfg_t cc; long i;
+    hook = 1; run_ms(500);
+    dial(num);
+    run_ms(3000 + 2000 + 300);
+    caller_cfg_default(&cc);
+    cc.raw_rx = bt_rx; cc.raw_tx = bt_tx;
+    caller_init(&C, &cc);
+    modem_on = 1; bt_got_n = bt_at = bt_n = 0;
+    for (i = 0; i < 20L * FS && !C.connected && !dead; i++) step(0);
+    return C.connected;
+}
+
 static int udp_at(uint32_t addr, int port)
 {
     int fd = socket(AF_INET, SOCK_DGRAM, 0), one = 1; struct sockaddr_in sa;
@@ -1147,6 +1180,163 @@ int main(int argc, char **argv)
         CHECK(file_has(lanlog, "the match server gave an address that cannot be a player"));
         CHECK(!file_has(lanlog, "the other player is"));
         if (stunpid > 0) { kill(stunpid, SIGKILL); waitpid(stunpid, NULL, 0); }
+        quiet_exit = 1;
+        kill(pid, SIGTERM);
+        for (i = 0; i < 400 && !dead; i++) step(0);
+        close(line_fd);
+        CHECK_EQ_I(waitpid(pid, &st, 0), pid);
+        CHECK(WIFEXITED(st) && WEXITSTATUS(st) == 0);
+    }
+    /* 13. a terminal program and a bulletin board: 1 800 BBS DIAL and the
+     * boards' own numbers (227 and seven digits), on a
+     * port whose service is the plain internet. The list in the image
+     * serves until the first call asks for a fresh one; the caller picks a
+     * board at the prompt and is joined to it, with the telnet words kept
+     * from its screen. The board is a script (-T). The port's own number is
+     * the dial-up connection as before. */
+    {
+        static char lanlog[300], board[300], builtin[300], fetched[300], live[300], fcmd[1200], resp[16384]; FILE *f;
+        snprintf(board, sizeof board, "%s/ns_bbs.sh", argv[2]);
+        snprintf(builtin, sizeof builtin, "%s/ns_bbs.builtin", argv[2]);
+        snprintf(fetched, sizeof fetched, "%s/ns_bbs.remote", argv[2]);
+        snprintf(live, sizeof live, "%s/ns_bbs.live", argv[2]);
+        /* the first try fails, as on a box that has just started and has no clock yet */
+        snprintf(fcmd, sizeof fcmd, "if test -f %s.tried; then cat %s; else touch %s.tried; exit 1; fi", fetched, fetched, fetched);
+        f = fopen(board, "w");
+        if (f) {
+            /* our DO ECHO comes first, then what was typed */
+            fprintf(f, "#!/bin/sh\n[ \"$1\" = dead.example ] && exit 1\n"
+                       "printf '\\377\\373\\001Welcome to %%s port %%s\\r\\n' \"$1\" \"$2\"\n"
+                       "x=$(dd bs=1 count=5 2>/dev/null | tail -c 2)\nprintf 'you said %%s\\r\\n' \"$x\"\n");
+            fclose(f); chmod(board, 0755);
+        }
+        f = fopen(builtin, "w");
+        if (f) {
+            fprintf(f, "# the list in the image\nv90d-bbs 2\n"
+                       "bbs telehack 2278353422 tele.example Telehack\nbbs 20forbeers 2272036723 b.example:1337 20 For Beers <BBS>\n"
+                       "bbs dead 2273323000 dead.example Dead Board\n");
+            fclose(f);
+        }
+        f = fopen(fetched, "w");
+        if (f) {
+            fprintf(f, "v90d-bbs 2\nbbs telehack 2278353422 tele.example Telehack\nbbs 20forbeers 2272036723 b.example:1337 20 For Beers <BBS>\n"
+                       "bbs newboard 2276392627 n.example New Board\n");
+            fclose(f);
+        }
+        unlink(live);
+        { char tried[320]; snprintf(tried, sizeof tried, "%s.tried", fetched); unlink(tried); }
+        cfg_default(&c);
+        strcpy(c.line_number, "5551234"); c.rings = 1; c.status_port = 8080;
+        c.auth = CFG_AUTH_CHAP; c.n_users = 1; strcpy(c.users[0].name, "alice"); strcpy(c.users[0].secret, "wonderland");
+        CHECK_EQ_I(cfg_save(&c, conf, err, sizeof err), CFG_OK);
+        CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
+        snprintf(lanlog, sizeof lanlog, "%s/ns_bbs.log", argv[2]);
+        pid = fork();
+        if (pid == 0) {
+            int a = fcntl(sv[1], F_DUPFD, 20), lfd = open(lanlog, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            dup2(a, 3); if (lfd >= 0) dup2(lfd, 2);
+            for (i = 4; i < 64; i++) close(i);
+            execl(argv[1], "v90d", "-c", conf, "-l", "fd:3", "-i", "lo", "-t", "ppp0", "-A", "",
+                  "-B", builtin, "-b", fcmd, "-J", live, "-T", board, (char *)NULL);
+            _exit(127);
+        }
+        close(sv[1]);
+        line_fd = sv[0]; idle_fd = -1;
+        dead = quiet_exit = 0; hook = modem_on = 0; blk_n = 0; c_tx = 0; c_rx_pw = 0;
+        channel_init(&CH, &cc);
+        memset(prev_tx, 0xFF, sizeof prev_tx);
+        run_ms(3000);
+        /* (a) nobody has asked for the boards: nothing is fetched */
+        CHECK(!file_has(lanlog, "bbs: fetched list"));
+        CHECK(access(live, F_OK) != 0);
+        /* (b) the number: the prompt, a search, a name nobody has, an
+         * address where nothing answers, then a board by its name as a
+         * person would type it */
+        CHECK_EQ_I(bt_call("18002273425"), 1);
+        CHECK(bt_wait("bulletin board gateway", 4000));
+        CHECK(bt_wait("BBS: ", 2000));
+        bt_type("?beer\r");
+        CHECK(bt_wait("227 203 6723  20forbeers", 3000)); CHECK(bt_wait("20 For Beers <BBS>", 2000));
+        CHECK(!bt_saw("Telehack"));
+        bt_type("nosuch\r");
+        CHECK(bt_wait("No board of that name", 3000));
+        /* an address is not a board: only what the list has is called */
+        bt_type("tele.example:23\r");
+        CHECK(bt_wait("No board of that name", 3000));
+        bt_type("227 111 1111\r");
+        CHECK(bt_wait("No board has that number", 3000));
+        bt_type("dead\r");
+        CHECK(bt_wait("Calling Dead Board ...", 3000));
+        CHECK(bt_wait("No answer.", 3000));
+        bt_got_n = 0;
+        bt_type("20 for beerx\bs\r");
+        CHECK(bt_wait("Calling 20 For Beers <BBS> ...", 3000));
+        CHECK(bt_wait("Welcome to b.example port 1337", 3000));
+        CHECK(!bt_saw("b.example:"));                            /* where a board is, is not the caller's to see */
+        CHECK(memchr(bt_got, 0xFF, bt_got_n) == NULL);          /* the board's telnet words are not the caller's to see */
+        bt_type("hi");
+        CHECK(bt_wait("you said hi", 3000));
+        /* the board is done: the line is dropped, as a board's own modem would */
+        for (i = 0; i < 60 && !file_has(lanlog, "the board hung up"); i++) { run_ms(100); usleep(20000); }
+        CHECK(file_has(lanlog, "bbs: the board hung up"));
+        {
+            int gone = 0;
+            for (i = 0; i < 100 && !gone; i++) {
+                run_ms(100);
+                gone = http("GET /status.json HTTP/1.0\r\n\r\n", resp, sizeof resp) > 0 && !strstr(resp, "\"line\":\"connected\"");
+            }
+            CHECK(gone);                                        /* while the caller is still off hook */
+        }
+        hang_up();
+        /* (c) that call asked for the list: the fetched one is in force, on
+         * the page and at the prompt; the short form of the number */
+        CHECK(file_has(lanlog, "bbs: the list could not be fetched; trying again in 1 minute"));
+        for (i = 0; i < 400 && !file_has(lanlog, "bbs: fetched list"); i++) { run_ms(200); usleep(5000); }
+        CHECK(file_has(lanlog, "bbs: fetched list with 3 boards"));
+        CHECK(file_has(live, "newboard"));
+        CHECK(http("GET /bbs HTTP/1.0\r\n\r\n", resp, sizeof resp) > 0);
+        CHECK(strstr(resp, "<td><code>newboard</code></td><td>227 639 2627</td>") != NULL);
+        CHECK(strstr(resp, "n.example") == NULL);
+        CHECK(strstr(resp, "Boards 1 to 3 of 3") != NULL);
+        /* the page's search, by name or by number; a page past the end */
+        CHECK(http("GET /bbs?q=beer HTTP/1.0\r\n\r\n", resp, sizeof resp) > 0);
+        CHECK(strstr(resp, "<code>20forbeers</code>") != NULL && strstr(resp, "<code>newboard</code>") == NULL);
+        CHECK(strstr(resp, "Boards 1 to 1 of 1") != NULL);
+        CHECK(http("GET /bbs?q=227639 HTTP/1.0\r\n\r\n", resp, sizeof resp) > 0);
+        CHECK(strstr(resp, "<code>newboard</code>") != NULL && strstr(resp, "<code>telehack</code>") == NULL);
+        CHECK(http("GET /bbs?p=2 HTTP/1.0\r\n\r\n", resp, sizeof resp) > 0);
+        CHECK(strstr(resp, "<td><code>") == NULL && strstr(resp, "<td colspan=\"3\">none</td>") != NULL);
+        CHECK(http("GET /bbs HTTP/1.0\r\n\r\n", resp, sizeof resp) > 0);
+        CHECK(strstr(resp, "<td>20 For Beers &lt;BBS&gt;</td>") != NULL);       /* a name is text, not markup */
+        CHECK_EQ_I(bt_call("8002273425"), 1);
+        CHECK(bt_wait("BBS: ", 4000));
+        bt_type("2276392627\r");                                 /* a board's number at the prompt */
+        CHECK(bt_wait("Welcome to n.example port 23", 3000));
+        hang_up();
+        /* (c2) a board's own number: no prompt, straight to the board; one
+         * that no board has ends at the prompt */
+        bt_got_n = 0;
+        CHECK_EQ_I(bt_call("2278353422"), 1);
+        CHECK(bt_wait("Calling Telehack ...", 5000));
+        CHECK(bt_wait("Welcome to tele.example port 23", 3000));
+        CHECK(!bt_saw("BBS: "));
+        hang_up();
+        CHECK_EQ_I(bt_call("12272036723"), 1);
+        CHECK(bt_wait("Welcome to b.example port 1337", 5000));
+        hang_up();
+        CHECK_EQ_I(bt_call("2271111111"), 1);
+        CHECK(bt_wait("No board has that number", 5000));
+        CHECK(bt_wait("BBS: ", 2000));
+        hang_up();
+        /* (d) the port's own number is PPP as ever; a number of nobody is wrong */
+        hook = 1; run_ms(500);
+        dial("5551234");
+        run_ms(2000 + 300);
+        start_modem(0);
+        CHECK(wait_ip(60000));
+        hang_up();
+        CHECK_EQ_I(bt_call("8002273426"), 0);
+        hang_up();
         quiet_exit = 1;
         kill(pid, SIGTERM);
         for (i = 0; i < 400 && !dead; i++) step(0);

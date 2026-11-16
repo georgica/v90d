@@ -21,9 +21,12 @@
 #include "dce.h"
 #include "console.h"
 #include "saturn.h"
+#include "bbs.h"
 
 typedef void (*srv_ip_fn)(void *ctx, const uint8_t *pkt, size_t len);
 typedef void (*srv_raw_fn)(void *ctx, const uint8_t *oct, size_t n);
+/* srv_link(): a call to the bulletin board number (bbs.h), beside the SATURN_* kinds */
+#define SRV_LINK_BBS 16
 
 typedef struct {
     cfg_t      cfg;             /* in force for the current / next call */
@@ -94,6 +97,12 @@ int     srv_link(const srv_t *s, uint32_t *addr, int *online);
 const char *srv_link_game(const srv_t *s);
 size_t  srv_send_raw(srv_t *s, const uint8_t *oct, size_t n);
 void    srv_hangup(srv_t *s);
+/* The bulletin board number (bbs.h) answers on a port of any service. That
+ * call carries octets like a saturn call (srv_set_raw, srv_send_raw,
+ * srv_hangup), with error control as [modem] says, and srv_link() reports
+ * SRV_LINK_BBS for it; srv_dialed() is what was dialled in the call in
+ * progress (which of the numbers). */
+const char *srv_dialed(const srv_t *s);
 /* 1 while a caller has IP up (packets can be sent to it) */
 int     srv_ip_up(const srv_t *s);
 

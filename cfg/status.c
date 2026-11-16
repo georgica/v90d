@@ -321,6 +321,102 @@ static void put_call(sbuf_t *b, const st_call_t *c, int port)
     sb_puts(b, "</td></tr>\n");
 }
 
+/* p= and q= of the BBS page's address. q keeps letters (in lower case)
+ * and digits only, 32 of them, so it can go into the page as it is. */
+static void bbs_query(const char *query, size_t n, char q[33], int *page)
+{
+    size_t i = 0, k = 0;
+    q[0] = 0; *page = 1;
+    while (query && i < n) {
+        size_t v = i, e;
+        while (v < n && query[v] != '=' && query[v] != '&') v++;
+        e = v;
+        while (e < n && query[e] != '&') e++;
+        if (v - i == 1 && query[i] == 'p' && v < e) {
+            long p = 0; size_t j;
+            for (j = v + 1; j < e && query[j] >= '0' && query[j] <= '9' && p < 100000; j++) p = p * 10 + (query[j] - '0');
+            *page = j == e && p >= 1 && p < 100000 ? (int)p : 1;
+        } else if (v - i == 1 && query[i] == 'q' && v < e) {
+            size_t j;
+            for (k = 0, j = v + 1; j < e && k < 32; j++) {
+                char ch = query[j];
+                if (ch == '%') { j += 2; continue; }            /* an escaped octet is no letter or digit we keep */
+                if (ch >= 'A' && ch <= 'Z') ch = (char)(ch - 'A' + 'a');
+                if ((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9')) q[k++] = ch;
+            }
+            q[k] = 0;
+        }
+        i = e + 1;
+    }
+}
+static void bbs_link(sbuf_t *b, int page, const char *q, const char *text)
+{
+    sb_puts(b, "<a href=\"/bbs?p="); sb_i32(b, (int32_t)page);
+    if (q[0]) { sb_puts(b, "&amp;q="); sb_puts(b, q); }
+    sb_puts(b, "\">"); sb_puts(b, text); sb_puts(b, "</a>");
+}
+
+int status_render_bbs(status_bbs_rows rows, void *ctx, const char *query, size_t qlen, char *buf, size_t cap)
+{
+    sbuf_t b; int shown = 0, left = 0, page; char q[33];
+    static const char tail_room[] = "</table></div>\n<p class=\"sw\"><a href=\"/bbs?p=0000000&amp;q=00000000000000000000000000000000\">Previous</a> "
+                                    "<a href=\"/bbs?p=0000000&amp;q=00000000000000000000000000000000\">Next</a> <a href=\"/bbs\">All boards</a></p>"
+                                    "<p>The boards are those of the <a href=\"https://www.telnetbbsguide.com\">Telnet BBS Guide</a>; the box fetches its list once a day.</p></section>\n" PAGE_END;
+
+    bbs_query(query, qlen, q, &page);
+    sb_init(&b, buf, cap);
+    page_top(&b, "bbs", "", PAGE_TAB_BBS, NULL);
+    sb_puts(&b, "<section><h2>Bulletin boards</h2>\n"
+                "<p>Every board has a telephone number of its own: <b>227</b> (BBS on the keys of a telephone) and seven digits, "
+                "the board's name on the same keys. Dial it from a terminal program on any phone port of the box, whatever the port's service, "
+                "and the box joins the call to that board: <b>227 835 3422</b> is Telehack.</p>\n"
+                "<p><b>1 800 227 3425</b> (1 800 BBS DIAL) is the operator: the box asks <code>BBS:</code>. "
+                "Type a board's name or number as the table gives it, or <code>?</code> and part of a name to search.</p>\n"
+                "<p>Both numbers work with or without a 1 in front. The modem connects without PPP, the box reaches the board over telnet, "
+                "and when the board logs you off the line is dropped.</p>\n"
+                "<p>Set the terminal program to 8 data bits, no parity, 1 stop bit and ANSI. "
+                "The port's own number is still the dial-up connection.</p>\n");
+    if (rows && !b.ovf && b.cap - b.len > sizeof tail_room + 600) {
+        size_t at; int skip = (page - 1) * STATUS_BBS_PAGE;
+        sb_puts(&b, "<form method=\"get\" action=\"/bbs\"><p><input type=\"text\" name=\"q\" size=\"24\" maxlength=\"32\" value=\"");
+        sb_puts(&b, q);
+        sb_puts(&b, "\"> <input type=\"submit\" value=\"Search\"> <small>part of a name or of a number</small></p></form>\n<p>");
+        at = b.len;
+        sb_puts(&b, "Boards 0000000 to 0000000 of 0000000</p>\n"
+                    "<div class=\"x\"><table>\n<tr><th>Board</th><th>Name at the prompt</th><th>Number</th></tr>\n");
+        if (!b.ovf) {
+            size_t rows_at = b.len, n = rows(ctx, q, skip, STATUS_BBS_PAGE, b.p + b.len, b.cap - b.len - sizeof tail_room, &shown, &left);
+            /* the count line in front, now that it is known */
+            sbuf_t c; char line[80]; size_t ln;
+            sb_init(&c, line, sizeof line);
+            if (shown) { sb_puts(&c, "Boards "); sb_i32(&c, (int32_t)(skip + 1)); sb_puts(&c, " to "); sb_i32(&c, (int32_t)(skip + shown));
+                         sb_puts(&c, " of "); sb_i32(&c, (int32_t)(skip + shown + left)); }
+            else sb_puts(&c, q[0] ? "No board answers that search." : "No boards here.");
+            sb_puts(&c, "</p>\n");
+            ln = c.len;
+            {   /* put the real line where the placeholder is and close the gap */
+                static const char rest[] = "<div class=\"x\"><table>\n<tr><th>Board</th><th>Name at the prompt</th><th>Number</th></tr>\n";
+                size_t rl = sizeof rest - 1;
+                memmove(b.p + at + ln + rl, b.p + rows_at, n);
+                memcpy(b.p + at, line, ln); memcpy(b.p + at + ln, rest, rl);
+                b.len = at + ln + rl + n;
+            }
+        }
+        if (!shown) sb_puts(&b, "<tr><td colspan=\"3\">none</td></tr>\n");
+        sb_puts(&b, "</table></div>\n");
+        if (page > 1 || left || q[0]) {
+            sb_puts(&b, "<p class=\"sw\">");
+            if (page > 1) { bbs_link(&b, page - 1, q, "Previous"); sb_puts(&b, " "); }
+            if (left) { bbs_link(&b, page + 1, q, "Next"); sb_puts(&b, " "); }
+            if (q[0]) sb_puts(&b, "<a href=\"/bbs\">All boards</a>");
+            sb_puts(&b, "</p>");
+        }
+        sb_puts(&b, "<p>The boards are those of the <a href=\"https://www.telnetbbsguide.com\">Telnet BBS Guide</a>; the box fetches its list once a day.</p>");
+    } else sb_puts(&b, "<p>The list of boards is not there.</p>");
+    sb_puts(&b, "</section>\n" PAGE_END);
+    return b.ovf ? -1 : (int)b.len;
+}
+
 int status_render_calls(const status_t *const ports[2], char *buf, size_t cap)
 {
     sbuf_t b;

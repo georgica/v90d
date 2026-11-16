@@ -2,6 +2,7 @@
  * (V.22bis or V.90), V.42, PPP client, over the channel simulator. */
 #include <errno.h>
 #include <fcntl.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
@@ -13,6 +14,15 @@
 #include "dcnow.h"
 #include "upnp.h"
 #include "saturn.h"
+#include "bbs.h"
+#include "telnet.h"
+#include "bbsdial.h"
+#include <signal.h>
+#include <poll.h>
+#include <sys/socket.h>
+#include <sys/wait.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #include "stun.h"
 #include "caller.h"
 #include "channel.h"
@@ -1114,6 +1124,312 @@ static void test_saturn_call(void)
 
 /* a V.92 caller: PCM upstream when the configuration allows it (v92 = on,
  * V.42 on, V.90 among the modulations), V.90 otherwise */
+/* ---- service = bbs: the list, the prompt's line, the telnet words ---- */
+static void test_bbs_words(void)
+{
+    bbs_entry e; char k[BBS_LOGIN_MAX + 1], num[BBS_NUMBER_LEN + 1]; bbs_edit_t ed; uint8_t echo[3]; size_t en; int i;
+#define L(s) bbs_line(s, strlen(s), &e)
+    printf("bbs: the list\n");
+    CHECK_EQ_I(L(""), BBS_LINE_NONE); CHECK_EQ_I(L("   # a comment"), BBS_LINE_NONE); CHECK_EQ_I(L("\r"), BBS_LINE_NONE);
+    CHECK_EQ_I(L("v90d-bbs 2"), BBS_LINE_HEAD); CHECK_EQ_I(L("v90d-bbs 2\r"), BBS_LINE_HEAD);
+    CHECK_EQ_I(L("v90d-bbs 1"), BBS_LINE_BAD); CHECK_EQ_I(L("v90d-bbs 3"), BBS_LINE_BAD);
+    CHECK_EQ_I(L("bbs telehack 2278353422 telehack.com:23 Telehack"), BBS_LINE_BBS);
+    CHECK(strcmp(e.login, "telehack") == 0); CHECK(strcmp(e.number, "2278353422") == 0);
+    CHECK(strcmp(e.host, "telehack.com") == 0); CHECK_EQ_I(e.port, 23); CHECK(strcmp(e.name, "Telehack") == 0);
+    CHECK_EQ_I(L("bbs 20forbeers 2272036723 20forbeers.com:1337 20 For Beers BBS \r"), BBS_LINE_BBS);
+    CHECK(strcmp(e.name, "20 For Beers BBS") == 0); CHECK_EQ_I(e.port, 1337);
+    CHECK_EQ_I(L("bbs 4wheelham 2274943354 bbs.4wheelham.com"), BBS_LINE_BBS);
+    CHECK_EQ_I(e.port, 23); CHECK(strcmp(e.name, "4wheelham") == 0);        /* no name: the login stands for it */
+    CHECK_EQ_I(L("bbs v4 2278400000 192.0.2.7:2323 By address"), BBS_LINE_BBS);
+    CHECK_EQ_I(L("bbs telehack telehack.com Telehack"), BBS_LINE_BAD);      /* no number */
+    CHECK_EQ_I(L("bbs x 2289000000 h.com"), BBS_LINE_BAD);                  /* a board's number begins 227 */
+    CHECK_EQ_I(L("bbs x 227900000 h.com"), BBS_LINE_BAD); CHECK_EQ_I(L("bbs x 22790000000 h.com"), BBS_LINE_BAD);
+    CHECK_EQ_I(L("bbs x 227900000a h.com"), BBS_LINE_BAD);
+    CHECK_EQ_I(L("bbs Telehack 2278353422 telehack.com"), BBS_LINE_BAD);    /* a login is lower case and digits */
+    CHECK_EQ_I(L("bbs x 2279000000 -oProxy.com"), BBS_LINE_BAD);            /* a host does not begin with '-' */
+    CHECK_EQ_I(L("bbs x 2279000000 host;rm:23"), BBS_LINE_BAD);
+    CHECK_EQ_I(L("bbs x 2279000000 host.com:0"), BBS_LINE_BAD); CHECK_EQ_I(L("bbs x 2279000000 host.com:65536"), BBS_LINE_BAD);
+    CHECK_EQ_I(L("bbs x 2279000000 host.com:23x"), BBS_LINE_BAD); CHECK_EQ_I(L("bbs x 2279000000"), BBS_LINE_BAD);
+    CHECK_EQ_I(L("bbs abcdefghijklmnopqrstuvwxyz0123456 2279000000 h.com"), BBS_LINE_BAD);    /* 33 */
+    /* the box itself is not a board */
+    CHECK_EQ_I(L("bbs x 2279000000 127.0.0.1"), BBS_LINE_BAD); CHECK_EQ_I(L("bbs x 2279000000 localhost"), BBS_LINE_BAD);
+    CHECK_EQ_I(L("bbs x 2279000000 127.1:80"), BBS_LINE_BAD); CHECK_EQ_I(L("bbs x 2279000000 0.0.0.0"), BBS_LINE_BAD);
+    CHECK_EQ_I(L("bbs x 2279000000 LocalHost.localdomain"), BBS_LINE_BAD);
+    CHECK_EQ_I(L("bbs x 2279000000 127001.example.com"), BBS_LINE_BBS);     /* a name that only looks like it */
+    CHECK_EQ_I(L("something else"), BBS_LINE_BAD);
+    { char nm[140] = "bbs x 2279000000 h.com "; memset(nm + 23, 'N', 100); nm[123] = 0;
+      CHECK_EQ_I(L(nm), BBS_LINE_BBS); CHECK_EQ_I((int)strlen(e.name), BBS_NAME_MAX); }    /* a long name is cut */
+    { char ctl[] = "bbs x 2279000000 h.com Na\033[2Jme"; CHECK_EQ_I(L(ctl), BBS_LINE_BBS); CHECK(strchr(e.name, 033) == NULL); }
+#undef L
+    printf("bbs: the number dialled\n");
+    CHECK_EQ_I(bbs_number("8002273425", num), BBS_NUM_PROMPT); CHECK_EQ_I(bbs_number("18002273425", num), BBS_NUM_PROMPT);
+    CHECK_EQ_I(bbs_number("8002273426", num), BBS_NUM_NONE); CHECK_EQ_I(bbs_number("118002273425", num), BBS_NUM_NONE);
+    CHECK_EQ_I(bbs_number("", num), BBS_NUM_NONE);
+    CHECK_EQ_I(bbs_number("2278353422", num), BBS_NUM_BOARD); CHECK(strcmp(num, "2278353422") == 0);
+    CHECK_EQ_I(bbs_number("12278353422", num), BBS_NUM_BOARD); CHECK(strcmp(num, "2278353422") == 0);   /* with the 1: the same board */
+    CHECK_EQ_I(bbs_number("227835342", num), BBS_NUM_NONE); CHECK_EQ_I(bbs_number("22783534222", num), BBS_NUM_NONE);
+    CHECK_EQ_I(bbs_number("227835342*", num), BBS_NUM_NONE); CHECK_EQ_I(bbs_number("2288353422", num), BBS_NUM_NONE);
+    /* a board's number from its name: 227 and the name on the keys of a telephone */
+    bbs_keypad("telehack", num); CHECK(strcmp(num, "2278353422") == 0);
+    bbs_keypad("a1", num); CHECK(strcmp(num, "2272100000") == 0);           /* a short name: zeros behind it */
+    bbs_keypad("20forbeers", num); CHECK(strcmp(num, "2272036723") == 0);
+    bbs_keypad("wxyzpqrs", num); CHECK(strcmp(num, "2279999777") == 0);
+    printf("bbs: what the caller types\n");
+    bbs_key("20 For Beers", k); CHECK(strcmp(k, "20forbeers") == 0);
+    bbs_key("  A-Net Online (Mystic)! ", k); CHECK(strcmp(k, "anetonlinemystic") == 0);
+    bbs_key("", k); CHECK(k[0] == 0);
+    bbs_key("abcdefghijklmnopqrstuvwxyz0123456789", k); CHECK_EQ_I((int)strlen(k), BBS_LOGIN_MAX);
+    strcpy(e.login, "20forbeers"); strcpy(e.name, "20 For Beers BBS"); strcpy(e.host, "20forbeers.com");
+    CHECK_EQ_I(bbs_match(&e, ""), 1); CHECK_EQ_I(bbs_match(&e, "beer"), 1); CHECK_EQ_I(bbs_match(&e, "forbeersbbs"), 1);
+    CHECK_EQ_I(bbs_match(&e, "wine"), 0);
+    strcpy(e.number, "2272036723");
+    CHECK_EQ_I(bbs_match(&e, "227203"), 1); CHECK_EQ_I(bbs_match(&e, "6723"), 1); CHECK_EQ_I(bbs_match(&e, "2279"), 0);
+    bbs_show("2278353422", k); CHECK(strcmp(k, "227 835 3422") == 0);
+    bbs_edit_init(&ed);
+    CHECK_EQ_I(bbs_edit(&ed, 't', echo, &en), 0); CHECK_EQ_I(en, 1); CHECK_EQ_I(echo[0], 't');
+    CHECK_EQ_I(bbs_edit(&ed, 'x', echo, &en), 0);
+    CHECK_EQ_I(bbs_edit(&ed, 8, echo, &en), 0); CHECK_EQ_I(en, 3); CHECK(memcmp(echo, "\b \b", 3) == 0);
+    CHECK_EQ_I(bbs_edit(&ed, 'h', echo, &en), 0);
+    CHECK_EQ_I(bbs_edit(&ed, 0x7F, echo, &en), 0); CHECK_EQ_I(en, 3);
+    CHECK_EQ_I(bbs_edit(&ed, 0x7F, echo, &en), 0); CHECK_EQ_I(en, 3);
+    CHECK_EQ_I(bbs_edit(&ed, 0x7F, echo, &en), 0); CHECK_EQ_I(en, 0);      /* nothing left to rub out */
+    CHECK_EQ_I(bbs_edit(&ed, 'o', echo, &en), 0); CHECK_EQ_I(bbs_edit(&ed, 'k', echo, &en), 0);
+    CHECK_EQ_I(bbs_edit(&ed, 0, echo, &en), 0); CHECK_EQ_I(en, 0);         /* not a character */
+    CHECK_EQ_I(bbs_edit(&ed, 10, echo, &en), 0); CHECK_EQ_I(en, 0);        /* the LF of a CR LF */
+    CHECK_EQ_I(bbs_edit(&ed, 0xE9, echo, &en), 0); CHECK_EQ_I(en, 0);
+    CHECK_EQ_I(bbs_edit(&ed, 13, echo, &en), 1); CHECK_EQ_I(en, 2); CHECK(memcmp(echo, "\r\n", 2) == 0);
+    CHECK(strcmp(ed.line, "ok") == 0);
+    bbs_edit_init(&ed);
+    for (i = 0; i < 200; i++) (void)bbs_edit(&ed, 'a', echo, &en);
+    CHECK_EQ_I(en, 0);                                          /* full: no more is taken or shown */
+    CHECK_EQ_I(bbs_edit(&ed, 13, echo, &en), 1); CHECK_EQ_I((int)strlen(ed.line), BBS_TYPED_MAX);
+}
+
+/* the connection to a board (bbsdial.h) against a listener here */
+static int dial_wait(int fd, const char *want, int ms)
+{
+    char b[256]; size_t n = 0; struct pollfd p = { fd, POLLIN, 0 };
+    while (n < sizeof b - 1 && poll(&p, 1, ms) > 0) {
+        ssize_t r = recv(fd, b + n, sizeof b - 1 - n, 0);
+        if (r <= 0) break;
+        n += (size_t)r; b[n] = 0;
+        if (strstr(b, want)) return 1;
+    }
+    return 0;
+}
+static void test_bbsdial(void)
+{
+    struct sockaddr_in a; socklen_t al = sizeof a; int ls, sv[2], c, st; pid_t pid; char port[8], b[8];
+    struct pollfd p;
+    printf("bbs: the connection to a board\n");
+    ls = socket(AF_INET, SOCK_STREAM, 0);
+    memset(&a, 0, sizeof a); a.sin_family = AF_INET; a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    CHECK(ls >= 0 && bind(ls, (struct sockaddr *)&a, sizeof a) == 0 && listen(ls, 2) == 0);
+    CHECK_EQ_I(getsockname(ls, (struct sockaddr *)&a, &al), 0);
+    snprintf(port, sizeof port, "%u", (unsigned)ntohs(a.sin_port));
+    /* octets both ways, and a quiet time is no reason to end */
+    CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
+    pid = fork();
+    if (pid == 0) { close(sv[0]); close(ls); _exit(bbsdial_run("127.0.0.1", port, sv[1], 5)); }
+    close(sv[1]);
+    c = accept(ls, NULL, NULL);
+    CHECK(c >= 0);
+    CHECK_EQ_I((int)send(c, "welcome", 7, 0), 7); CHECK(dial_wait(sv[0], "welcome", 3000));
+    CHECK_EQ_I((int)send(sv[0], "typed", 5, 0), 5); CHECK(dial_wait(c, "typed", 3000));
+    p.fd = sv[0]; p.events = POLLIN; p.revents = 0;
+    CHECK_EQ_I(poll(&p, 1, 2500), 0);                           /* nothing said for a while: still there */
+    CHECK_EQ_I(waitpid(pid, &st, WNOHANG), 0);
+    CHECK_EQ_I((int)send(c, "again", 5, 0), 5); CHECK(dial_wait(sv[0], "again", 3000));
+    /* the board ends it: what it said last arrives, then the end */
+    CHECK_EQ_I((int)send(c, "bye", 3, 0), 3); close(c);
+    CHECK(dial_wait(sv[0], "bye", 3000));
+    CHECK_EQ_I((int)recv(sv[0], b, sizeof b, 0), 0);
+    CHECK_EQ_I(waitpid(pid, &st, 0), pid); CHECK(WIFEXITED(st) && WEXITSTATUS(st) == 0);
+    close(sv[0]);
+    /* the daemon ends it: the board sees the end */
+    CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
+    pid = fork();
+    if (pid == 0) { close(sv[0]); close(ls); _exit(bbsdial_run("localhost", port, sv[1], 5)); }
+    close(sv[1]);
+    c = accept(ls, NULL, NULL);
+    CHECK(c >= 0);
+    close(sv[0]);
+    p.fd = c; p.events = POLLIN; p.revents = 0;
+    CHECK(poll(&p, 1, 3000) > 0); CHECK_EQ_I((int)recv(c, b, sizeof b, 0), 0);
+    CHECK_EQ_I(waitpid(pid, &st, 0), pid); CHECK(WIFEXITED(st) && WEXITSTATUS(st) == 0);
+    close(c); close(ls);
+    /* nobody there, and a name that is none */
+    CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
+    CHECK_EQ_I(bbsdial_run("127.0.0.1", port, sv[1], 5), 1);
+    CHECK_EQ_I(bbsdial_run("no-such-host.invalid", "23", sv[1], 5), 1);
+    close(sv[0]); close(sv[1]);
+}
+
+static void test_telnet(void)
+{
+    telnet_t t; uint8_t out[64], rep[64]; size_t on, rn, k;
+#define RX(lit) telnet_rx(&t, (const uint8_t *)(lit), sizeof(lit) - 1, out, sizeof out, &on, rep, sizeof rep, &rn)
+#define IS(buf, n, lit) ((n) == sizeof(lit) - 1 && memcmp(buf, lit, sizeof(lit) - 1) == 0)
+    printf("telnet: the words\n");
+    telnet_init(&t);
+    CHECK_EQ_I(RX("hello"), 5); CHECK(IS(out, on, "hello")); CHECK_EQ_I(rn, 0);
+    /* the board will echo and suppress go-ahead: agreed, once */
+    CHECK_EQ_I(RX("\377\373\001\377\373\003"), 6); CHECK_EQ_I(on, 0); CHECK(IS(rep, rn, "\377\375\001\377\375\003"));
+    CHECK_EQ_I(RX("\377\373\001"), 3); CHECK_EQ_I(rn, 0);                  /* said again: no answer, or it never ends */
+    /* asked for the terminal type and the window: given */
+    CHECK_EQ_I(RX("\377\375\030"), 3); CHECK(IS(rep, rn, "\377\373\030"));
+    CHECK_EQ_I(RX("\377\372\030\001\377\360"), 6); CHECK(IS(rep, rn, "\377\372\030\000ANSI\377\360")); CHECK_EQ_I(on, 0);
+    CHECK_EQ_I(RX("\377\375\037"), 3); CHECK(IS(rep, rn, "\377\373\037\377\372\037\000\120\000\030\377\360"));
+    /* what we do not know is refused, every time it is asked */
+    CHECK_EQ_I(RX("\377\375\042"), 3); CHECK(IS(rep, rn, "\377\374\042"));     /* DO LINEMODE: WONT */
+    CHECK_EQ_I(RX("\377\375\042"), 3); CHECK(IS(rep, rn, "\377\374\042"));
+    CHECK_EQ_I(RX("\377\373\052"), 3); CHECK(IS(rep, rn, "\377\376\052"));     /* WILL CHARSET: DONT */
+    CHECK_EQ_I(RX("\377\374\052\377\376\042"), 6); CHECK_EQ_I(rn, 0);          /* WONT / DONT what is already off */
+    /* the board stops echoing: acknowledged */
+    CHECK_EQ_I(RX("\377\374\001"), 3); CHECK(IS(rep, rn, "\377\376\001"));
+    /* data around and inside commands; 255 255 is one octet of data */
+    CHECK_EQ_I(RX("a\377\377b\377\361c"), 7); CHECK(IS(out, on, "a\377bc")); CHECK_EQ_I(rn, 0);
+    /* a command cut in two by the network */
+    CHECK_EQ_I(RX("x\377"), 2); CHECK(IS(out, on, "x"));
+    CHECK_EQ_I(RX("\373"), 1); CHECK_EQ_I(on, 0); CHECK_EQ_I(rn, 0);
+    CHECK_EQ_I(RX("\000y"), 2); CHECK(IS(out, on, "y")); CHECK(IS(rep, rn, "\377\375\000"));   /* WILL BINARY: DO */
+    /* a subnegotiation we do not know, with a 255 255 inside, is passed over */
+    CHECK_EQ_I(RX("1\377\372\052\001\377\377\002\377\3602"), 11); CHECK(IS(out, on, "12")); CHECK_EQ_I(rn, 0);
+    /* the end of a line: CR NUL is a CR, CR LF stays, while the board is not binary */
+    telnet_init(&t);
+    CHECK_EQ_I(RX("a\r\000b\r\nc\r"), 8); CHECK(IS(out, on, "a\rb\r\nc\r"));
+    CHECK_EQ_I(RX("\000d"), 2); CHECK(IS(out, on, "d"));                       /* the NUL arrives in the next read */
+    CHECK_EQ_I(RX("\377\373\000"), 3);                                         /* binary from now on */
+    CHECK_EQ_I(RX("a\r\000b"), 4); CHECK(IS(out, on, "a\r\000b"));
+    /* no room for an answer: nothing is taken, nothing is lost */
+    telnet_init(&t);
+    CHECK_EQ_I(telnet_rx(&t, (const uint8_t *)"ab\377\373\001", 5, out, sizeof out, &on, rep, 4, &rn), 0);
+    CHECK_EQ_I(on, 0); CHECK_EQ_I(rn, 0);
+    /* little room for the caller: what fits is taken */
+    CHECK_EQ_I(telnet_rx(&t, (const uint8_t *)"abcdef", 6, out, 4, &on, rep, sizeof rep, &rn), 4); CHECK(IS(out, on, "abcd"));
+    /* to the board: 255 doubled, NUL after CR until we are binary */
+    telnet_init(&t);
+    CHECK_EQ_I(telnet_tx(&t, (const uint8_t *)"a\377\rb", 4, out, sizeof out, &on), 4); CHECK(IS(out, on, "a\377\377\r\000b"));
+    CHECK_EQ_I(telnet_tx(&t, (const uint8_t *)"\r\n", 2, out, sizeof out, &on), 2); CHECK(IS(out, on, "\r\n"));  /* CR LF is a line end as it is */
+    CHECK_EQ_I(telnet_tx(&t, (const uint8_t *)"\r", 1, out, sizeof out, &on), 1); CHECK(IS(out, on, "\r"));
+    CHECK_EQ_I(telnet_tx(&t, (const uint8_t *)"x", 1, out, sizeof out, &on), 1); CHECK(IS(out, on, "\000x"));   /* the NUL owed */
+    CHECK_EQ_I(RX("\377\375\000"), 3); CHECK(IS(rep, rn, "\377\373\000"));     /* DO BINARY: WILL */
+    CHECK_EQ_I(telnet_tx(&t, (const uint8_t *)"\rb\377", 3, out, sizeof out, &on), 3); CHECK(IS(out, on, "\rb\377\377"));
+    CHECK_EQ_I(telnet_tx(&t, (const uint8_t *)"abc\377", 4, out, 4, &on), 3); CHECK(IS(out, on, "abc"));   /* no room for both 255s */
+    /* any octets at all never write past the buffers */
+    telnet_init(&t);
+    for (k = 0; k < 20000; k++) {
+        uint8_t in[8]; size_t j, took;
+        for (j = 0; j < sizeof in; j++) in[j] = (uint8_t)((k * 2654435761u + j * 40503u) >> (j + 3)) | (uint8_t)((k + j) % 3 == 0 ? 0xF0 : 0);
+        took = telnet_rx(&t, in, sizeof in, out, 8, &on, rep, 32, &rn);
+        if (took > sizeof in || on > 8 || rn > 32) { CHECK(0); break; }
+    }
+#undef RX
+#undef IS
+}
+
+/* ---- the bulletin board number, on a port of any service: that call
+ * carries octets on error control; the port's own number is as before ---- */
+static void test_bbs_call(void)
+{
+    cfg_t c; uint32_t a = 0; int on = 9; long i; size_t k, sent = 0; int bad = 0, svc; static uint8_t dn[600]; caller_cfg_t cc;
+
+    printf("bbs: a terminal program calls\n");
+    for (svc = 0; svc < CFG_SERVICE_COUNT; svc++) {
+        base_cfg(&c); c.rings = 0; c.service = svc;
+        line_init();
+        srv_init(&S, &c, 95 + (uint32_t)svc, lan_rx, NULL);
+        srv_set_raw(&S, sat_srv_rx);
+        place_call(svc & 1 ? "8002273425" : "18002273425", 6000);
+        CHECK_EQ_I(S.tel.state, TEL_ANSWERED);
+        CHECK_EQ_I(srv_link(&S, &a, &on), SRV_LINK_BBS); CHECK_EQ_I(on, 0);
+        hang_up();
+        CHECK_EQ_I(srv_link(&S, &a, &on), SATURN_NONE);
+    }
+    base_cfg(&c); c.rings = 0;
+    line_init();
+    srv_init(&S, &c, 99, lan_rx, NULL);
+    srv_set_raw(&S, sat_srv_rx);
+    place_call("8002273426", 6000);                     /* one digit off: a wrong number */
+    CHECK(S.tel.state != TEL_ANSWERED);
+    hang_up();
+    place_call("18002273425", 6000);
+    CHECK_EQ_I(S.tel.state, TEL_ANSWERED);
+    caller_cfg_default(&cc);
+    c_oct = 0xFF; c_lin = 0;
+    cc.raw_rx = sat_cli_rx; cc.raw_tx = sat_cli_tx;
+    caller_init(&C, &cc);
+    modem_on = 1;
+    sat_up_n = sat_dn_n = sat_cli_at = sat_cli_n = 0;
+    for (i = 0; i < 40L * FS && !(srv_link(&S, &a, &on) && on); i++) step(0);
+    CHECK_EQ_I(on, 1);
+    run_ms(1100);
+    CHECK_EQ_I(S.status.line, ST_LINE_CONNECTED);
+    CHECK_EQ_I(S.status.ppp, ST_PPP_DEAD);
+    CHECK_EQ_I(S.status.v42, ST_V42_LAPM);              /* error control, unlike the consoles' calls */
+    CHECK_EQ_I(srv_ip_up(&S), 0);
+    for (k = 0; k < sizeof dn; k++) dn[k] = (uint8_t)(k * 5 + 1);
+    sat_cli_n = 300;
+    for (i = 0; i < 60L * FS && (sat_up_n < 300 || sat_dn_n < sizeof dn); i++) {
+        if (sent < sizeof dn) sent += srv_send_raw(&S, dn + sent, sizeof dn - sent);
+        step(0);
+    }
+    CHECK_EQ_I(sat_up_n, 300); CHECK_EQ_I(sat_dn_n, sizeof dn);
+    for (k = 0; k < sat_up_n; k++) if (sat_up[k] != (uint8_t)(k * 11 + 3)) bad++;
+    for (k = 0; k < sat_dn_n; k++) if (sat_dn[k] != dn[k]) bad++;
+    CHECK_EQ_I(bad, 0);
+    srv_hangup(&S);
+    for (i = 0; i < 10L * FS && S.tel.state == TEL_ANSWERED; i++) step(0);
+    CHECK_EQ_I(S.tel.state, TEL_ENDED);
+    hang_up();
+    CHECK(strcmp(status_call(&S.status, 0)->dialed, "18002273425") == 0);
+    /* a board's own number: the same kind of call, and the daemon is told what was dialled */
+    place_call("2278353422", 6000);
+    CHECK_EQ_I(S.tel.state, TEL_ANSWERED);
+    CHECK_EQ_I(srv_link(&S, &a, &on), SRV_LINK_BBS);
+    CHECK(strcmp(srv_dialed(&S), "2278353422") == 0);
+    hang_up();
+    place_call("12278353422", 6000);
+    CHECK_EQ_I(srv_link(&S, &a, &on), SRV_LINK_BBS);
+    hang_up();
+    /* the port's own number is an ordinary call still */
+    place_call("5551234", 6000);
+    CHECK_EQ_I(S.tel.state, TEL_ANSWERED);
+    CHECK_EQ_I(srv_link(&S, &a, &on), SATURN_NONE);
+    hang_up();
+    /* even one that looks like a board's */
+    base_cfg(&c); c.rings = 0; strcpy(c.line_number, "2275551234");
+    line_init();
+    srv_init(&S, &c, 101, lan_rx, NULL);
+    place_call("2275551234", 6000);
+    CHECK_EQ_I(S.tel.state, TEL_ANSWERED);
+    CHECK_EQ_I(srv_link(&S, &a, &on), SATURN_NONE);
+    hang_up();
+}
+
+/* the list that goes into the image and is fetched by the boxes: every
+ * line is understood, no login twice */
+static void test_bbs_shipped_list(void)
+{
+    static bbs_entry bb[2048]; int nb = 0, bad = 0, head = 0, first = 1, i, j, twice = 0;
+    char line[512]; FILE *f = fopen("../lists/bbs.txt", "r");
+    printf("bbs: the shipped list\n");
+    CHECK(f != NULL);
+    if (!f) return;
+    while (fgets(line, sizeof line, f)) {
+        bbs_entry e; size_t len = strcspn(line, "\n"); int k = bbs_line(line, len, &e);
+        if (k == BBS_LINE_NONE) continue;
+        if (first) { first = 0; head = k == BBS_LINE_HEAD; continue; }
+        if (k == BBS_LINE_BBS && nb < 2048) bb[nb++] = e;
+        else bad++;
+    }
+    fclose(f);
+    CHECK_EQ_I(head, 1); CHECK_EQ_I(bad, 0); CHECK(nb >= 10);
+    printf("  %d boards\n", nb);
+    for (i = 0; i < nb; i++) for (j = 0; j < i; j++) if (strcmp(bb[i].login, bb[j].login) == 0 || strcmp(bb[i].number, bb[j].number) == 0) twice++;
+    CHECK_EQ_I(twice, 0);
+}
+
 static void test_v92_call(void)
 {
     cfg_t c; int ms; const st_call_t *h;
@@ -1153,9 +1469,10 @@ static void test_v92_call(void)
     CHECK_EQ_I(S.status.up_bps, 33333);
     hang_up();
 
-    /* v92 = off (the default): the same caller gets a V.90 call */
+    /* v92 = off: the same caller gets a V.90 call */
     base_cfg(&c); c.modulations = CFG_MOD_ALL; c.rings = 0;
-    CHECK_EQ_I(c.v92, 0);
+    CHECK_EQ_I(c.v92, 1);                               /* on is the default */
+    c.v92 = 0;
     line_init();
     srv_init(&S, &c, 31, lan_rx, NULL);
     CHECK_EQ_I(S.status.v92, 0);
@@ -1417,6 +1734,11 @@ int main(void)
     test_stun();
     test_dreamcast_call();
     test_saturn_call();
+    test_bbs_words();
+    test_telnet();
+    test_bbs_call();
+    test_bbs_shipped_list();
+    test_bbsdial();
     test_v34_call();
     test_v32bis_call();
     /* the same server on a line with linear receive (srv_tick_lin): whole

@@ -7,6 +7,12 @@ the modem connects (up to V.90 / V.92 speeds) and gets a PPP session that is
 routed out of the box's Ethernet port. No phone line, no SIP, no PC in
 between.
 
+It also gives bulletin boards their telephone numbers back: dial
+**227 835 3422** from a terminal program and the box joins the call to
+Telehack on the internet, the way boards were called before there was a
+web. More than a thousand boards have a number, and **1 800 BBS DIAL** is
+the operator.
+
 It installs from the stock firmware's own upgrade page with one file, and
 the stock firmware stays in the box, one click away.
 
@@ -44,11 +50,53 @@ the stock firmware stays in the box, one click away.
   OpenVPN tunnel: turn the switch on and paste your own `.ovpn` profile on
   the Consoles page. v90d ships no profile or keys of its own; bring one
   from whoever runs that network. Not done: DreamPi's closed helper programs.
+- A telephone number for every bulletin board and **1 800 BBS DIAL**
+  (1 800 227 3425), on every port, whatever its service: see below.
 - A web interface ("Nestaliga") for all of it: dashboard, line, modem,
-  users, network, system, firmware and calls, with a Consoles page (the
+  users, network, system, bulletin boards, firmware and calls, with a
+  Consoles page (the
   Dreamcast switches and the Saturn matchmaking switch) when a port uses one
   of those services. The pages follow the box: both phone ports on an HT802,
   a single port on a one-port box.
+
+## 1 800 BBS DIAL
+
+Bulletin boards are still running, hundreds of them, reached over telnet
+today instead of a telephone line. The box puts the telephone line back,
+and gives every board a number:
+
+- **227 and seven digits** is a board. 227 is BBS on the keys of a
+  telephone, the seven digits are the board's name on the same keys, with
+  zeros behind a short name: `telehack` is **227 835 3422**, `agency` is
+  227 243 6290. Dial it and you are on the board.
+- **1 800 227 3425** (1 800 BBS DIAL) is the operator. The box asks `BBS:`;
+  type a board's name (`telehack`, `20forbeers`, ...) or number, or `?` and
+  part of a name to search.
+
+Either with or without a 1 in front, on any phone port of the box, whatever
+its service, from anything that can dial: HyperTerminal, Telix, Procomm, a
+Commodore or Amiga terminal. The modem connects, with error correction if
+the modem has it, and without PPP: the computer needs no TCP/IP at all. The
+telnet negotiation stays inside the box; the terminal sees the board, ANSI
+and all. When the board logs you off, the line is dropped, as it always
+was.
+
+The **BBS** page of the web interface lists the boards with their numbers,
+a hundred to a page, with a search by name or number.
+The boards are those of the [Telnet BBS Guide](https://www.telnetbbsguide.com),
+more than a thousand of them: a box that uses the numbers fetches the
+guide's own list once a day and stays current without a firmware release.
+They go by the login names 2600.network uses for the same boards
+(`20forbeers` for "20 For Beers BBS"). Where two names begin alike, the
+second board takes the next free number, so look a number up on the page or
+with `?` before you put it in a phone book. A short list in the image
+([lists/bbs.txt](lists/bbs.txt)) serves until the first fetch or when the
+box has no way out. Only boards of the list can be called. The port's own
+number is still the dial-up connection.
+
+The idea is that of [2600.network](https://2600.network), which does this
+for callers on the real telephone network; here it is one box and your own
+telephone line to it.
 
 ## What it is made of
 
@@ -56,7 +104,8 @@ Linux, busybox and a C library are used as they are. Everything else in the
 image is written here from the ITU-T recommendations and the RFCs: the board
 support and drivers for the HT802's chips, the telephony, the modem itself
 (the signal processing of every modulation above, in fixed-point C99), the
-link layers, the PPP server, the web interface, the loader and the build.
+link layers, the PPP server, the telnet side of the bulletin board calls,
+the web interface, the loader and the build.
 The one other outside part is OpenVPN (with mbed TLS), built unchanged from
 source for the optional IWANGO tunnel. There is no Grandstream code or
 binary in the image and no closed blob.
@@ -76,12 +125,22 @@ work but are not yet tested; see [BOARDS.md](BOARDS.md).
 
 Tested with a Conexant USB modem on every modulation in the list, from
 Linux pppd and from Dial-Up Networking in Windows 98 SE and Windows XP
-(V.90 with MPPC compression in both). V.92 is off by default (`v92 = on` to
-offer it); with it on and the caller set to PCM upstream (`AT+PIG=0` on the
-Conexant) a call connects as V.92 with error correction and PPP up — in a
-bench call, 52000 down / 32000 up. Not tested yet: other modem brands, two
-calls at the same time, a real Dreamcast or Saturn, Windows 95 and Windows
-Me.
+(V.90 with MPPC compression in both). V.92 is offered by default
+(`v92 = off` to stop it) and used when the caller's modem asks for PCM
+upstream (`AT+PIG=0` on the Conexant): such a call connects as V.92 with
+error correction and PPP up, in a bench call 52000 down / 32000 up. A
+caller that does not ask gets V.90. An upgraded box keeps the setting it
+had.
+
+The bulletin board calls were made with the same modem: a board's own
+number from Linux (227 835 3422 reached Telehack), and 1 800 BBS DIAL from
+HyperTerminal in Windows XP at V.90 with error correction. The box fetched
+the Telnet BBS Guide's list by itself, 1073 boards that day.
+
+Not tested yet: other modem brands, two calls at the same time, a real
+Dreamcast or Saturn, Windows 95 and Windows Me, a file transfer (Zmodem)
+on a bulletin board call, and Windows callers against a port with V.92
+on.
 
 ## Installing
 
@@ -119,7 +178,8 @@ make -C fw test-release # the firmware file, the flash tools and the loader agai
 | `ppp/` | the PPP server |
 | `tel/` | tones, dialling, the call's life |
 | `dce/` | modem, link layer and PPP tied into one call |
-| `srv/` | the daemon: calls, network, NAT, the per-port services |
+| `srv/` | the daemon: calls, network, NAT, the per-port services, the bulletin board calls |
+| `lists/` | the short list of bulletin boards in the image |
 | `cfg/` | settings, status and the web interface |
 | `arch/` | the Archive service's helpers |
 | `fw/` | the firmware: kernel board support and drivers, loader, flash tools, image and release build |

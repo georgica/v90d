@@ -350,7 +350,7 @@ static void v42_start(dce_t *d)
 
     vc.originator = 0;
     if (!d->cfg.fixed_timers && vc.lapm.t401_ms < t401) vc.lapm.t401_ms = (int)t401;
-    if (d->cfg.raw_rx) {
+    if (d->cfg.raw_rx && !d->cfg.raw_ec) {
         /* octets as they are: straight to start-stop, as below */
         vc.detect = 1; vc.fallback = 1; vc.t400_ms = 1;
         vc.lapm.comp_tx = 0; vc.lapm.comp_rx = 0; vc.lapm.v44_tx = 0; vc.lapm.v44_rx = 0;

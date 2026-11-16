@@ -22,11 +22,13 @@
 
 #define TEL_FS          8000
 #define TEL_NUMBER_MAX  20
+#define TEL_ALSO        4
 
 enum { TEL_TONES_US = 0, TEL_TONES_EU = 1 };
 
 typedef struct {
     char     number[TEL_NUMBER_MAX + 1]; /* digits 0-9 * #; "" = any number connects */
+    char     also[TEL_ALSO][TEL_NUMBER_MAX + 1];   /* more numbers that connect, '?' = any digit; "" = unused */
     int      tones;             /* TEL_TONES_* */
     int      rings;             /* bursts of ringing tone before the answer, 0..10 */
     int      busy_chance;       /* percent of calls that get busy tone */

@@ -94,6 +94,7 @@
 #define PAGE_TAB_FIRMWARE 6
 #define PAGE_TAB_CALLS 7
 #define PAGE_TAB_CONSOLES 8
+#define PAGE_TAB_BBS 9
 /* The Dreamcast tab is shown only while a port has that service. Whoever
  * knows the settings says so before a page is made (the settings pages by
  * themselves, the server for the others); defined in status.c. */
@@ -103,10 +104,10 @@ static inline void page_top(sbuf_t *b, const char *title, const char *head, int 
     static const struct { const char *href, *label; } tabs[] = {
         { "/", "Dashboard" }, { "/line", "Line" }, { "/modem", "Modem" }, { "/users", "Users" },
         { "/network", "Network" }, { "/system", "System" }, { "/firmware", "Firmware" },
-        { "/calls", "Calls" }, { "/dreamcast", "Consoles" },
+        { "/calls", "Calls" }, { "/dreamcast", "Consoles" }, { "/bbs", "BBS" },
     };
     /* the order they are shown in */
-    static const unsigned char order[] = { 0, 1, 2, 3, 4, 8, 5, 6, 7 };
+    static const unsigned char order[] = { 0, 1, 2, 3, 4, 8, 9, 5, 6, 7 };
     int i, k;
 
     sb_puts(b, "<!DOCTYPE html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">\n");

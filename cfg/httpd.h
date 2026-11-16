@@ -169,6 +169,8 @@ typedef struct httpd {
     const status_t *status2;        /* port 2, or NULL */
     int           (*save)(void *ctx, const cfg_t *newcfg);
     int           (*vpn)(void *ctx, const char *profile, size_t len); void *vpn_ctx;
+    status_bbs_rows bbs; void *bbs_ctx;
+    const char *bbs_query; size_t bbs_qlen;     /* of the request being answered */
     void           *save_ctx;
     int             listen_fd;   /* -1 when there is none */
     uint32_t        rx_timeout_ms, tx_timeout_ms, linger_ms;
@@ -219,6 +221,8 @@ void httpd_on_save(httpd_t *h, int (*save)(void *ctx, const cfg_t *newcfg), void
  * removed; 0 from it is answered with 303 to the page, anything else with
  * 500. A profile that does not pass is 400 with the page and the reason.
  * Login, Host and Origin rules as for the settings; 403 without a keep. */
+/* The BBS page's boards (status.h, status_render_bbs); NULL = no list. */
+void httpd_on_bbs(httpd_t *h, status_bbs_rows rows, void *ctx);
 void httpd_on_vpn(httpd_t *h, int (*keep)(void *ctx, const char *profile, size_t len), void *ctx);
 
 /* Register the Firmware page's helpers (copied; NULL takes them away).

@@ -68,6 +68,7 @@
 #include "upnp.h"
 #include "daemon.h"
 #include "satlink.h"
+#include "bbslink.h"
 #include "netsvc.h"
 #include "vpn.h"
 #include "settings.h"
@@ -320,6 +321,14 @@ static void log_last_call(int port)
     }
 }
 
+/* the octets of a call without PPP: a bulletin board call, or the port's saturn service */
+static void raw_from_modem(void *ctx, const uint8_t *oct, size_t n)
+{
+    uint32_t addr; int on;
+    if (srv_link((srv_t *)ctx, &addr, &on) == SRV_LINK_BBS) bbslink_from_modem(ctx, oct, n);
+    else satlink_from_modem(ctx, oct, n);
+}
+
 static void usage(void)
 {
     fprintf(stderr, "usage: v90d [-c FILE] -l LINE [-l LINE2] [-d N] [-i LAN-IF] [-t TUN] [-A GATEWAY] [-D FETCH-COMMAND] [-G REPORT-PROGRAM] [-E LEASE-COMMAND] [-v]\n       v90d [-c FILE] -p\n"
@@ -345,7 +354,7 @@ int main(int argc, char **argv)
     /* the telephone lights: <prefix><port>/brightness, lit while the port is off hook */
     const char *led_prefix = "/sys/class/leds/ht802:phone"; int led_fd[PORTS] = { -1, -1 }, led_on[PORTS] = { -1, -1 };
 
-    while ((opt = getopt(argc, argv, "c:l:d:i:t:vpw:W:L:A:N:R:P:D:G:E:O:V:M:S:X")) != -1) {
+    while ((opt = getopt(argc, argv, "c:l:d:i:t:vpw:W:L:A:N:R:P:D:G:E:O:V:M:S:XB:b:J:T:")) != -1) {
         switch (opt) {
         case 'c': cfg_path = optarg; break;
         case 'l': if (n_ports >= PORTS) usage(); line_spec[n_ports++] = optarg; break;
@@ -373,6 +382,10 @@ int main(int argc, char **argv)
                 satlink_set_stun(q0 << 24 | q1 << 16 | q2 << 8 | q3, (uint16_t)pp);
             }
             break; }
+        case 'B': bbslink_set_builtin(optarg); break; /* the bbs list in the image */
+        case 'b': bbslink_set_fetch(optarg); break;   /* the command that prints the bbs list; "" = never fetch */
+        case 'J': bbslink_set_live(optarg); break;    /* where a fetched bbs list is kept */
+        case 'T': bbslink_set_prog(optarg); break;    /* run instead of nc to reach a board: PROG HOST PORT */
         case 'V': netsvc_set_vpnpath(optarg); break;  /* where the VPN profile is kept */
         case 'E': netsvc_set_lease(optarg); break;    /* prints the console's address on the network (instead of udhcpc) */
         case 'G': netsvc_set_dcnow(optarg); break;    /* run instead of wget for the Dreamcast Now report: PROG URL BODY */
@@ -414,7 +427,7 @@ int main(int argc, char **argv)
         line_law[p] = view.law == CFG_LAW_ALAW;
         if (line_set_law(&line[p], line_law[p]) < 0) logf_(CFG_LOG_WARN, "line %s: cannot set the law: %s", line_spec[p], strerror(errno));
         srv_init(&S[p], &view, seed + 0x9E3779B9u * (uint32_t)p, ip_to_kernel, &S[p]);
-        srv_set_raw(&S[p], satlink_from_modem);
+        srv_set_raw(&S[p], raw_from_modem);
         srv_set_echo_delay(&S[p], echo_delay);
         srv_set_max_tx_code(&S[p], max_tx_code);
         if ((size_t)p < strlen(rx_formats)) {
@@ -432,6 +445,7 @@ int main(int argc, char **argv)
     if (n_ports > 1) httpd_status2(&H, &S[1].status);
     httpd_on_save(&H, on_save, NULL);
     httpd_on_vpn(&H, netsvc_on_vpn, NULL);
+    httpd_on_bbs(&H, bbslink_rows, NULL);
     { char r[48]; settings_set_vpn(netsvc_vpn_remote(r, sizeof r) ? r : NULL); }
     {
         static const httpd_fw_t fw = { V90D_VERSION " (built " __DATE__ ")", fw_text, fw_take, NULL };
@@ -518,6 +532,7 @@ int main(int argc, char **argv)
                 if (net_dirty) netsvc_apply();
             }
             satlink_poll(now_ms);
+            bbslink_poll(now_ms);
             netsvc_poll(now_ms);
             if (fw_pid > 0 && now_ms % 1000 == 0 && waitpid(fw_pid, NULL, WNOHANG) == fw_pid) fw_pid = 0;
             /* the Restart button, once its answer has gone out */
@@ -565,6 +580,7 @@ int main(int argc, char **argv)
 
     httpd_close(&H);
     netsvc_stop();
+    bbslink_stop();
     for (p = 0; p < n_ports; p++) line_close(&line[p]);
     logf_(CFG_LOG_INFO, "stopped");
     return 0;

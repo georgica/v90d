@@ -139,7 +139,7 @@ for them with the DIL; ours just sends what it asks for).
 | `ppp/` | PPP server: HDLC framing, LCP, PAP/CHAP, IPCP, CCP with Deflate and MPPC (`ppp_deflate`, `ppp_mppc`) | yes |
 | `dce/` | one-call glue: modem + V.42 + PPP | yes |
 | `tel/` | telephony layer: tones, DTMF and pulse digits, number check, busy, drops, limits | yes |
-| `srv/` | the server (tel + dce + cfg + status) and the Linux daemon `v90d`: line back end, TUN, NAT by nftables netlink; the console services (`console`, `dclist`, `dcnow`, `upnp`, `saturn`) | yes |
+| `srv/` | the server (tel + dce + cfg + status) and the Linux daemon `v90d`: line back end, TUN, NAT by nftables netlink; the console services (`console`, `dclist`, `dcnow`, `upnp`, `saturn`); the bulletin board calls (`bbs`, `telnet`, `bbslink`) | yes |
 | `sim/` | test peers and channel simulator (double allowed) | no |
 | `test/` | unit and end-to-end tests, spandsp wrappers | no |
 | `rig/` | real-modem test rig that rides the stock firmware's SIP/RTP | no |
@@ -354,6 +354,93 @@ player's address are heard; its source port is taken as its router shows
 it. Two things are ours and not the tunnel's: a call that waits ends after
 two minutes without a caller, and a peer that has been silent for 30 s
 (it should ping every second) ends the call.
+
+### 5b. The bulletin board numbers
+
+Two kinds of number belong to the box, not to a port: the telephony layer
+takes them beside the port's own (`tel_cfg.also`, where `?` is any digit),
+on every port and whatever the port's service, and the server starts such a
+call differently (`srv/srv.c`, `bbs_number()`). Both with or without a 1 in
+front. A port whose own number looks like one of them keeps its number.
+
+- **227 and seven digits**: one board each. 227 is BBS on the keys of a
+  telephone; the seven digits are the board's login name on the same keys,
+  zeros behind a short name (`telehack`: 227 835 3422, `agency`:
+  227 243 6290). Names that begin alike would share a number; the second
+  takes the next number that is free (116 of 1074 boards on 2026-11-16), so
+  the number to dial is the one the BBS page or a `?` search shows. Such a
+  number can move when the guide gains a board that sorts before it.
+- **1 800 BBS DIAL** (`8002273425`): the operator, a prompt.
+
+- **The call.** No PPP: the call object is in its octet mode, as for the
+  Saturn, but with `raw_ec`: error control and compression stay as `[modem]`
+  says, because the caller is a terminal program with an ordinary modem,
+  and V.92 is offered where it is switched on. The daemon gets the octets
+  (`srv_set_raw`) and hands them to `bbslink.c` when `srv_link()` says the
+  call is a bulletin board call.
+- **The prompt.** `bbslink.c` waits a second and a half after the modems
+  connect (HyperTerminal under Windows XP is not listening sooner and lost
+  the greeting), then shows `BBS:` and reads a line with a small
+  editor (`bbs_edit`: echo, backspace, printable ASCII only). A line is a
+  board's login name (compared as letters and digits, so "20 For Beers"
+  finds `20forbeers`), a board's number, or `?text` for a search (40 rows
+  at most, number, login name and name, paced by what the modem has
+  taken). A call to a board's own number skips the prompt and goes to the
+  board; a number no board has ends at the prompt.
+- **No addresses.** A caller reaches only boards of the list and is never
+  shown where one is: not at the prompt, not in "Calling ...", not on the
+  page. Where a board is, is the list's business (the log names it).
+- **The connection** is made by a child process (`bbsdial.c`: the name
+  and the connect within 15 s, then octets both ways with no limit on
+  quiet time), with a socket pair as its standard input and output. It
+  was busybox's `nc -w 15` at first; that ends a connection the second
+  time a quarter minute passes without an octet, which dropped callers who
+  were reading (found with SyncTERM on the bench: a call held with one
+  key every 20 s ended after 42 s). The
+  daemon's loop never resolves a name or waits for a connect. The host is
+  checked to be letters, digits, `.` and `-` and not to begin with `-`
+  before it becomes an argument; there is no shell. Nothing is read from
+  the board unless it can be handed on whole, so a slow modem holds the
+  board back through TCP and nothing is dropped. No octet from the board
+  before the connection ends means "no answer" and the prompt again;
+  otherwise the board has logged the caller off and the line is dropped,
+  three seconds after the last octet went to the modem.
+- **Telnet** (`telnet.c`, RFC 854/855): the box is the client and asks for
+  nothing. It agrees to the board's echo and suppress-go-ahead, to binary
+  in either direction, tells terminal type `ANSI` and a window of 80 x 24
+  when asked, refuses the rest, and answers only what changes something.
+  255 is doubled towards the board; CR is CR NUL while we are not binary.
+  A board that speaks no telnet at all (raw TCP) works the same.
+- **The list** (format in `srv/bbs.h`). The image has a short one,
+  `lists/bbs.txt` as `/etc/v90d.bbs`. The first call to the number or the
+  first look at the BBS page makes the box fetch the Telnet BBS Guide's
+  own archive from the guide, then once a day (`fw/bbsfetch.sh`: today's
+  `ibbsMMDDYY.zip`, else the month's `ibbsMMYY.zip`, else last month's;
+  nothing without a clock). `fw/bbsguide.awk` turns its
+  `dialdirectory.xml` into our lines: telnet boards only, the login name
+  is the board's name in lower case letters and digits without the word
+  BBS (what 2600.network calls the same board), a second board of one
+  name is `name2`, and each gets its number as above. The guide's list is not copied into this repository;
+  each box takes it from the guide as it is. What the script prints is
+  checked line by line by the daemon (the head line first, at least one
+  board) and only then renamed over `/tmp/v90d.bbs`. A box whose owner
+  never uses the number fetches nothing. The list is never held in
+  memory: it is read from the file, 512 octets per block of the line,
+  when a name is looked up. busybox's wget does not verify certificates,
+  so somebody on the path could hand the box another list; what that list
+  can do is send a caller to another telnet host, which a telnet session
+  cannot rule out anyway.
+- **The page** (`/bbs`, `status_render_bbs`) shows the numbers and the
+  boards, 100 to a page (`/bbs?p=2`) with a search by part of a name or of
+  a number (`q=`, kept as letters and digits only). Plain links and a GET
+  form, no script, so a period browser can use it. The daemon writes the
+  rows (`bbslink_rows`), HTML-escaped, reading the list file anew for each
+  page.
+- What a list can name is checked: a host is letters, digits, `.` and `-`,
+  never begins with `-`, and is not the box itself (`localhost`, numeric
+  addresses in 127/8 and 0/8; a name that resolves there is not caught).
+  The host is looked at once more before it becomes an argument, and the
+  fetched file is created anew, never through a link.
 
 ## 6. Firmware (Track A)
 

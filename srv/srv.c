@@ -34,6 +34,7 @@ static void raw_from_caller(void *ctx, const uint8_t *oct, size_t n)
 }
 
 void srv_set_raw(srv_t *s, srv_raw_fn raw_out) { s->raw_out = raw_out; }
+const char *srv_dialed(const srv_t *s) { return s->tel.dialed; }
 
 int srv_link(const srv_t *s, uint32_t *addr, int *online)
 {
@@ -79,6 +80,9 @@ static void tel_settings(const srv_t *s, tel_cfg *t)
     memset(t, 0, sizeof *t);
     memcpy(t->number, c->line_number, TEL_NUMBER_MAX); t->number[TEL_NUMBER_MAX] = 0;
     if (c->service == CFG_SERVICE_SATURN) t->number[0] = 0;     /* what is dialled is an instruction: saturn.h */
+    /* on every port: 1 800 BBS DIAL and the boards' own numbers (bbs.h) */
+    strcpy(t->also[0], BBS_NUMBER); strcpy(t->also[1], BBS_NUMBER_LONG);
+    strcpy(t->also[2], BBS_AREA "???????"); strcpy(t->also[3], "1" BBS_AREA "???????");
     t->tones = c->line_tones == CFG_TONES_EU ? TEL_TONES_EU : TEL_TONES_US;
     t->rings = c->rings;
     t->busy_chance = c->busy_chance;
@@ -149,9 +153,13 @@ static void call_start(srv_t *s)
 {
     dce_cfg_t d;
     const cfg_t *c = &s->cfg;
+    int bbs; char board[BBS_NUMBER_LEN + 1];
     s->link = SATURN_NONE;
     s->call_start = s->clock; s->call_s = 0;
-    if (for_link(c)) {
+    /* a terminal program for a bulletin board (bbs.h), unless the number is the port's own */
+    bbs = strcmp(s->tel.dialed, c->line_number) != 0 && bbs_number(s->tel.dialed, board) != BBS_NUM_NONE;
+    if (bbs) s->link = SRV_LINK_BBS;
+    else if (for_link(c)) {
         s->link = saturn_number(s->tel.dialed, &s->link_addr, s->link_game);
         if ((s->link == SATURN_MATCH_WAIT || s->link == SATURN_MATCH_CALL) && !c->sat_match) s->link = SATURN_NONE;
         if (s->link == SATURN_NONE) {
@@ -171,7 +179,7 @@ static void call_start(srv_t *s)
     /* V.92 rides on the V.90 offer. Only with error control: a V.92 caller
      * that saw LAPM in our JM skips ODP / ADP (V.92 9.3.1) and would wait
      * for a LAPM that v42 = off never starts */
-    if ((c->modulations & CFG_MOD_V90) && c->v92 && c->v42 && !for_console(c) && !for_link(c)) d.modes |= ANS_MODE_V92;
+    if ((c->modulations & CFG_MOD_V90) && c->v92 && c->v42 && (bbs || (!for_console(c) && !for_link(c)))) d.modes |= ANS_MODE_V92;
     if (c->modulations & CFG_MOD_V34) d.modes |= V8_MOD_V34;
     if (c->modulations & CFG_MOD_V32BIS) d.modes |= V8_MOD_V32;
     if (c->modulations & (CFG_MOD_V22BIS | CFG_MOD_V22)) d.modes |= V8_MOD_V22;
@@ -194,7 +202,7 @@ static void call_start(srv_t *s)
     d.ppp.echo_interval_ms = (uint32_t)c->echo_interval * 1000u;
     /* [ppp] compression: CCP with Deflate and MPPC, or no CCP at all */
     d.ppp.comp = c->compression ? (PPP_COMP_DEFLATE | PPP_COMP_MPPC) : PPP_COMP_NONE;
-    if (for_console(c)) {
+    if (for_console(c) && !bbs) {
         /* The number and the login are the port's, as for every service.
          * Whatever [ppp] and [network] say: no CCP (one game is known to
          * get it wrong, and the console has no use for it), and the name
@@ -208,7 +216,8 @@ static void call_start(srv_t *s)
     s->seed = s->seed * 1664525u + 1013904223u;
     d.ppp.seed = s->seed ^ s->clock;
     d.ppp.ctx = s; d.ppp.ip_rx = ip_from_caller;
-    if (for_link(c)) d.raw_rx = raw_from_caller;
+    if (for_link(c) || bbs) d.raw_rx = raw_from_caller;
+    d.raw_ec = bbs;
     dce_init(&s->dce, &d);
     dce_get_status(&s->dce, &s->ds);
     s->in_call = 1; s->hangup_sent = 0;

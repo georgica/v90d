@@ -129,7 +129,7 @@ void cfg_default(cfg_t *c)
     c->tx_level      = -12;
     c->v42           = 1;
     c->v42bis        = 1;
-    c->v92           = 0;
+    c->v92           = 1;
     c->rings         = 1;
     c->law           = CFG_LAW_ULAW;
     c->line_tones    = CFG_TONES_US;    /* number "" = any; no busy, no drops */

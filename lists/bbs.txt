@@ -1,0 +1,26 @@
+# v90d: bulletin boards behind 1 800 BBS DIAL, the short list in the image.
+#
+# A box that uses the number fetches the Telnet BBS Guide's own list from
+# https://www.telnetbbsguide.com once a day (fw/bbsfetch.sh) and uses that:
+# more than a thousand boards. These few serve until it has, or when it
+# has no way out. The format is in srv/bbs.h:
+#
+#   bbs LOGIN NUMBER HOST[:PORT] NAME   the name typed at the prompt (a-z,
+#       0-9), the telephone number (227 and the name on the keys of a
+#       telephone, zeros behind a short one), where the board is
+#       (telnet; port 23 if none), its name.
+v90d-bbs 2
+
+bbs telehack 2278353422 telehack.com Telehack
+bbs phatstarteleporter 2277428782 198.71.48.13:7777 Phatstar Teleporter
+bbs level29 2275383529 bbs.fozztexx.com Level 29
+bbs vertrauen 2278378728 vert.synchro.net Vertrauen
+bbs blackflag 2272522535 blackflag.acid.org Black Flag BBS
+bbs 20forbeers 2272036723 20forbeers.com:1337 20 For Beers BBS
+bbs particles 2277278425 particlesbbs.dyndns.org:6400 Particles! BBS
+bbs duraeuropos 2273872387 dura-bbs.net:6359 Dura-Europos
+bbs capitolcityonline 2272274865 capitolcityonline.net Capitol City Online BBS
+bbs agency 2272436290 agency.bbs.nz Agency BBS
+bbs xibalba 2279422522 xibalba.l33t.codes:44510 Xibalba
+bbs 8bitboyz 2278248269 bbs.8bitboyz.com:6502 8-Bit Boyz BBS
+bbs starbase21 2277827228 bbs.starbase21.net Starbase 21

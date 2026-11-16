@@ -169,10 +169,10 @@ static void test_page(void)
     CHECK(has(html, "name=\"max_downstream\" size=\"6\" maxlength=\"5\" value=\"56000\">"));
     CHECK(has(html, "name=\"max_upstream\" size=\"6\" maxlength=\"5\" value=\"33600\">"));
     CHECK(has(html, "<small>bit/s, 300 to 48000</small>")); CHECK(!has(html, "300 to 33600"));
-    /* V.92: a switch, off unless asked */
-    CHECK(has(html, "<tr><th>V.92</th><td>" "<select name=\"v92\"><option value=\"off\" selected>Off: V.90 upstream (V.34, up to 33600 bit/s)</option>"
-                    "<option value=\"on\">On: offer PCM upstream to V.92 callers (experimental)</option></select>"));
-    CHECK(has(html, "AT+PIG=0")); CHECK(has(html, "simulation"));
+    /* V.92: a switch, on unless switched off */
+    CHECK(has(html, "<tr><th>V.92</th><td>" "<select name=\"v92\"><option value=\"off\">Off: V.90 upstream (V.34, up to 33600 bit/s)</option>"
+                    "<option value=\"on\" selected>On: offer PCM upstream to V.92 callers</option></select>"));
+    CHECK(has(html, "AT+PIG=0")); CHECK(!has(html, "simulation"));
     CHECK(has(html, "<input type=\"text\" name=\"user0\" size=\"24\" maxlength=\"63\" value=\"\">"));
     CHECK(has(html, "<input type=\"text\" name=\"user15\" size=\"24\" maxlength=\"63\" value=\"\">"));
     CHECK(!has(html, "name=\"user16\""));
@@ -211,7 +211,7 @@ static void test_page(void)
     c.v92 = 1;
     CHECK(settings_render_html(&c, 0, NULL, html, sizeof html) > 0);
     CHECK(has(html, "<select name=\"v92\"><option value=\"off\">Off: V.90 upstream (V.34, up to 33600 bit/s)</option>"
-                    "<option value=\"on\" selected>On: offer PCM upstream to V.92 callers (experimental)</option></select>"));
+                    "<option value=\"on\" selected>On: offer PCM upstream to V.92 callers</option></select>"));
     c.v92 = 0;
     n = settings_render_html(&c, 0, NULL, html, sizeof html);
     CHECK(has(html, "name=\"user0\" size=\"24\" maxlength=\"63\" value=\"alice\">"));
@@ -613,19 +613,19 @@ static void test_port2(void)
     CHECK(has(html, "name=\"mod_v90\" value=\"1\">"));
     CHECK(has(html, "name=\"mod_v34\" value=\"1\" checked>"));
     CHECK(has(html, "name=\"max_downstream\" size=\"6\" maxlength=\"5\" value=\"28800\""));
-    CHECK(has(html, "<select name=\"v92\"><option value=\"off\" selected>"));
+    CHECK(has(html, "<option value=\"on\" selected>On: offer"));
     CHECK(has(html, "<b>Modem</b>"));
     /* V.92 per port: the same field name, the hidden port=2 says whose it is */
-    CHECK_EQ_I(apply(&c, "port=2&v92=on", &out), SETTINGS_OK);
-    CHECK_EQ_I(out.port2.v92, 1); CHECK_EQ_I(out.v92, 0);
+    CHECK_EQ_I(apply(&c, "port=2&v92=off", &out), SETTINGS_OK);
+    CHECK_EQ_I(out.port2.v92, 0); CHECK_EQ_I(out.v92, 1);
     CHECK(settings_render_page(&out, SETTINGS_MODEM2, 0, NULL, html, sizeof html) > 0);
-    CHECK(has(html, "<select name=\"v92\"><option value=\"off\">") && has(html, "<option value=\"on\" selected>On: offer"));
+    CHECK(has(html, "<select name=\"v92\"><option value=\"off\" selected>") && has(html, "<option value=\"on\">On: offer"));
     CHECK(settings_render_page(&out, SETTINGS_MODEM, 0, NULL, html, sizeof html) > 0);
-    CHECK(has(html, "<select name=\"v92\"><option value=\"off\" selected>"));
+    CHECK(has(html, "<option value=\"on\" selected>On: offer"));
     CHECK(settings_render_page(&out, SETTINGS_LINE, 0, NULL, html, sizeof html) > 0);
     CHECK(!has(html, "name=\"v92\""));
-    CHECK_EQ_I(apply(&c, "v92=on", &out), SETTINGS_OK);
-    CHECK_EQ_I(out.v92, 1); CHECK_EQ_I(out.port2.v92, 0);
+    CHECK_EQ_I(apply(&c, "v92=off", &out), SETTINGS_OK);
+    CHECK_EQ_I(out.v92, 0); CHECK_EQ_I(out.port2.v92, 1);
     CHECK_EQ_I(apply(&c, "port=2&v92=1", &out), SETTINGS_INVALID);
     CHECK(strcmp(err, "[modem2] v92: '1' is not one of: on, off") == 0);
     CHECK_EQ_I(apply(&c, "port=2&max_upstream=48000", &out), SETTINGS_OK);

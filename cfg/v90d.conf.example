@@ -41,7 +41,7 @@ v42 = on
 v42bis = on
 # on: offer V.92 PCM upstream to V.92 callers (then max_upstream may go up
 # to 48000). off (default): V.90, upstream is V.34.
-v92 = off
+v92 = on
 # rings before answer
 rings = 1
 # ulaw (default) or alaw

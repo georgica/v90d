@@ -148,6 +148,17 @@ int status_render_ports(const status_t *const ports[2], int sel, char *buf, size
  * on. ports[1] is NULL on a box with one port. The history lives in memory:
  * a restart of the box empties it. */
 int status_render_calls(const status_t *const ports[2], char *buf, size_t cap);
+/* The BBS page: what to dial for the bulletin boards, and the boards, in
+ * pages of STATUS_BBS_PAGE with a search. rows writes the boards that
+ * answer the search q (letters in lower case and digits, "" = all) as <tr>
+ * rows of three cells (name, name at the prompt, number) into its buffer:
+ * it passes over the first skip of them, writes at most max, and says how
+ * many it wrote and how many more follow; NULL = there is no list. query
+ * is what followed the ? in the address (p = page from 1, q = search),
+ * NULL if nothing did. */
+#define STATUS_BBS_PAGE 100
+typedef size_t (*status_bbs_rows)(void *ctx, const char *q, int skip, int max, char *buf, size_t cap, int *shown, int *left);
+int status_render_bbs(status_bbs_rows rows, void *ctx, const char *query, size_t qlen, char *buf, size_t cap);
 int status_render_json(const status_t *s, char *buf, size_t cap);
 
 #endif

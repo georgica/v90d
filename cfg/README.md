@@ -66,7 +66,7 @@ daemon's decision.
 | modem | `tx_level` | dBm0, -30..-6 | `-12` |
 | modem | `v42` | `on`, `off` | `on` |
 | modem | `v42bis` | `on`, `off` (on needs `v42 = on`) | `on` |
-| modem | `v92` | `on`, `off`: offer V.92 PCM upstream to callers whose modem asks for it (has an effect only with `v90` in `modulations` and `v42 = on`; the upstream goes above 33333 bit/s only with `max_upstream` raised, up to 48000; experimental, simulation tested only) | `off` |
+| modem | `v92` | `on`, `off`: offer V.92 PCM upstream to callers whose modem asks for it (has an effect only with `v90` in `modulations` and `v42 = on`; the upstream goes above 33333 bit/s only with `max_upstream` raised, up to 48000; a caller that does not ask gets V.90) | `on` |
 | modem | `rings` | rings of ringback before we answer, 1..10 | `1` |
 | modem | `law` | `ulaw`, `alaw` | `ulaw` |
 | line | `number` | the number callers must dial: 1..20 characters from `0-9 * #`, or `any` | `any` |
@@ -201,7 +201,7 @@ v42 = on
 v42bis = on
 # on: offer V.92 PCM upstream to V.92 callers (then max_upstream may go up
 # to 48000). off (default): V.90, upstream is V.34.
-v92 = off
+v92 = on
 # rings before answer
 rings = 1
 # ulaw (default) or alaw

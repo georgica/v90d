@@ -177,7 +177,7 @@ static void test_idle(void)
         int n_links = 0;
         CHECK(a != NULL && strncmp(a, "href=\"/line\">Line</a>", 21) == 0);
         for (; a; a = strstr(a + 5, "href=")) { CHECK(a[6] == '/' && a[7] != '/'); n_links++; }
-        CHECK_EQ_I(n_links, 8);                 /* five settings tabs, Firmware, Calls, Log out */
+        CHECK_EQ_I(n_links, 9);                 /* five settings tabs, BBS, Firmware, Calls, Log out */
     }
     CHECK(has(html, "<meta http-equiv=\"refresh\" content=\"5\">"));
     /* the look: light and dark, a header that marks this page, the state

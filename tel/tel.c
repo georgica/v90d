@@ -165,6 +165,25 @@ static void accept_number(tel_t *t)
     go(t, TEL_CONNECTING);
 }
 
+/* what has been dialled so far and the numbers that connect: 2 = it is one
+ * of them, 1 = it begins one, 0 = it can be none */
+static int dialed_is(const tel_t *t)
+{
+    int i, best = 0;
+    for (i = -1; i < TEL_ALSO; i++) {
+        const char *num = i < 0 ? t->cfg.number : t->cfg.also[i];
+        size_t want = strlen(num);
+        size_t k;
+        if (!want || (size_t)t->ndialed > want) continue;
+        for (k = 0; k < (size_t)t->ndialed; k++)        /* in also[], '?' is any digit */
+            if (t->dialed[k] != num[k] && !(i >= 0 && num[k] == '?' && t->dialed[k] >= '0' && t->dialed[k] <= '9')) break;
+        if (k < (size_t)t->ndialed) continue;
+        if ((size_t)t->ndialed == want) return 2;
+        best = 1;
+    }
+    return best;
+}
+
 static void digit(tel_t *t, char k)
 {
     size_t want = strlen(t->cfg.number);
@@ -175,8 +194,7 @@ static void digit(tel_t *t, char k)
     if (want == 0 && k == '#' && t->ndialed > 0) { accept_number(t); return; }
     if (t->ndialed >= TEL_NUMBER_MAX) { t->overflow = 1; return; }
     t->dialed[t->ndialed++] = k; t->dialed[t->ndialed] = 0;
-    if (want && (size_t)t->ndialed == want && memcmp(t->dialed, t->cfg.number, want) == 0)
-        accept_number(t);
+    if (want && dialed_is(t) == 2) accept_number(t);
 }
 
 static void hook_logic(tel_t *t, int raw)
@@ -269,8 +287,7 @@ int16_t tel_tick(tel_t *t, int offhook, int16_t rx)
         break;
     case TEL_DIALING: {
         size_t want = strlen(t->cfg.number);
-        int wrong = want && (t->overflow || (size_t)t->ndialed > want ||
-                             memcmp(t->dialed, t->cfg.number, (size_t)t->ndialed) != 0);
+        int wrong = want && (t->overflow || !dialed_is(t));
         t->idle++;
         if (t->pulses) t->idle = 0;
         if (want == 0) { if (t->idle >= MS(ANY_WAIT_MS)) accept_number(t); }

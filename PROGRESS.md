@@ -1931,3 +1931,91 @@ one: the box's V.92 answering side is proven from Linux pppd, where the
 exact chat string (`AT+PIG=0`) makes the Conexant request V.92 and the call
 comes up V.92 (52000/32000). A real V.92-on-Windows test would need a
 proper Conexant Win98 driver rather than the generic "Standard Modem".
+
+## 1 800 BBS DIAL: bulletin boards from a terminal program (2026-11-16)
+
+New: the box answers 1 800 227 3425 (with or without the 1) on every port,
+whatever the port's service. That call carries octets instead of PPP, with
+error control; the caller is asked `BBS:` and joined over telnet to the
+board named. DESIGN.md 5b says how. The boards are those of the Telnet BBS
+Guide: the box fetches the guide's archive once a day and makes its list
+from it (`fw/bbsfetch.sh`, `fw/bbsguide.awk`); run on the PC against the
+real site on 2026-11-16 the script took `ibbs111626.zip` and printed 1073
+boards. A short list (`lists/bbs.txt`, 13 boards) is in the image.
+
+Later the same day: every board has a telephone number of its own, 227 and
+the login name on the keys of a telephone (seven digits, zeros behind a
+short name, the next free number where two would share one: 116 of 1074
+on that day's list), dialled on any port and joined to the board without a
+prompt. 1 800 BBS DIAL stays as the operator and takes a name or a number.
+A caller can no longer type an address and is no longer shown one. List
+format `v90d-bbs 2`. `tel`: `?` in `also[]` is any digit (391 checks);
+`srv`: 1094 checks; `ns_call`: 328 checks (a board's number with and
+without the 1, a number no board has, an address typed at the prompt is
+no board, no address on the caller's screen or on the page).
+
+The BBS page in pages of 100 with a search (`ns_call` 337 checks,
+`test_httpd` covers the address parsing). On the bench unit with the
+guide's list: "Boards 1 to 100 of 1073", page 11 is 1001 to 1073 with no
+Next, `q=tele` gives 9 boards, `q=2278353422` gives Telehack.
+
+V.92 is on by default (`v92 = on` in the code, the image's first
+configuration and the example); a saved configuration keeps its value.
+On the unit, Conexant on port 2 from Linux (`ATDT2278353422`, V.92 on at
+the port, the modem not asking for it): CONNECT, "v90d bulletin board
+gateway", "Calling Telehack ...", Telehack's banner and command list, no
+prompt in between. Not yet tried: a caller that asks for V.92 on a board
+call, and the Windows VMs against a port with V.92 on.
+
+Calls from SyncTERM 1.7 on Linux kept ending. Cause: busybox `nc -w 15`,
+which the box used to reach a board, ends the second time 15 s pass
+without an octet. Measured on the unit: a call to Telehack with one key
+every 20 s ended after 42 s, "cleared locally". The box now connects with
+its own code (`srv/bbsdial.c`, no limit on quiet time; `srv` 1123 checks).
+With that build the same call with one key every 50 s was still up after
+360 s when the test hung up, carrier detect steady throughout.
+
+Tests on the PC:
+- `dce`: octets on LAPM both ways (`test_call` case s).
+- `tel`: numbers that answer beside the port's own (`test_also`).
+- `srv`: the list's lines, the prompt's line editor, the telnet words
+  (answers, refusals, split commands, CR NUL, no buffer overrun on 20000
+  blocks of arbitrary octets), the number on a port of each service, a
+  whole call with data both ways, every line of the shipped list.
+- `ns_call` part 13, the real daemon: the number, a search, an unknown
+  name, an address where nothing answers, a board (a script) reached by a
+  name typed with a backspace, the board's telnet words kept from the
+  caller, the line dropped when the board ends, the list fetched only after
+  the first call and then in force on the page and at the prompt, the
+  port's own number still PPP.
+- `cfg`: the BBS page.
+- `fw/tools/test_bbsfetch.sh`: the guide's directory as our list (a bare
+  &, `][`, BBS inside a name, two boards of one name, a bad host, ssh
+  entries left out), the archive names tried and their order, January, no
+  clock, an error page instead of an archive.
+
+On the box (HT802 V2.5A, this build installed through its Firmware page),
+Conexant on PHONE 2, whose service is the plain internet:
+- From Linux (pyserial as the terminal): `ATDT18002273425`, CONNECT, the
+  greeting and `BBS:`; `?beer` listed 20forbeers; `telehack` gave "Calling
+  Telehack (telehack.com:23) ..." and Telehack's banner and command list.
+- From Windows XP (VirtualBox, modem by USB), HyperTerminal dialling
+  1 800 2273425 through "Standard 56000 bps Modem": the box showed the call
+  as V.90, 52000 down / 28800 up, LAPM. `?` listed the boards, `telehack`
+  reached Telehack, readable in HyperTerminal's ANSI window. HyperTerminal
+  did not show the greeting, which went out the moment the modems
+  connected; the box now waits 1.5 s first.
+
+- The list on the box: opened seconds after a restart, the BBS page showed
+  the 13 boards of the image (the box had no clock yet and the fetch gave
+  up; early failures are now tried again after a minute, not fifteen).
+  With that build, 39 s after the restart the page showed 190 boards "and
+  883 more": the guide's list of that day, 1073 boards, fetched and
+  converted by the box itself.
+- The owner then used the XP session by hand and was inside Dura-Europos
+  (a board only the guide's list has) when the next firmware upload
+  restarted the box and HyperTerminal showed NO CARRIER.
+
+Not tried: a file transfer (Zmodem) through the bridge, a board that needs
+8-bit binary, ANSI art at speed, a real vintage terminal, two such calls at
+once, V.92 on such a call.

@@ -868,7 +868,7 @@ static void test_settings_post(void)
     CHECK_EQ_I(sv.calls, 1);
     CHECK(sv.ctx == &sv);
     CHECK_EQ_I(sv.got.busy_chance, 40);
-    CHECK_EQ_I(sv.got.v92, 1); CHECK_EQ_I(sv.got.max_up, 48000); CHECK_EQ_I(sv.got.port2.v92, 0);
+    CHECK_EQ_I(sv.got.v92, 1); CHECK_EQ_I(sv.got.max_up, 48000); CHECK_EQ_I(sv.got.port2.v92, 1);
     CHECK(strcmp(sv.got.line_number, "5550000") == 0);
     CHECK_EQ_I(sv.old_busy, 0);                 /* the callback still saw the old config in C */
     CHECK_EQ_I(C.busy_chance, 40);              /* and now it is the new one */
@@ -880,7 +880,7 @@ static void test_settings_post(void)
     CHECK_EQ_I(cfg_validate(&C, NULL, 0), CFG_OK);
     CHECK_EQ_I(code_of("GET /settings?saved=1 HTTP/1.0\r\n\r\n"), 200);
     CHECK(strstr(resp, "name=\"busy_chance\" size=\"6\" maxlength=\"5\" value=\"40\">") != NULL);
-    CHECK(strstr(resp, "<option value=\"on\" selected>On: offer PCM upstream to V.92 callers (experimental)</option>") != NULL);
+    CHECK(strstr(resp, "<option value=\"on\" selected>On: offer PCM upstream to V.92 callers</option>") != NULL);
     CHECK(strstr(resp, "name=\"max_upstream\" size=\"6\" maxlength=\"5\" value=\"48000\">") != NULL);
     CHECK(strstr(resp, "value=\"5550000\"") != NULL);
     CHECK(strstr(resp, "SECRET") == NULL);
@@ -2202,6 +2202,75 @@ static int vpn_post(const char *ctype, const char *body, char *out, size_t cap)
                      ctype, (unsigned)strlen(body), body);
     return exchange_n(req, (size_t)n, out, cap);
 }
+/* the BBS page: what to dial, and the boards the daemon knows */
+static char bbs_q[40]; static int bbs_skip, bbs_max, bbs_total = 3;
+static size_t bbs_rows(void *ctx, const char *q, int skip, int max, char *buf, size_t cap, int *shown, int *left)
+{
+    static const char rows[] = "<tr><td>Telehack</td><td><code>telehack</code></td><td>227 835 3422</td></tr>\n";
+    (void)ctx;
+    snprintf(bbs_q, sizeof bbs_q, "%s", q); bbs_skip = skip; bbs_max = max;
+    if (cap < sizeof rows || skip >= bbs_total) { *shown = 0; *left = 0; return 0; }
+    memcpy(buf, rows, sizeof rows - 1); *shown = 1; *left = bbs_total - skip - 1;
+    return sizeof rows - 1;
+}
+static void test_bbs_page(void)
+{
+    resp_t r; int len;
+    fixture();
+    len = exchange("GET /bbs HTTP/1.0\r\n\r\n", resp, sizeof resp);
+    CHECK(parse_resp(resp, len, &r) && r.code == 200);
+    CHECK(strstr(resp, "<h2>Bulletin boards</h2>") != NULL);
+    CHECK(strstr(resp, "1 800 227 3425") != NULL && strstr(resp, "1 800 BBS DIAL") != NULL);
+    CHECK(strstr(resp, "227 835 3422") != NULL);                    /* the example of a board's own number */
+    CHECK(strstr(resp, "host:port") == NULL);
+    CHECK(strstr(resp, "<a href=\"/bbs\">BBS</a>") == NULL);       /* the active tab is no link */
+    CHECK(strstr(resp, "The list of boards is not there.") != NULL); /* nobody gives rows here */
+    CHECK(strstr(resp, "</html>") != NULL);
+    httpd_on_bbs(&H, bbs_rows, NULL);
+    len = exchange("GET /bbs HTTP/1.0\r\n\r\n", resp, sizeof resp);
+    CHECK(parse_resp(resp, len, &r) && r.code == 200);
+    CHECK(strstr(resp, "<th>Board</th><th>Name at the prompt</th><th>Number</th>") != NULL);
+    CHECK(strstr(resp, "<td><code>telehack</code></td>") != NULL);
+    CHECK(strstr(resp, "</html>") != NULL);
+    /* pages of STATUS_BBS_PAGE boards and a search, all in the address: no script */
+    CHECK_EQ_I(bbs_skip, 0); CHECK_EQ_I(bbs_max, STATUS_BBS_PAGE); CHECK(strcmp(bbs_q, "") == 0);
+    CHECK(strstr(resp, "<form method=\"get\" action=\"/bbs\">") != NULL);
+    CHECK(strstr(resp, "<input type=\"text\" name=\"q\" size=\"24\" maxlength=\"32\" value=\"\">") != NULL);
+    CHECK(strstr(resp, "Boards 1 to 1 of 3") != NULL);
+    CHECK(strstr(resp, "<a href=\"/bbs?p=2\">Next</a>") != NULL);
+    CHECK(strstr(resp, ">Previous</a>") == NULL);
+    bbs_total = 250;
+    len = exchange("GET /bbs?p=2 HTTP/1.0\r\n\r\n", resp, sizeof resp);
+    CHECK(parse_resp(resp, len, &r) && r.code == 200);
+    CHECK_EQ_I(bbs_skip, STATUS_BBS_PAGE);
+    CHECK(strstr(resp, "Boards 101 to 101 of 250") != NULL);
+    CHECK(strstr(resp, "<a href=\"/bbs?p=1\">Previous</a>") != NULL);
+    CHECK(strstr(resp, "<a href=\"/bbs?p=3\">Next</a>") != NULL);
+    /* a search is letters and digits, as at the prompt; the rest never reaches the page */
+    len = exchange("GET /bbs?q=Tele+Hack%3Cb%3E&p=2 HTTP/1.0\r\n\r\n", resp, sizeof resp);
+    CHECK(parse_resp(resp, len, &r) && r.code == 200);
+    CHECK(strcmp(bbs_q, "telehackb") == 0); CHECK_EQ_I(bbs_skip, STATUS_BBS_PAGE);
+    CHECK(strstr(resp, "name=\"q\" size=\"24\" maxlength=\"32\" value=\"telehackb\">") != NULL);
+    CHECK(strstr(resp, "<a href=\"/bbs?p=3&amp;q=telehackb\">Next</a>") != NULL);
+    CHECK(strstr(resp, "<a href=\"/bbs\">All boards</a>") != NULL);
+    CHECK(strstr(resp, "<b>") == NULL || strstr(resp, "Hack<b>") == NULL);
+    /* a page past the end, nonsense for a page */
+    bbs_total = 3;
+    len = exchange("GET /bbs?p=9 HTTP/1.0\r\n\r\n", resp, sizeof resp);
+    CHECK(parse_resp(resp, len, &r) && r.code == 200);
+    CHECK(strstr(resp, "<td colspan=\"3\">none</td>") != NULL);
+    CHECK(strstr(resp, "<a href=\"/bbs?p=8\">Previous</a>") != NULL); CHECK(strstr(resp, ">Next</a>") == NULL);
+    len = exchange("GET /bbs?p=-4&q= HTTP/1.0\r\n\r\n", resp, sizeof resp);
+    CHECK(parse_resp(resp, len, &r) && r.code == 200); CHECK_EQ_I(bbs_skip, 0);
+    len = exchange("GET /bbs?p=99999999999 HTTP/1.0\r\n\r\n", resp, sizeof resp);
+    CHECK(parse_resp(resp, len, &r) && r.code == 200); CHECK(bbs_skip >= 0);
+    CHECK_EQ_I(code_of("POST /bbs HTTP/1.0\r\nContent-Length: 0\r\n\r\n"), 405);
+    /* the tab is on the other pages */
+    len = exchange("GET / HTTP/1.0\r\n\r\n", resp, sizeof resp);
+    CHECK(strstr(resp, "<a href=\"/bbs\">BBS</a>") != NULL);
+    httpd_on_bbs(&H, NULL, NULL);
+}
+
 static void test_vpn_profile(void)
 {
     resp_t r; int len; static char big[VPN_PROFILE_MAX + 600]; size_t i;
@@ -2297,6 +2366,7 @@ int main(void)
     test_firmware();
     test_pages();
     test_two_ports();
+    test_bbs_page();
     test_vpn_profile();
     test_settings_fuzz();
     httpd_close(&H);

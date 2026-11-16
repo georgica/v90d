@@ -29,7 +29,7 @@
 #include "vpn.h"
 
 enum { HC_FREE = 0, HC_RECV, HC_BODY, HC_SEND, HC_LINGER };
-enum { V_ERROR = 0, V_HTML, V_JSON, V_CONFIG, V_HTML2, V_JSON2 /* port 2 */, V_CALLS };
+enum { V_ERROR = 0, V_HTML, V_JSON, V_CONFIG, V_HTML2, V_JSON2 /* port 2 */, V_CALLS, V_BBS };
 enum { M_GET, M_HEAD, M_POST, M_OTHER };
 
 #define CRED_MAX (6 + CFG_SECRET_MAX)   /* "admin:" and the longest password */
@@ -189,6 +189,9 @@ static void respond(httpd_t *h, httpd_conn_t *c, int code, int view, int head_on
         finish(h, c, code, CT_HTML, NULL, status_render_calls(both, body, HTTPD_BODY_MAX), head_only, now);
         break;
     }
+    case V_BBS:
+        finish(h, c, code, CT_HTML, NULL, status_render_bbs(h->bbs, h->bbs_ctx, h->bbs_query, h->bbs_qlen, body, HTTPD_BODY_MAX), head_only, now);
+        break;
     case V_JSON:
     case V_JSON2:
         finish(h, c, code, "application/json", NULL,
@@ -886,7 +889,7 @@ static void handle(httpd_t *h, httpd_conn_t *c, size_t n, uint32_t now)
         }
         return;
     }
-    /* the status views: read only, a query string is ignored */
+    /* the status views: read only, a query string is ignored but for /bbs */
     if (method != M_GET && method != M_HEAD) { respond(h, c, 405, V_ERROR, 0, now); return; }
     head_only = method == M_HEAD;
     if (plen == 1) view = V_HTML;
@@ -894,6 +897,9 @@ static void handle(httpd_t *h, httpd_conn_t *c, size_t n, uint32_t now)
     else if (h->status2 && plen == 6 && memcmp(uri, "/port2", 6) == 0) view = V_HTML2;
     else if (h->status2 && plen == 13 && memcmp(uri, "/status2.json", 13) == 0) view = V_JSON2;
     else if (plen == 6 && memcmp(uri, "/calls", 6) == 0) view = V_CALLS;
+    else if (plen == 4 && memcmp(uri, "/bbs", 4) == 0) {         /* its page and its search are in the query */
+        view = V_BBS; h->bbs_query = q ? q + 1 : NULL; h->bbs_qlen = q ? ulen - plen - 1 : 0;
+    }
     else if (plen == 7 && memcmp(uri, "/config", 7) == 0) view = V_CONFIG;
     else if (plen == 7 && memcmp(uri, "/logout", 7) == 0) {
         { int j = session_find(h, c->rx, n, now); if (j >= 0) h->sess[j].on = 0; }
@@ -979,6 +985,8 @@ void httpd_on_firmware(httpd_t *h, const httpd_fw_t *fw)
     if (fw) h->fw = *fw;
     else memset(&h->fw, 0, sizeof h->fw);
 }
+
+void httpd_on_bbs(httpd_t *h, status_bbs_rows rows, void *ctx) { h->bbs = rows; h->bbs_ctx = ctx; }
 
 void httpd_on_vpn(httpd_t *h, int (*keep)(void *ctx, const char *profile, size_t len), void *ctx)
 {

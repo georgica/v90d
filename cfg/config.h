@@ -57,7 +57,7 @@
  *   tx_level = -12            transmit level in dBm0, -30..-6
  *   v42 = on                  on | off
  *   v42bis = on               on | off; on needs v42 = on
- *   v92 = off                 on | off: offer V.92 PCM upstream to callers
+ *   v92 = on                  on | off: offer V.92 PCM upstream to callers
  *                             whose modem asks for it. Has an effect only
  *                             with v90 in modulations.
  *   rings = 1                 rings before answer, 1..10

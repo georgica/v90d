@@ -74,7 +74,7 @@ static void test_port2(void)
         "[network]\nppp_peer2 = 10.64.64.9\n"
         "[modem]\nrings = 2\n"
         "[modem2]\nrings = 3\nmodulations = v22bis\nlaw = alaw\nmax_downstream = 2400\nmax_upstream = 1200\n"
-        "tx_level = -15\nv42bis = off\nv92 = on\n"
+        "tx_level = -15\nv42bis = off\nv92 = off\n"
         "[line]\nnumber = 5551111\n"
         "[line2]\nnumber = 5559999\ntones = eu\nbusy_chance = 10\ndrop_mean = 5\nsession_limit = 60\nidle_timeout = 7\n";
 
@@ -83,7 +83,7 @@ static void test_port2(void)
     CHECK_EQ_I(c.port2.modulations, CFG_MOD_ALL);
     CHECK_EQ_I(c.port2.max_down, 56000); CHECK_EQ_I(c.port2.max_up, 33600);
     CHECK_EQ_I(c.port2.tx_level, -12); CHECK_EQ_I(c.port2.v42, 1); CHECK_EQ_I(c.port2.v42bis, 1);
-    CHECK_EQ_I(c.port2.v92, 0);
+    CHECK_EQ_I(c.port2.v92, 1);
     CHECK_EQ_I(c.port2.rings, 1); CHECK_EQ_I(c.port2.law, CFG_LAW_ULAW);
     CHECK_EQ_I(c.port2.line_number[0], 0); CHECK_EQ_I(c.port2.line_tones, CFG_TONES_US);
     CHECK_EQ_I(cfg_validate(&c, err, sizeof err), CFG_OK);
@@ -97,7 +97,7 @@ static void test_port2(void)
     CHECK_EQ_I(c.port2.rings, 3); CHECK_EQ_I(c.port2.modulations, CFG_MOD_V22BIS);
     CHECK_EQ_I(c.port2.law, CFG_LAW_ALAW); CHECK_EQ_I(c.port2.max_down, 2400); CHECK_EQ_I(c.port2.max_up, 1200);
     CHECK_EQ_I(c.port2.tx_level, -15); CHECK_EQ_I(c.port2.v42, 1); CHECK_EQ_I(c.port2.v42bis, 0);
-    CHECK_EQ_I(c.port2.v92, 1); CHECK_EQ_I(c.v92, 0);       /* each port has its own */
+    CHECK_EQ_I(c.port2.v92, 0); CHECK_EQ_I(c.v92, 1);       /* each port has its own */
     CHECK_EQ_S(c.port2.line_number, "5559999"); CHECK_EQ_I(c.port2.line_tones, CFG_TONES_EU);
     CHECK_EQ_I(c.port2.busy_chance, 10); CHECK_EQ_I(c.port2.drop_mean_min, 5);
     CHECK_EQ_I(c.port2.session_limit_min, 60); CHECK_EQ_I(c.port2.idle_timeout_min, 7);
@@ -105,9 +105,9 @@ static void test_port2(void)
     /* what one line's server is given */
     cfg_for_port(&c, 0, &v);
     CHECK_EQ_I(v.rings, 2); CHECK_EQ_S(v.line_number, "5551111"); CHECK(v.ppp_peer == IP(10, 64, 64, 2));
-    CHECK_EQ_I(v.v92, 0);
+    CHECK_EQ_I(v.v92, 1);
     cfg_for_port(&c, 1, &v);
-    CHECK_EQ_I(v.v92, 1); CHECK_EQ_I(v.port2.v92, 0);
+    CHECK_EQ_I(v.v92, 0); CHECK_EQ_I(v.port2.v92, 1);
     CHECK_EQ_I(v.rings, 3); CHECK_EQ_S(v.line_number, "5559999"); CHECK(v.ppp_peer == IP(10, 64, 64, 9));
     CHECK_EQ_I(v.modulations, CFG_MOD_V22BIS); CHECK_EQ_I(v.law, CFG_LAW_ALAW);
     CHECK_EQ_I(v.max_down, 2400); CHECK_EQ_I(v.max_up, 1200); CHECK_EQ_I(v.tx_level, -15);
@@ -120,8 +120,8 @@ static void test_port2(void)
     CHECK(cfg_write(&c, 1, text, sizeof text) > 0);
     CHECK(strstr(text, "\nppp_peer = 10.64.64.2\nppp_peer2 = 10.64.64.9\n") != NULL);
     CHECK(strstr(text, "\n[modem2]\nmodulations = v22bis\nmax_downstream = 2400\nmax_upstream = 1200\n"
-                       "tx_level = -15\nv42 = on\nv42bis = off\nv92 = on\nrings = 3\nlaw = alaw\n") != NULL);
-    CHECK(strstr(text, "\nv42bis = on\nv92 = off\nrings = 2\n") != NULL);          /* port 1 */
+                       "tx_level = -15\nv42 = on\nv42bis = off\nv92 = off\nrings = 3\nlaw = alaw\n") != NULL);
+    CHECK(strstr(text, "\nv42bis = on\nv92 = on\nrings = 2\n") != NULL);          /* port 1 */
     CHECK(strstr(text, "\n[line2]\nnumber = 5559999\ntones = eu\nbusy_chance = 10\ndrop_mean = 5\n"
                        "session_limit = 60\nidle_timeout = 7\n") != NULL);
     CHECK(strstr(text, "\n[line]\nnumber = 5551111\n") != NULL);
@@ -195,7 +195,7 @@ static void test_defaults(void)
     CHECK_EQ_I(c.tx_level, -12);
     CHECK_EQ_I(c.v42, 1);
     CHECK_EQ_I(c.v42bis, 1);
-    CHECK_EQ_I(c.v92, 0);            /* V.92 is asked for, never the default */
+    CHECK_EQ_I(c.v92, 1);            /* V.92 is offered unless switched off */
     CHECK_EQ_I(c.rings, 1);
     CHECK_EQ_I(c.law, CFG_LAW_ULAW);
     CHECK_EQ_I(c.status_listen, CFG_LISTEN_LAN);
@@ -678,9 +678,9 @@ static void test_write(void)
     CHECK(strstr(a, "modulations = v90, v34, v32bis, v22bis, v22, v21\n") != NULL);
     CHECK(strstr(a, "tx_level = -12\n") != NULL);
     CHECK(strstr(a, "\n[modem]\nmodulations = v90, v34, v32bis, v22bis, v22, v21\nmax_downstream = 56000\n"
-                    "max_upstream = 33600\ntx_level = -12\nv42 = on\nv42bis = on\nv92 = off\nrings = 1\n") != NULL);
+                    "max_upstream = 33600\ntx_level = -12\nv42 = on\nv42bis = on\nv92 = on\nrings = 1\n") != NULL);
     CHECK(strstr(a, "\n[modem2]\nmodulations = v90, v34, v32bis, v22bis, v22, v21\nmax_downstream = 56000\n"
-                    "max_upstream = 33600\ntx_level = -12\nv42 = on\nv42bis = on\nv92 = off\nrings = 1\n") != NULL);
+                    "max_upstream = 33600\ntx_level = -12\nv42 = on\nv42bis = on\nv92 = on\nrings = 1\n") != NULL);
     CHECK(strstr(a, "\n[log]\nlevel = info\n") != NULL);
     CHECK(strstr(a, "\n[line]\nnumber = any\ntones = us\nbusy_chance = 0\ndrop_mean = 0\n"
                     "session_limit = 0\nidle_timeout = 0\nservice = internet\ndreamcast_now = off\ndreamcast_lan = off\ndreamcast_upnp = off\ndreamcast_iwango = off\nsaturn_matchmaking = off\n\n[modem2]\n") != NULL);

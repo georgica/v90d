@@ -107,6 +107,9 @@ typedef struct {
      * what the caller's modem sends is handed to raw_rx (with ppp.ctx) as it
      * is, and dce_raw_write() sends to it. PPP stays down. */
     void   (*raw_rx)(void *ctx, const uint8_t *oct, size_t n);
+    /* with raw_rx: 1 = error control and compression stay as v42 says (a
+     * terminal program calling a bulletin board, srv/bbs.h); 0 = none */
+    int      raw_ec;
     /* closing sequence limits, ms; 0 = the defaults in brackets */
     uint32_t flush_ms;         /* wait for PPP's last frames to go out [5000] */
     uint32_t release_ms;       /* wait for the answer to DISC [3000] */

@@ -233,6 +233,59 @@ static void test_wrong_number(void)
     CHECK(tone_amp(R.cap, R.ncap, 480) > 600);
 }
 
+/* numbers that answer beside the port's own (tel_cfg.also) */
+static void test_also(void)
+{
+    tel_cfg c = base_cfg();
+    strcpy(c.also[0], "8002273425"); strcpy(c.also[1], "18002273425");
+    rig_init(&R, &c);
+    R.hook = 1; run(&R, 300);
+    dial(&R, "8002273425");
+    CHECK_EQ_I(R.t.state, TEL_CONNECTING);
+    CHECK(strcmp(R.t.dialed, "8002273425") == 0);
+    R.hook = 0; run(&R, 600);
+    R.hook = 1; run(&R, 300);
+    dial(&R, "18002273425");
+    CHECK_EQ_I(R.t.state, TEL_CONNECTING);
+    R.hook = 0; run(&R, 600);
+    /* the port's own number as before */
+    R.hook = 1; run(&R, 300);
+    dial(&R, "5551234");
+    CHECK_EQ_I(R.t.state, TEL_CONNECTING);
+    R.hook = 0; run(&R, 600);
+    /* part of one of them is not yet wrong; one digit off is */
+    R.hook = 1; run(&R, 300);
+    dial(&R, "180022");
+    run(&R, 3000);
+    CHECK_EQ_I(R.t.state, TEL_DIALING);
+    R.hook = 0; run(&R, 600);
+    R.hook = 1; run(&R, 300);
+    dial(&R, "8002273426");
+    CHECK(wait_state(&R, TEL_INTERCEPT, 4000) >= 0);
+    R.hook = 0; run(&R, 600);
+    /* '?' stands for any digit: a whole range of numbers connects */
+    strcpy(c.also[1], "227???????");
+    rig_init(&R, &c);
+    R.hook = 1; run(&R, 300);
+    dial(&R, "2275550123");
+    CHECK_EQ_I(R.t.state, TEL_CONNECTING);
+    CHECK(strcmp(R.t.dialed, "2275550123") == 0);
+    R.hook = 0; run(&R, 600);
+    R.hook = 1; run(&R, 300);
+    dial(&R, "22755501");
+    run(&R, 3000);
+    CHECK_EQ_I(R.t.state, TEL_DIALING);                 /* not complete yet */
+    R.hook = 0; run(&R, 600);
+    R.hook = 1; run(&R, 300);
+    dial(&R, "227*");                                   /* a digit, not any key */
+    CHECK(wait_state(&R, TEL_INTERCEPT, 4000) >= 0);
+    R.hook = 0; run(&R, 600);
+    R.hook = 1; run(&R, 300);
+    dial(&R, "2285550123");
+    CHECK(wait_state(&R, TEL_INTERCEPT, 4000) >= 0);
+    R.hook = 0; run(&R, 600);
+}
+
 static void test_any_number(void)
 {
     tel_cfg c = base_cfg();
@@ -466,6 +519,7 @@ int main(void)
     test_dtmf_call();
     test_rings_zero_and_eu();
     test_wrong_number();
+    test_also();
     test_any_number();
     test_pulse();
     test_busy();

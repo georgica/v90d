@@ -50,7 +50,7 @@ static const char *const t_dciwango[] = { "Off", "On: reach the IWANGO games' se
 static const char *const t_satmatch[] = { "Off: direct only (dial 0 to wait, #a*b*c*d# to call an address)",
                                           "On: pair players through saturn.dreampipe.net (dial #0NN# and #NN)" };
 static const char *const t_v92[]   = { "Off: V.90 upstream (V.34, up to 33600 bit/s)",
-                                       "On: offer PCM upstream to V.92 callers (experimental)" };
+                                       "On: offer PCM upstream to V.92 callers" };
 static const char *const n_comp[]  = { "off", "on" };
 static const char *const t_comp[]  = { "Off: no PPP compression",
                                        "On: Deflate or MPPC, whichever the caller asks for" };
@@ -313,7 +313,7 @@ int settings_render_page(const cfg_t *c, int page, int saved, const char *error,
     in_select(&b, "PPP compression", F_COMPRESSION, c->compression, n_comp, t_comp, 2);
     sb_puts(&b, "</table>\n<p>With V.92 on, PCM upstream is used when the caller's modem asks for it (for"
                 " example AT+PIG=0 on Conexant modems); set Max upstream above 33600 to let"
-                " it go faster. Tested in simulation only. PPP compression (for both ports) works on"
+                " it go faster. A caller that does not ask gets V.90. PPP compression (for both ports) works on"
                 " top of the modem's own: web pages and text arrive about three times as fast"
                 " as the line rate.</p></section>\n");
 
