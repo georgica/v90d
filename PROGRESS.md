@@ -1916,3 +1916,18 @@ Note on the "691" path: it is an authentication result, not a modem or
 line failure - the two modems negotiated a V.90 carrier with LAPM before
 PPP auth ran. A real deployment just needs the DUN credentials to match a
 box user.
+
+## V.92 under Windows 98: did not negotiate (2026-11-16)
+
+Follow-up to the Win98 dial-up test: with the box offering V.92 (port 2
+v92 = on, max_upstream 48000) and `+PIG=0` added to the Windows "Standard
+Modem" extra settings (Modems control panel -> Properties -> Connection ->
+Advanced -> Extra settings), the Win98 DUN call still connected as **V.90**
+(28800 upstream), not V.92.
+
+So V.92 under Win98's generic Standard Modem driver did not engage, even
+with the PCM-upstream init. This is a caller/modem-driver matter, not a box
+one: the box's V.92 answering side is proven from Linux pppd, where the
+exact chat string (`AT+PIG=0`) makes the Conexant request V.92 and the call
+comes up V.92 (52000/32000). A real V.92-on-Windows test would need a
+proper Conexant Win98 driver rather than the generic "Standard Modem".
