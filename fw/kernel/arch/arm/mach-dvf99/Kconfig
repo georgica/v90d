@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: GPL-2.0
+menuconfig ARCH_DVF99
+	bool "DSPG DVF99 (DVF9918 and relatives)"
+	depends on ARCH_MULTI_V5
+	select CPU_ARM926T
+	select GPIOLIB
+	select DVF99_PLICU
+	select DVF99_TIMER
+	help
+	  Support for boards built on the DSPG DVF99 family of ARM926 SoCs,
+	  such as the Grandstream HT802 analogue telephone adapter.

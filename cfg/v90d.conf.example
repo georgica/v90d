@@ -1,0 +1,80 @@
+# v90d example configuration. Every key is shown; a key left out keeps the
+# default, which is the value shown here except where noted.
+
+[network]
+# dhcp (default) or static. address and netmask are used in static mode.
+lan = static
+address = 192.168.1.2
+netmask = 255.255.255.0
+# the default route in static mode: an address in the same network, or none
+gateway = none
+# our end of the PPP link, and the address handed to the caller
+ppp_local = 10.64.64.1
+ppp_peer = 10.64.64.2
+# DNS servers offered to the caller; `none` to leave one out
+dns1 = 9.9.9.9
+dns2 = 1.1.1.1
+# masquerade the caller behind the LAN address
+nat = on
+
+[ppp]
+# none (default), pap or chap. pap and chap need at least one user.
+auth = chap
+mru = 1500
+# seconds between LCP echo requests, 0 = off
+echo_interval = 30
+# PPP compression (CCP) with callers that ask for it: Deflate (Linux pppd)
+# or MPPC (Windows). Works on top of v42bis; off = never negotiated.
+compression = on
+# up to 16 users: name, then secret. Quote anything with blanks; inside
+# quotes use \" \\ and \xHH.
+user = alice wonderland
+user = "bob smith" "correct horse \"battery\" staple"
+
+[modem]
+modulations = v90, v34, v32bis, v22bis, v22, v21
+max_downstream = 56000
+max_upstream = 33600
+# transmit level in dBm0
+tx_level = -12
+v42 = on
+v42bis = on
+# on: offer V.92 PCM upstream to V.92 callers (then max_upstream may go up
+# to 48000). off (default): V.90, upstream is V.34.
+v92 = off
+# rings before answer
+rings = 1
+# ulaw (default) or alaw
+law = ulaw
+
+[line]
+# the number callers must dial: 1 to 20 characters out of 0-9 * #, or `any`
+# (default): every number connects.
+number = 6387825442
+# us (default) or eu: dial tone, ringback and busy cadences
+tones = us
+# percent of calls that get a busy signal instead of an answer
+busy_chance = 0
+# mean minutes of connect time before the line drops at random, 0 = never
+drop_mean = 0
+# hard limit of one call in minutes, 0 = none
+session_limit = 0
+# minutes without IP traffic before we hang up, 0 = none
+idle_timeout = 0
+# what a caller on this port gets: internet (as it is), archive (web and
+# FTP from Protoweb, the web as it was) or dreamcast (for the game console:
+# no PPP compression, no V.92, the game revival name servers; not tried with
+# a real console)
+service = internet
+
+[status]
+# lan (default) or off
+listen = lan
+port = 80
+# password of the settings page (user name `admin`), quoted like a user
+# secret. Empty: anyone on the LAN can change the settings.
+admin_password = ""
+
+[log]
+# error, warn, info (default) or debug
+level = info

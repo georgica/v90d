@@ -1,0 +1,82 @@
+/* Tests for the echo canceller. */
+#include <string.h>
+#include "test.h"
+#include "../modem/ec.h"
+#include "../sim/noise.h"
+
+#define NH 40
+static double hpath[NH];
+static double hist[NH];
+
+static double echo(double tx)
+{
+    double y = 0; int k;
+    memmove(hist + 1, hist, sizeof(double) * (NH - 1));
+    hist[0] = tx;
+    for (k = 0; k < NH; k++) y += hpath[k] * hist[k];
+    return y;
+}
+
+int main(void)
+{
+    static ec_t ec; rng_t rng;
+    double pe = 0, pr = 0, erle;
+    int i, k;
+
+    /* an echo path: 5 samples of delay, then a decaying oscillation; about -12 dB */
+    for (k = 0; k < NH; k++) hpath[k] = k < 5 ? 0 : 0.2 * cos(0.9 * (k - 5)) * exp(-(k - 5) / 6.0);
+    memset(hist, 0, sizeof hist);
+    rng_seed(&rng, 11);
+
+    /* before training nothing is removed */
+    ec_init(&ec);
+    CHECK_EQ_I(ec_tick(&ec, 1000, 321, -1), 321);
+
+    /* training on a two-level signal (like TRN1d), far end silent */
+    ec_init(&ec);
+    for (i = 0; i < 2040; i++) {
+        int16_t tx = rng_uniform(&rng) < 0.5 ? -3000 : 3000;
+        double e = echo(tx);
+        int16_t out = ec_tick(&ec, tx, (int16_t)floor(e + 0.5), 0);
+        if (i >= 1500) { pe += e * e; pr += (double)out * out; }
+    }
+    erle = 10 * log10(pe / (pr + 1e-9));
+    printf("  ec: ERLE after 2040 samples of two-level training %.1f dB\n", erle);
+    CHECK(erle > 40.0);
+
+    /* frozen, multi-level transmit signal, far-end signal present: the far
+     * signal comes through and the echo stays down */
+    {
+        double pfar = 0, perr = 0;
+        for (i = 0; i < 8000; i++) {
+            int16_t tx = (int16_t)(8000 * (rng_uniform(&rng) * 2 - 1));
+            double e = echo(tx), far = 500 * rng_gauss(&rng);
+            int16_t out = ec_tick(&ec, tx, (int16_t)floor(e + far + 0.5), -1);
+            pfar += far * far; perr += (out - far) * (out - far);
+        }
+        printf("  ec: frozen, residual echo %.1f dB below the far signal\n", 10 * log10(pfar / perr));
+        CHECK(10 * log10(pfar / perr) > 25.0);      /* echo was 13 dB ABOVE the far signal */
+    }
+
+    /* crawling adaptation under double talk follows a changed echo path
+     * without being thrown by the far signal */
+    {
+        double pfar = 0, perr = 0;
+        for (k = 5; k < NH; k++) hpath[k] *= 1.15;
+        for (i = 0; i < 80000; i++) {
+            int16_t tx = (int16_t)(8000 * (rng_uniform(&rng) * 2 - 1));
+            double e = echo(tx), far = 500 * rng_gauss(&rng);
+            int16_t out = ec_tick(&ec, tx, (int16_t)floor(e + far + 0.5), 7);
+            if (i >= 60000) { pfar += far * far; perr += (out - far) * (out - far); }
+        }
+        printf("  ec: after a 15 %% path change, slow adaptation: residual %.1f dB below the far signal\n",
+               10 * log10(pfar / perr));
+        CHECK(10 * log10(pfar / perr) > 22.0);
+    }
+
+    /* silence in, silence out, no blow-up when the transmit history is empty */
+    ec_init(&ec);
+    for (i = 0; i < 500; i++) CHECK_EQ_I(ec_tick(&ec, 0, 0, 2) == 0, 1);
+
+    T_REPORT("ec");
+}

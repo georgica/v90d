@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: GPL-2.0
+config V90LINE
+	bool "v90d telephone line of the HT802"
+	depends on ARCH_DVF99
+	help
+	  FXS port 1 of the Grandstream HT802 as /dev/v90line for the v90d
+	  dial-up daemon: the SoC's TDM block, a Si3217x SLIC, the hook.

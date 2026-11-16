@@ -1,0 +1,720 @@
+/* v90d/cfg - the settings form: page renderer and decoder of the posted
+ * body. See settings.h. */
+#include <stdarg.h>
+#include <stdio.h>
+#include <string.h>
+#include "settings.h"
+#include "sbuf.h"
+#include "page.h"
+
+#define VAL_MAX CFG_SECRET_MAX      /* the longest value any field takes */
+
+enum {
+    F_NUMBER, F_TONES, F_RINGS, F_BUSY, F_DROP, F_SESSION, F_IDLE, F_AUTH,
+    F_MODS, F_V90, F_V34, F_V32BIS, F_V22BIS, F_V22, F_V21, F_DOWN, F_UP, F_ADMINPW, F_ADMINCLR,
+    F_LAN, F_ADDRESS, F_NETMASK, F_GATEWAY, F_DNS1, F_DNS2, F_PORT, F_SERVICE, F_V92, F_COMPRESSION,
+    F_COUNT,
+    F_USER = 100, F_PASS = 200      /* plus the row */
+};
+/* name on the wire, and the config section for messages */
+static const struct { const char *name; const char *sec; } fields[F_COUNT] = {
+    { "number", "line" }, { "tones", "line" }, { "rings", "modem" }, { "busy_chance", "line" },
+    { "drop_mean", "line" }, { "session_limit", "line" }, { "idle_timeout", "line" },
+    { "auth", "ppp" },
+    { "mods", "modem" }, { "mod_v90", "modem" }, { "mod_v34", "modem" }, { "mod_v32bis", "modem" },
+    { "mod_v22bis", "modem" }, { "mod_v22", "modem" },
+    { "mod_v21", "modem" }, { "max_downstream", "modem" }, { "max_upstream", "modem" },
+    { "admin_password", "status" }, { "admin_clear", "status" },
+    { "lan", "network" }, { "address", "network" }, { "netmask", "network" },
+    { "gateway", "network" }, { "dns1", "network" }, { "dns2", "network" },
+    { "port", "line" }, { "service", "line" }, { "v92", "modem" }, { "compression", "ppp" },
+};
+
+static const char *const n_tones[] = { "us", "eu" };
+static const char *const t_tones[] = { "North America", "Europe" };
+static const char *const n_auth[]  = { "none", "pap", "chap" };
+static const char *const t_auth[]  = { "none", "PAP", "CHAP" };
+static const char *const n_lan[]   = { "static", "dhcp" };      /* the value of lan_dhcp */
+static const char *const t_lan[]   = { "Static address", "DHCP" };
+static const char *const n_service[] = { "internet", "archive", "dreamcast" };
+static const char *const t_service[] = { "Internet: as it is", "Archive: the old web (Protoweb)", "Dreamcast: for the game console" };
+static const char *const n_v92[]   = { "off", "on" };
+static const char *const t_v92[]   = { "Off: V.90 upstream (V.34, up to 33600 bit/s)",
+                                       "On: offer PCM upstream to V.92 callers (experimental)" };
+static const char *const n_comp[]  = { "off", "on" };
+static const char *const t_comp[]  = { "Off: no PPP compression",
+                                       "On: Deflate or MPPC, whichever the caller asks for" };
+static const char *const t_mods[]  = { "V.90", "V.34", "V.32bis", "V.22bis", "V.22", "V.21" };     /* bit i */
+
+/* ---- the page -------------------------------------------------------------- */
+
+/* length of the string in z[0..max), which may lack its NUL */
+static size_t len_of(const char *z, size_t max)
+{
+    const char *e = memchr(z, '\0', max);
+    return e ? (size_t)(e - z) : max;
+}
+
+/* 1 if a browser that got these octets in a UTF-8 page sends the same
+ * octets back: well-formed UTF-8 (shortest form, no surrogates, at most
+ * U+10FFFF) without control characters */
+static int form_safe(const char *z, size_t n)
+{
+    const unsigned char *p = (const unsigned char *)z;
+    size_t i = 0, k, need;
+
+    while (i < n) {
+        uint32_t cp = p[i], min;
+        if (cp < 0x20 || cp == 0x7f) return 0;
+        if (cp < 0x80) { i++; continue; }
+        if (cp >= 0xc2 && cp <= 0xdf)      { need = 1; cp &= 0x1f; min = 0x80; }
+        else if (cp >= 0xe0 && cp <= 0xef) { need = 2; cp &= 0x0f; min = 0x800; }
+        else if (cp >= 0xf0 && cp <= 0xf4) { need = 3; cp &= 0x07; min = 0x10000; }
+        else return 0;
+        if (n - i <= need) return 0;
+        for (k = 1; k <= need; k++) {
+            if ((p[i + k] & 0xc0) != 0x80) return 0;
+            cp = (cp << 6) | (p[i + k] & 0x3fu);
+        }
+        if (cp < min || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff)) return 0;
+        i += need + 1;
+    }
+    return 1;
+}
+
+static void row_open(sbuf_t *b, const char *label)
+{
+    sb_puts(b, "<tr><th>"); sb_puts(b, label); sb_puts(b, "</th><td>");
+}
+
+static void row_close(sbuf_t *b, const char *note)
+{
+    if (note[0]) { sb_puts(b, "<small>"); sb_puts(b, note); sb_puts(b, "</small>"); }
+    sb_puts(b, "</td></tr>\n");
+}
+
+/* <input type=.. name=..[row] size=.. maxlength=..   (left open) */
+static void in_open(sbuf_t *b, const char *type, const char *name, int row, int size, int maxlen)
+{
+    sb_puts(b, "<input type=\""); sb_puts(b, type);
+    sb_puts(b, "\" name=\""); sb_puts(b, name);
+    if (row >= 0) sb_u64(b, (uint64_t)row);
+    sb_puts(b, "\" size=\""); sb_u64(b, (uint64_t)size);
+    sb_puts(b, "\" maxlength=\""); sb_u64(b, (uint64_t)maxlen);
+    sb_putc(b, '"');
+}
+
+static void in_int(sbuf_t *b, const char *label, int f, int v, const char *note)
+{
+    row_open(b, label);
+    in_open(b, "text", fields[f].name, -1, 6, 5);
+    sb_puts(b, " value=\""); sb_i32(b, v); sb_puts(b, "\">");
+    row_close(b, note);
+}
+
+/* an IPv4 address; 0 is shown as an empty field */
+static void in_addr(sbuf_t *b, const char *label, int f, uint32_t a, const char *note)
+{
+    row_open(b, label);
+    in_open(b, "text", fields[f].name, -1, 16, 15);
+    sb_puts(b, " value=\""); if (a) sb_ip(b, a); sb_puts(b, "\">");
+    row_close(b, note);
+}
+
+static void in_password(sbuf_t *b, const char *name, int row)
+{
+    in_open(b, "password", name, row, 24, CFG_SECRET_MAX);
+    sb_puts(b, " autocomplete=\"new-password\">");
+}
+
+static void in_check(sbuf_t *b, int f, int on, const char *text)
+{
+    sb_puts(b, "<label><input type=\"checkbox\" name=\""); sb_puts(b, fields[f].name);
+    sb_puts(b, on ? "\" value=\"1\" checked> " : "\" value=\"1\"> ");
+    sb_puts(b, text); sb_puts(b, "</label>");
+}
+
+static void in_select(sbuf_t *b, const char *label, int f, int v, const char *const *names,
+                      const char *const *texts, int count)
+{
+    int i;
+    row_open(b, label);
+    sb_puts(b, "<select name=\""); sb_puts(b, fields[f].name); sb_puts(b, "\">");
+    for (i = 0; i < count; i++) {
+        sb_puts(b, "<option value=\""); sb_puts(b, names[i]);
+        sb_puts(b, i == v ? "\" selected>" : "\">");
+        sb_puts(b, texts[i]); sb_puts(b, "</option>");
+    }
+    sb_puts(b, "</select>");
+    row_close(b, "");
+}
+
+static const struct { const char *path, *title; } pages[SETTINGS_PAGES] = {
+    { "/settings", "settings" }, { "/line", "line" }, { "/modem", "modem" }, { "/users", "users" },
+    { "/network", "network" }, { "/system", "system" },
+    { "/line2", "line, port 2" }, { "/modem2", "modem, port 2" },
+};
+
+const char *settings_page_path(int page)
+{
+    return pages[page >= 0 && page < SETTINGS_PAGES ? page : 0].path;
+}
+
+int settings_page_of(const char *path, size_t len)
+{
+    int i;
+    for (i = 0; i < SETTINGS_PAGES; i++)
+        if (strlen(pages[i].path) == len && memcmp(pages[i].path, path, len) == 0) return i;
+    return -1;
+}
+
+int settings_render_html(const cfg_t *c, int saved, const char *error, char *buf, size_t cap)
+{
+    return settings_render_page(c, SETTINGS_ALL, saved, error, buf, cap);
+}
+
+int settings_render_page(const cfg_t *c, int page, int saved, const char *error, char *buf, size_t cap)
+{
+#define ON(p) (page == SETTINGS_ALL || page == (p))
+    sbuf_t b;
+    cfg_t two;
+    int i, n, own = page, port2 = 0;
+
+    sb_init(&b, buf, cap);
+    if (page < 0 || page >= SETTINGS_PAGES) page = own = SETTINGS_ALL;
+    if (page == SETTINGS_LINE2 || page == SETTINGS_MODEM2) {
+        /* port 2: the same sections, filled from its settings */
+        port2 = 1;
+        cfg_for_port(c, 1, &two); c = &two;
+        page = page == SETTINGS_LINE2 ? SETTINGS_LINE : SETTINGS_MODEM;
+    }
+    page_top(&b, pages[own].title, "", page ? page : -1, NULL);
+    if (error) {
+        sb_puts(&b, "<p><b>Not saved:</b> ");
+        sb_html(&b, error, SETTINGS_MSG_MAX, 0);
+        sb_puts(&b, "</p>\n");
+    } else if (saved) {
+        sb_puts(&b, "<p><b>Settings saved.</b></p>\n");
+    }
+    if (page == SETTINGS_LINE || page == SETTINGS_MODEM) {
+        const char *base = pages[page].path;
+        sb_puts(&b, "<p class=\"sw\">");
+        if (port2) { sb_puts(&b, "<a href=\""); sb_puts(&b, base); sb_puts(&b, "\">Port 1</a> <b>Port 2</b>"); }
+        else { sb_puts(&b, "<b>Port 1</b> <a href=\""); sb_puts(&b, base); sb_puts(&b, "2\">Port 2</a>"); }
+        sb_puts(&b, "</p>\n");
+    }
+    sb_puts(&b, "<form method=\"post\" action=\""); sb_puts(&b, pages[own].path); sb_puts(&b, "\">\n");
+    if (port2) {
+        sb_puts(&b, "<input type=\"hidden\" name=\""); sb_puts(&b, fields[F_PORT].name);
+        sb_puts(&b, "\" value=\"2\">\n");
+    }
+
+    if (ON(SETTINGS_LINE)) {
+    sb_puts(&b, "<section><h2>Telephone line</h2>\n<table>\n");
+    row_open(&b, "Phone number");
+    in_open(&b, "text", fields[F_NUMBER].name, -1, 22, CFG_NUMBER_MAX);
+    sb_puts(&b, " value=\""); sb_html(&b, c->line_number, sizeof c->line_number, 0); sb_puts(&b, "\">");
+    row_close(&b, "digits, * and #; empty: every number connects");
+    in_select(&b, "Service", F_SERVICE, c->service, n_service, t_service, CFG_SERVICE_COUNT);
+    in_select(&b, "Tones", F_TONES, c->line_tones, n_tones, t_tones, 2);
+    in_int(&b, "Rings before answer", F_RINGS, c->rings, "1 to 10");
+    in_int(&b, "Busy signal", F_BUSY, c->busy_chance, "percent of calls, 0 to 100");
+    in_int(&b, "Line drop", F_DROP, c->drop_mean_min,
+           "mean minutes until the line drops at random, 0 = never");
+    in_int(&b, "Session limit", F_SESSION, c->session_limit_min, "minutes, 0 = none");
+    in_int(&b, "Idle timeout", F_IDLE, c->idle_timeout_min, "minutes without traffic, 0 = none");
+    sb_puts(&b, "</table>\n<p>Service says what a caller on this port gets. Archive: every web"
+                " (HTTP) and FTP address the caller opens is fetched from Protoweb, the archive of"
+                " the web as it was, with no proxy to set on the caller's computer; mail, chat and"
+                " secure sites do not work. Dreamcast: set the console to dial this port's number"
+                " with a user name and password of the PPP page; PPP compression and V.92 are off"
+                " for this port and the console is given the name servers of the game revival"
+                " projects, whatever the other pages say. This one has not been tried with a real"
+                " console. A change takes effect when the lines are free.</p></section>\n");
+
+    }
+    if (ON(SETTINGS_MODEM)) {
+    sb_puts(&b, "<section><h2>Modem</h2>\n<table>\n");
+    row_open(&b, "Modulations");
+    sb_puts(&b, "<input type=\"hidden\" name=\""); sb_puts(&b, fields[F_MODS].name);
+    sb_puts(&b, "\" value=\"1\">");
+    for (i = 0; i < CFG_MOD_COUNT; i++) {
+        if (i) sb_putc(&b, ' ');
+        in_check(&b, F_V90 + i, (c->modulations >> i) & 1u, t_mods[i]);
+    }
+    row_close(&b, "");
+    in_int(&b, "Max downstream", F_DOWN, c->max_down, "bit/s, 300 to 56000");
+    in_int(&b, "Max upstream", F_UP, c->max_up, "bit/s, 300 to 48000");
+    in_select(&b, "V.92", F_V92, c->v92, n_v92, t_v92, 2);
+    in_select(&b, "PPP compression", F_COMPRESSION, c->compression, n_comp, t_comp, 2);
+    sb_puts(&b, "</table>\n<p>With V.92 on, PCM upstream is used when the caller's modem asks for it (for"
+                " example AT+PIG=0 on Conexant modems); set Max upstream above 33600 to let"
+                " it go faster. Tested in simulation only. PPP compression (for both ports) works on"
+                " top of the modem's own: web pages and text arrive about three times as fast"
+                " as the line rate.</p></section>\n");
+
+    }
+    if (ON(SETTINGS_USERS)) {
+    sb_puts(&b, "<section><h2>PPP login</h2>\n<table>\n");
+    in_select(&b, "Authentication", F_AUTH, c->auth, n_auth, t_auth, 3);
+    sb_puts(&b, "</table>\n<div class=\"x\"><table>\n"
+                "<tr><th>#</th><th>User name</th><th>Password</th></tr>\n");
+    n = c->n_users < 0 ? 0 : c->n_users > CFG_MAX_USERS ? CFG_MAX_USERS : c->n_users;
+    for (i = 0; i < CFG_MAX_USERS; i++) {
+        const char *name = i < n ? c->users[i].name : "";
+        size_t nl = len_of(name, sizeof c->users[i].name);
+        sb_puts(&b, "<tr><td>"); sb_u64(&b, (uint64_t)i + 1u); sb_puts(&b, "</td><td>");
+        if (form_safe(name, nl)) {
+            in_open(&b, "text", "user", i, 24, CFG_NAME_MAX);
+            sb_puts(&b, " value=\""); sb_html(&b, name, nl, 1); sb_puts(&b, "\">");
+        } else {
+            sb_html(&b, name, nl, 0);
+            sb_puts(&b, " <i>(change it in the config file)</i>");
+        }
+        sb_puts(&b, "</td><td>");
+        in_password(&b, "pass", i);
+        sb_puts(&b, "</td></tr>\n");
+    }
+    sb_puts(&b, "</table></div>\n"
+                "<p>A row without a name is not used. Passwords are not shown: leave the field"
+                " empty to keep the one a user has, type a new one to change it.</p></section>\n");
+
+    }
+    if (ON(SETTINGS_NETWORK)) {
+    sb_puts(&b, "<section><h2>Ethernet</h2>\n<table>\n");
+    row_open(&b, "Address from");
+    sb_puts(&b, "<select name=\"lan\">");
+    for (i = 1; i >= 0; i--) {
+        sb_puts(&b, "<option value=\""); sb_puts(&b, n_lan[i]);
+        sb_puts(&b, c->lan_dhcp == i ? "\" selected>" : "\">");
+        sb_puts(&b, t_lan[i]); sb_puts(&b, "</option>");
+    }
+    sb_puts(&b, "</select>");
+    row_close(&b, "");
+    in_addr(&b, "Address", F_ADDRESS, c->lan_addr, "static only");
+    in_addr(&b, "Netmask", F_NETMASK, c->lan_netmask, "static only");
+    in_addr(&b, "Gateway", F_GATEWAY, c->lan_gateway, "static only; empty: none");
+    in_addr(&b, "DNS server 1", F_DNS1, c->dns[0], "given to the caller; empty: none");
+    in_addr(&b, "DNS server 2", F_DNS2, c->dns[1], "");
+    sb_puts(&b, "</table>\n<p>The Ethernet settings are used from the next restart on. Whatever is"
+                " set here, the box also answers on " PAGE_RESCUE_IP " (put the computer on"
+                " 169.254.x.x, netmask 255.255.0.0).</p></section>\n");
+
+    }
+    if (ON(SETTINGS_SYSTEM)) {
+    sb_puts(&b, "<section><h2>Login</h2>\n<table>\n");
+    row_open(&b, "Admin password");
+    in_password(&b, fields[F_ADMINPW].name, -1);
+    row_close(&b, strcmp(c->admin_password, "admin") == 0
+        ? "This is still the factory password (admin): set another one. The user name is admin."
+        : c->admin_password[0]
+        ? "A password is set (user name admin). Empty: keep it."
+        : "No password is set: anyone on the LAN can change these settings."
+          " With one, the user name is admin.");
+    row_open(&b, "Remove");
+    in_check(&b, F_ADMINCLR, 0, "remove the admin password");
+    row_close(&b, "");
+    sb_puts(&b, "</table></section>\n");
+    }
+    sb_puts(&b, "<p><input type=\"submit\" value=\"Save\"></p>\n</form>\n");
+    if (ON(SETTINGS_SYSTEM))
+        sb_puts(&b, "<form method=\"post\" action=\"/restart\">\n"
+                    "<section><h2>Restart</h2>\n<p>Restarts the box. A call in progress is cut off;"
+                    " the box is back in about 20 seconds.</p>\n"
+                    "<p><input type=\"submit\" value=\"Restart\"></p></section>\n"
+                    "</form>\n");
+    sb_puts(&b, PAGE_END);
+#undef ON
+    return sb_end(&b);
+}
+
+/* ---- the decoder ----------------------------------------------------------- */
+
+typedef struct {
+    cfg_t      *out;
+    uint32_t    seen;                       /* bit per fixed field */
+    unsigned    user_seen, pass_seen;       /* bit per row */
+    cfg_user_t  row[CFG_MAX_USERS];         /* names and passwords as posted */
+    int         sw[F_COUNT];                /* the 0/1 fields: -1 = not posted */
+    char        admin_pw[CFG_SECRET_MAX + 1];
+    int         invalid;
+    int         port2;                      /* the line and modem fields are port 2's */
+    int         bad;                        /* not a form of ours after all */
+    char        msg[SETTINGS_MSG_MAX];
+} form_t;
+
+/* the config section a field belongs to, for messages */
+static const char *sec_of(const form_t *f, int fi)
+{
+    const char *s = fields[fi].sec;
+    if (!f->port2) return s;
+    if (strcmp(s, "line") == 0) return "line2";
+    if (strcmp(s, "modem") == 0) return "modem2";
+    return s;
+}
+
+/* note the first thing that is wrong with a value */
+static void fail(form_t *f, const char *fmt, ...)
+{
+    va_list ap;
+    if (f->invalid) return;
+    f->invalid = 1;
+    va_start(ap, fmt);
+    vsnprintf(f->msg, sizeof f->msg, fmt, ap);
+    va_end(ap);
+}
+
+/* a value for a message: at most 40 octets, anything unprintable as '?' */
+static const char *safe(const char *z, char out[41])
+{
+    size_t i;
+    for (i = 0; i < 40 && z[i]; i++)
+        out[i] = (z[i] >= 0x20 && z[i] < 0x7f) ? z[i] : '?';
+    out[i] = '\0';
+    return out;
+}
+
+static int hexval(char ch)
+{
+    if (ch >= '0' && ch <= '9') return ch - '0';
+    if (ch >= 'a' && ch <= 'f') return ch - 'a' + 10;
+    if (ch >= 'A' && ch <= 'F') return ch - 'A' + 10;
+    return -1;
+}
+
+/* Decode the urlencoded value p[0..n) into out (NUL terminated, at most
+ * VAL_MAX octets; *len gets the full decoded length, which may be more).
+ * -1 if it is malformed: a broken percent escape, a NUL however written,
+ * or an octet that a form encoder never leaves bare. */
+static int decode(const char *p, size_t n, char out[VAL_MAX + 1], size_t *len)
+{
+    size_t i = 0, o = 0;
+    while (i < n) {
+        unsigned ch = (unsigned char)p[i++];
+        if (ch == '%') {
+            int hi = i < n ? hexval(p[i]) : -1;
+            int lo = i + 1 < n ? hexval(p[i + 1]) : -1;
+            if (hi < 0 || lo < 0 || (hi == 0 && lo == 0)) return -1;
+            ch = (unsigned)(hi * 16 + lo);
+            i += 2;
+        } else if (ch == '+') {
+            ch = ' ';
+        } else if (ch <= 0x20 || ch == 0x7f || ch == '=' || ch == '&') {
+            return -1;
+        }
+        if (o < VAL_MAX) out[o] = (char)ch;
+        o++;
+    }
+    out[o < VAL_MAX ? o : VAL_MAX] = '\0';
+    *len = o;
+    return 0;
+}
+
+/* F_ index of the field name p[0..n), F_USER + row, F_PASS + row, or -1 */
+static int field_of(const char *p, size_t n)
+{
+    int f;
+    for (f = 0; f < F_COUNT; f++)
+        if (strlen(fields[f].name) == n && memcmp(fields[f].name, p, n) == 0) return f;
+    if (n >= 5 && n <= 6 && (memcmp(p, "user", 4) == 0 || memcmp(p, "pass", 4) == 0)) {
+        int row = p[4] - '0';
+        if (row < 0 || row > 9) return -1;
+        if (n == 6) {
+            if (row != 1 || p[5] < '0' || p[5] > '9') return -1;    /* no leading zero */
+            row = 10 + (p[5] - '0');
+        }
+        if (row >= CFG_MAX_USERS) return -1;
+        return (p[0] == 'u' ? F_USER : F_PASS) + row;
+    }
+    return -1;
+}
+
+/* decimal number of 1 to 9 digits, blanks around it allowed */
+static int get_num(const char *v, int *out)
+{
+    long n = 0;
+    int digits = 0;
+    while (*v == ' ') v++;
+    while (*v >= '0' && *v <= '9') {
+        if (++digits > 9) return -1;
+        n = n * 10 + (*v++ - '0');
+    }
+    while (*v == ' ') v++;
+    if (digits == 0 || *v != '\0') return -1;
+    *out = (int)n;
+    return 0;
+}
+
+static void set_num(form_t *f, int fi, int *field, const char *v)
+{
+    char sv[41];
+    if (get_num(v, field))
+        fail(f, "[%s] %s: '%s' is not a number", sec_of(f, fi), fields[fi].name, safe(v, sv));
+}
+
+/* an address field: blanks around it allowed; empty = none where that is allowed */
+static void set_addr(form_t *f, int fi, uint32_t *field, const char *v, int none_ok)
+{
+    char t[16], sv[41];
+    size_t n;
+    uint32_t a;
+
+    while (*v == ' ') v++;
+    n = strlen(v);
+    while (n && v[n - 1] == ' ') n--;
+    if (n == 0 && none_ok) { *field = 0; return; }
+    if (n < sizeof t) { memcpy(t, v, n); t[n] = '\0'; }
+    if (n >= sizeof t || cfg_parse_ip(t, &a))
+        fail(f, "[%s] %s: '%s' is not an IPv4 address", sec_of(f, fi), fields[fi].name, safe(v, sv));
+    else
+        *field = a;
+}
+
+static void set_enum(form_t *f, int fi, int *field, const char *v, const char *const *names,
+                     int count, const char *list)
+{
+    char sv[41];
+    int i;
+    for (i = 0; i < count; i++)
+        if (strcmp(names[i], v) == 0) { *field = i; return; }
+    fail(f, "[%s] %s: '%s' is not one of: %s", sec_of(f, fi), fields[fi].name, safe(v, sv), list);
+}
+
+/* one decoded field into the form */
+static void set_field(form_t *f, int fi, const char *v, size_t len)
+{
+    cfg_t *c = f->out;
+    char sv[41];
+
+    if (fi >= F_PASS) {
+        if (len > CFG_SECRET_MAX)
+            fail(f, "[ppp] user %d: password is longer than %d octets", fi - F_PASS + 1, CFG_SECRET_MAX);
+        else
+            memcpy(f->row[fi - F_PASS].secret, v, len + 1);
+        return;
+    }
+    if (fi >= F_USER) {
+        if (len > CFG_NAME_MAX)
+            fail(f, "[ppp] user %d: name is longer than %d octets", fi - F_USER + 1, CFG_NAME_MAX);
+        else
+            memcpy(f->row[fi - F_USER].name, v, len + 1);
+        return;
+    }
+    switch (fi) {
+    case F_NUMBER:
+        if (len > CFG_NUMBER_MAX) {
+            fail(f, "[%s] number: longer than %d characters", sec_of(f, fi), CFG_NUMBER_MAX);
+            break;
+        }
+        memset(c->line_number, 0, sizeof c->line_number);
+        if (strcmp(v, "any") != 0) memcpy(c->line_number, v, len);
+        break;
+    case F_TONES:   set_enum(f, fi, &c->line_tones, v, n_tones, 2, "us, eu"); break;
+    case F_AUTH:    set_enum(f, fi, &c->auth, v, n_auth, 3, "none, pap, chap"); break;
+    case F_LAN:     set_enum(f, fi, &c->lan_dhcp, v, n_lan, 2, "dhcp, static"); break;
+    case F_SERVICE: set_enum(f, fi, &c->service, v, n_service, CFG_SERVICE_COUNT, "internet, archive, dreamcast"); break;
+    case F_V92:     set_enum(f, fi, &c->v92, v, n_v92, 2, "on, off"); break;
+    case F_COMPRESSION: set_enum(f, fi, &c->compression, v, n_comp, 2, "on, off"); break;
+    case F_ADDRESS: set_addr(f, fi, &c->lan_addr, v, 0); break;
+    case F_NETMASK: set_addr(f, fi, &c->lan_netmask, v, 0); break;
+    case F_GATEWAY: set_addr(f, fi, &c->lan_gateway, v, 1); break;
+    case F_DNS1:    set_addr(f, fi, &c->dns[0], v, 1); break;
+    case F_DNS2:    set_addr(f, fi, &c->dns[1], v, 1); break;
+    case F_RINGS:   set_num(f, fi, &c->rings, v); break;
+    case F_BUSY:    set_num(f, fi, &c->busy_chance, v); break;
+    case F_DROP:    set_num(f, fi, &c->drop_mean_min, v); break;
+    case F_SESSION: set_num(f, fi, &c->session_limit_min, v); break;
+    case F_IDLE:    set_num(f, fi, &c->idle_timeout_min, v); break;
+    case F_DOWN:    set_num(f, fi, &c->max_down, v); break;
+    case F_UP:      set_num(f, fi, &c->max_up, v); break;
+    case F_PORT:
+        if (len != 1 || (v[0] != '1' && v[0] != '2')) f->bad = 1;
+        break;
+    case F_ADMINPW:
+        if (len > CFG_SECRET_MAX)
+            fail(f, "[status] admin_password: password is longer than %d octets", CFG_SECRET_MAX);
+        else
+            memcpy(f->admin_pw, v, len + 1);
+        break;
+    default:                                    /* the 0/1 fields */
+        if (len == 1 && (v[0] == '0' || v[0] == '1')) f->sw[fi] = v[0] - '0';
+        else fail(f, "[%s] %s: '%s' is not 0 or 1", sec_of(f, fi), fields[fi].name, safe(v, sv));
+        break;
+    }
+}
+
+/* the user table of the candidate, from the rows posted and the current
+ * users (see settings.h for the rules) */
+static void build_users(form_t *f, const cfg_t *cur)
+{
+    cfg_t *c = f->out;
+    int ncur = cur->n_users < 0 ? 0 : cur->n_users > CFG_MAX_USERS ? CFG_MAX_USERS : cur->n_users;
+    int i, j, n = 0;
+    char sn[41];
+
+    memset(c->users, 0, sizeof c->users);
+    for (i = 0; i < CFG_MAX_USERS; i++) {
+        const char *name = (f->user_seen >> i) & 1u ? f->row[i].name : i < ncur ? cur->users[i].name : "";
+        const char *pw = f->row[i].secret;
+        cfg_user_t *u = &c->users[n];
+
+        if (name[0] == '\0') {
+            if (pw[0]) fail(f, "[ppp] user %d: password without a name", i + 1);
+            continue;
+        }
+        for (j = 0; j < ncur; j++)
+            if (strcmp(cur->users[j].name, name) == 0) break;
+        strcpy(u->name, name);
+        if (pw[0]) strcpy(u->secret, pw);
+        else if (j < ncur) strcpy(u->secret, cur->users[j].secret);
+        else fail(f, "[ppp] user '%s': a new user needs a password", safe(name, sn));
+        n++;
+    }
+    c->n_users = n;
+}
+
+int settings_apply(const cfg_t *cur, const char *body, size_t len, cfg_t *out,
+                   char *err, size_t errsz)
+{
+    form_t f;
+    size_t pos = 0;
+    unsigned mask;
+    int i;
+
+    memset(&f, 0, sizeof f);
+    f.out = out;
+    for (i = 0; i < F_COUNT; i++) f.sw[i] = -1;
+    *out = *cur;
+    if (errsz) err[0] = '\0';
+
+    /* port=2 anywhere in the body: the line and modem fields are port 2's.
+     * They are then applied to the view of that port and put back at the end. */
+    while (pos < len) {
+        size_t pl = 0;
+        while (pos + pl < len && body[pos + pl] != '&') pl++;
+        if (pl == 6 && memcmp(body + pos, "port=2", 6) == 0) f.port2 = 1;
+        pos += pl + 1;
+    }
+    pos = 0;
+    if (f.port2) cfg_for_port(cur, 1, out);
+
+    while (pos < len) {
+        const char *pair = body + pos, *eq;
+        char val[VAL_MAX + 1];
+        size_t pl = 0, vlen;
+        int fi;
+
+        while (pos + pl < len && pair[pl] != '&') pl++;
+        /* a pair is followed by & and another pair, or by the end */
+        if (pos + pl < len && pos + pl + 1 == len) goto bad;
+        pos += pl + 1;
+        eq = memchr(pair, '=', pl);
+        if (!eq) goto bad;
+        fi = field_of(pair, (size_t)(eq - pair));
+        if (fi < 0) goto bad;
+        if (fi >= F_PASS) {
+            if ((f.pass_seen >> (fi - F_PASS)) & 1u) goto bad;
+            f.pass_seen |= 1u << (fi - F_PASS);
+        } else if (fi >= F_USER) {
+            if ((f.user_seen >> (fi - F_USER)) & 1u) goto bad;
+            f.user_seen |= 1u << (fi - F_USER);
+        } else {
+            if ((f.seen >> fi) & 1u) goto bad;
+            f.seen |= (uint32_t)1 << fi;
+        }
+        if (decode(eq + 1, pl - (size_t)(eq + 1 - pair), val, &vlen)) goto bad;
+        set_field(&f, fi, val, vlen);
+        if (f.bad) goto bad;
+    }
+
+    /* modulations: the whole set, or one switch at a time */
+    mask = f.sw[F_MODS] == 1 ? 0u : out->modulations;
+    for (i = 0; i < CFG_MOD_COUNT; i++) {
+        if (f.sw[F_V90 + i] == 1) mask |= 1u << i;
+        if (f.sw[F_V90 + i] == 0) mask &= ~(1u << i);
+    }
+    out->modulations = mask;
+
+    if (f.sw[F_ADMINCLR] == 1 && f.admin_pw[0])
+        fail(&f, "[status] admin_password: a new password and admin_clear together");
+    else if (f.sw[F_ADMINCLR] == 1)
+        memset(out->admin_password, 0, sizeof out->admin_password);
+    else if (f.admin_pw[0])
+        memcpy(out->admin_password, f.admin_pw, sizeof f.admin_pw);
+
+    build_users(&f, cur);
+
+    if (f.port2) { cfg_t view = *out; cfg_for_port(&view, 1, out); }
+    if (!f.invalid && cfg_validate(out, f.msg, sizeof f.msg) != CFG_OK) f.invalid = 1;
+    if (f.invalid) {
+        if (errsz) snprintf(err, errsz, "%s", f.msg);
+        return SETTINGS_INVALID;
+    }
+    return SETTINGS_OK;
+
+bad:
+    *out = *cur;
+    return SETTINGS_BAD;
+}
+
+/* ---- the login page -------------------------------------------------------- */
+
+int login_render_html(int failed, char *buf, size_t cap)
+{
+    sbuf_t b;
+
+    sb_init(&b, buf, cap);
+    page_top(&b, "login", "", -1, "Login");
+    sb_puts(&b, "<div class=\"lg\"><form method=\"post\" action=\"/login\">\n<section><h2>Log in</h2>\n");
+    if (failed) sb_puts(&b, "<p class=\"err\">Wrong user name or password.</p>\n");
+    sb_puts(&b,
+        "<table>\n"
+        "<tr><th>User name</th><td><input type=\"text\" name=\"user\" size=\"24\" maxlength=\"32\""
+        " autocomplete=\"username\" autofocus></td></tr>\n"
+        "<tr><th>Password</th><td><input type=\"password\" name=\"password\" size=\"24\" maxlength=\"64\""
+        " autocomplete=\"current-password\"></td></tr>\n"
+        "</table></section>\n"
+        "<p><input type=\"submit\" value=\"Log in\"></p>\n"
+        "</form></div>\n" PAGE_END);
+    return sb_end(&b);
+}
+
+int login_check(const char *body, size_t len, const char *pw)
+{
+    /* both sides of each comparison in buffers of one size, every octet
+     * looked at, so the time does not tell how much was right */
+    char user[VAL_MAX + 1], pass[VAL_MAX + 1], wu[VAL_MAX + 1], wp[VAL_MAX + 1];
+    size_t pos = 0, i;
+    unsigned seen = 0, diff = 0;
+
+    memset(user, 0, sizeof user); memset(pass, 0, sizeof pass);
+    memset(wu, 0, sizeof wu); memset(wp, 0, sizeof wp);
+    while (pos < len) {
+        const char *pair = body + pos, *eq;
+        char val[VAL_MAX + 1];
+        size_t pl = 0, vlen, nl;
+        unsigned bit;
+
+        while (pos + pl < len && pair[pl] != '&') pl++;
+        if (pos + pl < len && pos + pl + 1 == len) return -1;
+        pos += pl + 1;
+        eq = memchr(pair, '=', pl);
+        if (!eq) return -1;
+        nl = (size_t)(eq - pair);
+        if (nl == 4 && memcmp(pair, "user", 4) == 0) bit = 1;
+        else if (nl == 8 && memcmp(pair, "password", 8) == 0) bit = 2;
+        else return -1;
+        if (seen & bit) return -1;
+        seen |= bit;
+        memset(val, 0, sizeof val);
+        if (decode(eq + 1, pl - nl - 1, val, &vlen)) return -1;
+        if (vlen > VAL_MAX) diff = 1;                   /* longer than any password */
+        memcpy(bit == 1 ? user : pass, val, sizeof val);
+    }
+    if (seen != 3) diff = 1;
+    strcpy(wu, "admin");
+    for (i = 0; i < VAL_MAX && pw[i]; i++) wp[i] = pw[i];
+    for (i = 0; i < sizeof user; i++)
+        diff |= (unsigned)(unsigned char)(user[i] ^ wu[i]) | (unsigned)(unsigned char)(pass[i] ^ wp[i]);
+    return diff == 0;
+}

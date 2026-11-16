@@ -1,0 +1,302 @@
+/* V.32bis / V.32 duplex modem, 2400 symbols/s on an 1800 Hz carrier, echo
+ * cancelled: 14400, 12000, 9600 and 7200 bit/s trellis coded, 4800 bit/s
+ * uncoded. Written from Recommendation V.32bis (02/91). Answer mode.
+ * Fixed-point, sample-driven (8000 Hz, 16-bit linear), no allocation: all
+ * state lives in the caller's v32_t. See README.md. */
+#ifndef V90D_V32_H
+#define V90D_V32_H
+#include <stdint.h>
+
+/* data signalling rates: index 0..4, 2 + index bits per symbol */
+#define V32_NRATES   5
+#define V32_R4800    (1u << 0)
+#define V32_R7200    (1u << 1)
+#define V32_R9600    (1u << 2)
+#define V32_R12000   (1u << 3)
+#define V32_R14400   (1u << 4)
+#define V32_RALL     0x1Fu
+#define V32_BITRATE(idx) (2400 * (2 + (idx)))
+
+typedef int  (*v32_getbit_fn)(void *user);
+typedef void (*v32_putbit_fn)(void *user, int bit);
+
+/* ---------------- coding (2.3, 4, 5.2, 5.3) ---------------- */
+typedef struct { uint32_t reg; } v32_scr_t;
+/* answer = 1: GPA (1 + x^-5 + x^-23), 0: GPC (1 + x^-18 + x^-23) */
+int v32_scramble(v32_scr_t *s, int answer, int di);
+int v32_descramble(v32_scr_t *s, int answer, int ds);
+
+/* differential + trellis encoder state */
+typedef struct { int y; int st; } v32_enc_t;      /* y = Y1<<1|Y2 of the last symbol; st = delay elements */
+/* q = the symbol's data bits, Q1 (first in time) in the most significant
+ * position; rate = index 0..4. Writes the signal point (scale of Figure 2-1)
+ * and returns its label (Y0 Y1 Y2 Q3..; Y1 Y2 at 4800). */
+int  v32_encode(v32_enc_t *e, int rate, int q, int *x, int *y);
+/* the convolutional encoder alone (Figure 1): next state for state st
+ * (a<<2 | b<<1 | c, c = Y0) and input y12 = Y1<<1|Y2 */
+int  v32_trellis_next(int st, int y12);
+/* the signal point for a label */
+void v32_point(int rate, int label, int *x, int *y);
+/* synchronising states: 0 = A, 1 = B, 2 = C, 3 = D (each +90 degrees) */
+void v32_state_point(int abcd, int *x, int *y);
+
+/* rate signal (Table 5): B0 is the most significant bit of the 16-bit word */
+#define V32_RW_BASE  0x0991u      /* B4 B7 B8 B11 B15 */
+#define V32_RW_SYNC  0xF111u      /* B0-B3 B7 B11 B15 */
+#define V32_RW_E     0xF000u
+uint16_t v32_rate_word(unsigned rates);          /* V32_R* mask -> 16-bit sequence */
+unsigned v32_word_rates(uint16_t w);             /* and back */
+
+/* ---------------- Viterbi decoder for the 8-state code ---------------- */
+#define V32_VDEPTH 24
+#define V32_UNIT   512            /* receiver units per signal space unit */
+typedef struct {
+    int      rate;
+    int32_t  pm[8];
+    uint16_t hist[32][8];         /* per step and state: label << 3 | previous state */
+    int      pos; uint32_t n;
+    uint8_t  next[8][4];
+} v32_vit_t;
+void v32_vit_init(v32_vit_t *v, int rate);
+/* One received point (V32_UNIT per signal space unit). *hard = label of the
+ * nearest point. Returns the label decided for the symbol V32_VDEPTH symbols
+ * ago, or -1 while the decoder is still filling. */
+int  v32_vit_step(v32_vit_t *v, int32_t zr, int32_t zi, int *hard);
+/* Differential decoding of one decided label: returns the symbol's data bits
+ * (Q1 in the most significant position); *yprev is the decoder's memory. */
+int  v32_decode_bits(int rate, int label, int *yprev);
+
+/* ---------------- transmitter ---------------- */
+#define V32_TXL 12                /* pulse length, symbols */
+#define V32_TXD 6                 /* symbols by which the line signal trails the canceller's reference */
+/* samples from the tick that generates a symbol to the centre of its pulse on the line */
+#define V32_TX_DELAY ((V32_TXD + V32_TXL / 2) * 10 / 3)
+typedef enum {
+    V32_TX_SILENCE, V32_TX_AC, V32_TX_CA, V32_TX_AA, V32_TX_CC,
+    V32_TX_S, V32_TX_SBAR, V32_TX_TRN, V32_TX_RATE, V32_TX_ONES, V32_TX_DATA
+} v32_txmode;
+
+typedef struct {
+    int        answer;
+    v32_txmode mode;
+    /* symbols, carrier rotation applied, newest first. The line signal is
+     * built from the ones V32_TXD back; the echo canceller's reference from
+     * the newest, so that it leads the echo it has to model */
+    int8_t     br[V32_TXL + V32_TXD], bi[V32_TXL + V32_TXD];
+    int        acc;               /* pulse phase 0..9 (thirds of a sample) */
+    int        newsym;            /* a symbol began with the sample just produced */
+    int16_t    ref;               /* the echo canceller's reference for that sample */
+    int        rot;               /* symbol count mod 4: carrier phase at the symbol */
+    int32_t    gain;
+    v32_scr_t  scr;
+    v32_enc_t  enc;
+    int        rate;              /* data rate index for ONES / DATA */
+    uint16_t   rword; int rbit;   /* rate sequence being sent, next bit 0..15 */
+    int        abcd;              /* last 4800 state sent */
+    uint32_t   nsym;              /* symbols sent in this mode */
+    v32_getbit_fn getbit; void *user;
+} v32tx_t;
+
+void    v32tx_init(v32tx_t *t, int answer, int level, v32_getbit_fn getbit, void *user);
+/* A new symbol is generated by the next v32tx_tick() when this is true: the
+ * mode set before that tick is the mode of that symbol. */
+int     v32tx_symbol_due(const v32tx_t *t);
+void    v32tx_set_mode(v32tx_t *t, v32_txmode mode);
+int16_t v32tx_tick(v32tx_t *t);
+
+/* ---------------- echo canceller ---------------- */
+#define V32_EC_NEAR 96            /* samples: near echo path, 12 ms */
+#define V32_EC_FAR  96            /* samples: far echo window, 12 ms */
+#define V32_EC_HIST 16384         /* transmit history: longest far echo delay, 2 s */
+typedef struct {
+    int16_t hist[V32_EC_HIST]; int hpos;
+    int16_t xn[2 * V32_EC_NEAR]; int npos;     /* doubled delay lines, newest first */
+    int16_t xf[2 * V32_EC_FAR];  int fpos;
+    int32_t hn[V32_EC_NEAR], hf[V32_EC_FAR];   /* Q24 */
+    int64_t energy;               /* sum of x^2 over both delay lines */
+    int     bulk;                 /* far window starts this many samples back */
+    int     near_delay;           /* and the near one this many (I/O buffering) */
+    int64_t pw_in, pw_out;        /* smoothed power before / after cancelling, x256 */
+} v32ec_t;
+void    v32ec_init(v32ec_t *e);
+/* far echo window from `samples` back (not less than V32_EC_NEAR: a far echo
+ * nearer than that is the near canceller's) */
+void    v32ec_set_bulk(v32ec_t *e, int samples);
+/* before any tick: samples from handing a sample to the line until its echo
+ * can start to come back (a driver's buffering); 0 when tx and rx are in step */
+void    v32ec_set_near_delay(v32ec_t *e, int samples);
+/* tx: the reference for the sample being sent (v32tx_t.ref, see v32_ec.c);
+ * rx: the sample received; mu_shift: step 2^-mu_shift, negative = frozen.
+ * Returns rx minus the echo estimate. */
+int32_t v32ec_tick(v32ec_t *e, int16_t tx, int32_t rx, int mu_shift);
+
+/* ---------------- receiver ---------------- */
+#define V32_RXP 48                /* fractional delays in the filter bank */
+#define V32_RXN 33
+#define V32_EQN 32                /* T/2-spaced equaliser taps */
+
+typedef enum {
+    V32_RX_TONE,                  /* detectors only (AA / CC tone, S) */
+    V32_RX_S,                     /* S present: gain, timing; waiting for S-bar */
+    V32_RX_TRAIN,                 /* S-bar and TRN against the known sequence */
+    V32_RX_DD4,                   /* 4-point decisions: end of TRN, rate signals */
+    V32_RX_DATA
+} v32_rxmode;
+
+typedef struct {
+    int        answer;
+    v32_rxmode mode;
+    int16_t    ring[64]; int rpos;
+    int32_t    tnext, t_integ;
+    uint32_t   cph, dph;
+    int        half;
+    uint32_t   nsamp;             /* samples processed */
+    /* band-edge timing */
+    int32_t    lr, li, ur, ui;    /* resonators at 600 and 3000 Hz */
+    int32_t    te;                /* last timing error (diagnostic) */
+    /* raw T/2 history and detectors */
+    int32_t    yr[8], yi[8]; int ypos;
+    int64_t    pw_raw;            /* smoothed |y|^2 */
+    int64_t    tone_p, tone_q;    /* smoothed Re(v v*[-4]) / 16 and |v|^2 / 16 */
+    int        tone_run;          /* half symbols an 1800 Hz tone has been steady */
+    int        pure_run;          /* ... and has been all there is on the line */
+    int        rev_count; uint32_t rev_t; int rev_hold;   /* phase reversals seen, time of the last */
+    int64_t    c4;                /* smoothed Re(y y*[-4]): S and S-bar */
+    int64_t    sq;                /* smoothed power at 1800 Hz, for the same */
+    int        s_run;             /* half symbols S has been present */
+    /* gain, equaliser, carrier */
+    int32_t    gain;              /* Q16 */
+    int64_t    agc_acc; int agc_n;
+    int32_t    xr[V32_EQN], xi[V32_EQN];
+    int32_t    wr[V32_EQN], wi[V32_EQN];     /* Q24 */
+    uint32_t   theta; int32_t freq;
+    int32_t    o1r, o1i, o2r, o2i;           /* previous on-time samples (S-bar detector) */
+    int        sbar_neg;
+    uint32_t   nsym;              /* symbols in this mode */
+    int32_t    mse;               /* smoothed |error|^2, 4096 = one signal space unit squared */
+    int32_t    zr, zi;            /* last equalised point (diagnostic) */
+    /* training reference and 4800 bit/s decoding */
+    int        ref_idx;           /* reference symbol: < 0 S, 0..15 S-bar, then TRN */
+    v32_scr_t  ref_scr;
+    v32_scr_t  dscr_dir, dscr;    /* descramblers: TRN dibits taken directly; differential */
+    int        abcd;              /* last 4800 state decided */
+    uint32_t   trn_ones;          /* run of ONEs out of the direct descrambler */
+    uint64_t   bits;              /* last 64 descrambled bits (differential path), newest in bit 0 */
+    int        nbits;
+    /* rate signals */
+    uint16_t   rate_word;         /* last rate sequence accepted (0 = none) */
+    int        rate_seen;         /* consecutive identical sequences */
+    int        frame_bit;         /* bits since the last frame boundary, -1 = unsynchronised */
+    uint16_t   e_word;            /* E sequence received (0 = not yet) */
+    /* data */
+    int        rate;
+    v32_vit_t  vit;
+    int        yprev;             /* differential decoder memory */
+    uint32_t   ndata;             /* data symbols received */
+    uint32_t   clamp;             /* decoded symbols still to discard (circuit 104 clamped) */
+    v32_putbit_fn putbit; void *user;
+} v32rx_t;
+
+void v32rx_init(v32rx_t *r, int answer, v32_putbit_fn putbit, void *user);
+void v32rx_tick(v32rx_t *r, int32_t sample);
+void v32rx_set_mode(v32rx_t *r, v32_rxmode mode);
+/* received line level, RMS in 16-bit sample units */
+int  v32rx_level(const v32rx_t *r);
+
+/* ---------------- the modem: start-up (6.2), data, retrain (7.2) ---------------- */
+typedef enum {
+    V32S_AC1,        /* sending AC, waiting for the caller's 1800 Hz tone */
+    V32S_CA,         /* sending CA, timing the round trip */
+    V32S_AC2,        /* sending AC again until the caller's tone drops */
+    V32S_SILENCE,    /* 16 symbols */
+    V32S_S1, V32S_SBAR1, V32S_TRN1,   /* first receiver conditioning signal: echo canceller training */
+    V32S_R1,         /* rate signal R1 until the caller's S arrives */
+    V32S_WAIT,       /* silent for MT */
+    V32S_RXTRAIN,    /* training on the caller's S, S-bar, TRN; waiting for R2 */
+    V32S_S2, V32S_SBAR2, V32S_TRN2,   /* second receiver conditioning signal */
+    V32S_R3,         /* rate signal R3 until the caller's E arrives */
+    V32S_E,          /* our E */
+    V32S_B1,         /* 128 symbols of scrambled ones */
+    V32S_DATA,
+    V32S_CLEAR,      /* R3 calling for a cleardown, then V32S_FAILED */
+    V32S_FAILED
+} v32_state;
+
+#define V32_ERR_NONE     0
+#define V32_ERR_NO_TONE  1     /* the caller's AA never came (or never reversed) */
+#define V32_ERR_TRAIN    2     /* no S / no R2 / no E in time */
+#define V32_ERR_NO_RATE  3     /* nothing in common, or the caller asked for a cleardown */
+#define V32_ERR_CARRIER  4     /* signal lost in data mode */
+
+typedef struct {
+    int           level;       /* transmit RMS, 16-bit sample units */
+    unsigned      rates;       /* V32_R* enabled */
+    v32_getbit_fn getbit;
+    v32_putbit_fn putbit;
+    void         *user;
+    int           echo_delay;  /* samples of I/O buffering between our output and its echo's earliest return */
+    int           no_auto_retrain;   /* 1: never retrain for poor reception by ourselves (tests, measurements) */
+} v32_cfg;
+
+typedef struct {
+    v32_cfg   cfg;
+    int       retraining;      /* a retrain is running: connected stays 1, no data moves */
+    v32tx_t   tx;
+    v32ec_t   ec;
+    v32rx_t   rx;
+    v32_state state;
+    int       error;
+    uint32_t  nsamp;           /* samples since v32_init */
+    uint32_t  seg;             /* transmit symbols in this state */
+    uint32_t  t_state;         /* samples in this state */
+    uint32_t  t_ca;            /* when the AC-CA reversal left (pulse centre) */
+    uint32_t  t_ac2;           /* when the CA-AC reversal should leave / left */
+    int32_t   mt;              /* round trip as measured, samples (includes the caller's 64T) */
+    int       ca_len;          /* symbols of CA to send (0 = not known yet) */
+    int64_t   tone_ref;        /* level of the caller's tone */
+    int       drop_run;
+    int       ec_mu;           /* echo canceller step now */
+    int64_t   ec_best; uint32_t ec_block; int ec_stall;
+    uint32_t  trn1_min;           /* TRN1: 1280 symbols plus the round trip (the far echo of TRN is back only then) */
+    int32_t   erle_db10;       /* echo attenuation reached in training, 0.1 dB (diagnostic) */
+    unsigned  r2_rates;        /* what the caller offered */
+    int       rate;            /* rate index agreed (-1: none) */
+    int       v32_only;        /* the caller's rate signal had B4 or B8 clear */
+    int       rx_e_seen;
+    int       tx_ready, rx_ready;
+    int       connected, bitrate;
+    int       retrains;        /* retrains begun */
+    int32_t   tone_data_run;   /* data mode: how long an 1800 Hz tone has been there */
+    int32_t   bad_run;         /* data mode: samples of poor reception (leaky) */
+    int       carrier;         /* data mode: line signal present */
+    int32_t   lost_run;        /* data mode: samples without it */
+    int       auto_rt;         /* retrains we began for poor reception, lately */
+    int32_t   good_run;
+    /* timing record for tests: symbols sent in each state the last time through */
+    uint32_t  seg_len[V32S_FAILED + 1];
+} v32_t;
+
+void    v32_init(v32_t *m, const v32_cfg *cfg);
+int16_t v32_tick(v32_t *m, int16_t rx);
+/* data mode: start a retrain (7.2). Returns 0, or -1 when not in data mode. */
+int     v32_retrain(v32_t *m);
+
+/* ---------------- AA detector for the V.25 / V.8 answer sequence ----------------
+ * A V.32 / V.32bis caller answers the 2100 Hz tone with AA, a steady 1800 Hz
+ * tone (6.1; Annex A.2.2). Feed every received sample while the answer tone
+ * is being sent (and only then: our own V.21 JM has a tone at 1850 Hz);
+ * v32_aadet_tick returns 1 once 1800 Hz has been there at -43 dBm0 or more,
+ * and 12 dB over what there is at 2400 Hz, for 100 ms (the 64 symbol
+ * intervals of 6.2 are 27 ms; an answer tone leaves time to be surer). */
+#define V32_AADET_RUN 800
+typedef struct {
+    uint32_t ph, ph2;
+    int32_t  i1, q1, i2, q2;      /* 1800 Hz */
+    int32_t  j1, r1, j2, r2;      /* 2400 Hz */
+    int64_t  pw, pw2;
+    int      run;
+} v32_aadet_t;
+void v32_aadet_init(v32_aadet_t *d);
+int  v32_aadet_tick(v32_aadet_t *d, int16_t rx);
+
+#endif

@@ -1,0 +1,252 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Grandstream HT802 V2.x (board 9610003725A): DSPG DVF9918, 32 MiB SDRAM,
+ * 16 MiB QSPI flash, one 10/100 port, two FXS ports on Si3217x SLICs.
+ *
+ * Written for the v90d project from HARDWARE.md and refs/dvf99-*-facts.md.
+ * Interrupt numbers are the PLICU source numbers. The boot loader leaves the
+ * PLLs running; the rates below are what it sets.
+ */
+/dts-v1/;
+
+/ {
+	#address-cells = <1>;
+	#size-cells = <1>;
+	model = "Grandstream HT802 (v90d)";
+	compatible = "grandstream,ht802", "dspg,dvf9918", "dspg,dvf99";
+	interrupt-parent = <&plicu>;
+
+	aliases {
+		serial0 = &uart1;
+		serial1 = &uart2;
+	};
+
+	chosen {
+		bootargs = "console=ttyS0,115200 earlycon";
+		stdout-path = "serial0:115200n8";
+	};
+
+	memory@c8000000 {
+		device_type = "memory";
+		reg = <0xc8000000 0x02000000>;
+	};
+
+	/*
+	 * The kernel log, kept where a warm reset and the stock firmware's
+	 * boot leave it alone long enough to be read back (bring-up aid).
+	 */
+	reserved-memory {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		ramoops@c9ce0000 {
+			compatible = "ramoops";
+			reg = <0xc9ce0000 0x20000>;
+			console-size = <0x10000>;
+			record-size = <0x4000>;
+		};
+	};
+
+	cpus {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		cpu@0 {
+			device_type = "cpu";
+			compatible = "arm,arm926ej-s";
+			reg = <0>;
+		};
+	};
+
+	hclk: clock-hclk {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <133333333>;
+	};
+
+	/* The lights are lit by a low level (seen on the unit: all four on with
+	 * the lines at 0). They show state only: nothing is lit at power-up. */
+	leds {
+		compatible = "gpio-leds";
+
+		led-wan {
+			label = "ht802:wan";
+			gpios = <&gpio 152 1>;		/* EGPIO24 */
+			default-state = "off";
+		};
+		led-rj45 {
+			label = "ht802:rj45";
+			gpios = <&gpio 153 1>;		/* EGPIO25 */
+			default-state = "off";
+		};
+		led-phone1 {
+			label = "ht802:phone1";
+			gpios = <&gpio 154 1>;		/* EGPIO26 */
+			default-state = "off";
+		};
+		led-phone2 {
+			label = "ht802:phone2";
+			gpios = <&gpio 155 1>;		/* EGPIO27 */
+			default-state = "off";
+		};
+	};
+
+	soc {
+		compatible = "simple-bus";
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		gpio: gpio@5000000 {
+			compatible = "dspg,dvf99-gpio";
+			reg = <0x05000000 0x2b0>;
+			gpio-controller;
+			#gpio-cells = <2>;
+		};
+
+		plicu: interrupt-controller@5100000 {
+			compatible = "dspg,dvf99-plicu";
+			reg = <0x05100000 0x100>;
+			interrupt-controller;
+			#interrupt-cells = <1>;
+		};
+
+		syscfg: syscon@5200000 {
+			compatible = "dspg,dvf99-syscfg", "syscon";
+			reg = <0x05200000 0x100>;
+		};
+
+		cmu: clock-controller@5300000 {
+			compatible = "dspg,dvf99-cmu";
+			reg = <0x05300000 0x100>;
+		};
+
+		timer@5800000 {
+			compatible = "dspg,dvf99-timer";
+			reg = <0x05800000 0x40>;
+			interrupts = <50>;
+			clocks = <&hclk>;
+		};
+
+		uart1: serial@5a00000 {
+			compatible = "dspg,dvf99-uart";
+			reg = <0x05a00000 0x200>;
+			interrupts = <55>;
+			clocks = <&hclk>;
+			dspg,gate = <6>;
+		};
+
+		uart2: serial@5b00000 {
+			compatible = "dspg,dvf99-uart";
+			reg = <0x05b00000 0x200>;
+			interrupts = <54>;
+			clocks = <&hclk>;
+			dspg,gate = <7>;
+			status = "disabled";
+		};
+
+		/*
+		 * The 16 MiB serial flash. The driver erases and programs
+		 * nothing outside the ranges of "v90d,writable"; they are the
+		 * places our system may have to write in either way the box
+		 * can start it, whichever of the two stock sets it was put
+		 * into (DESIGN.md, "Release image"; HARDWARE.md has the map):
+		 *
+		 *   0x060000 64 KiB   set A: first sector of "core" (our loader's
+		 *                     signature); bench scheme: the settings
+		 *   0x070000  4 KiB   set A: the loader's count of starts
+		 *   0x080000 64 KiB   set A: settings
+		 *   0x1a0000  4 KiB   set B: first sector of "core"
+		 *   0x1b0000  4 KiB   set B: the loader's count of starts
+		 *   0x1c0000 64 KiB   set B: settings
+		 *   0x2e0000  6 MiB   "base" of set A and of set B: our image
+		 *   0xfbe000  8 KiB   U-Boot's saved environment (bench scheme)
+		 *
+		 * Which of them belong to this box is only known once the
+		 * flash has been read, so the narrowing to one set is done by
+		 * the one program that writes here (fw/tools/v90nv, on the
+		 * "all" device, with its own list). Both boot loaders,
+		 * "factory", "nvram", both "prog" and everything else of
+		 * "core" stay out of reach of any program.
+		 */
+		flash@5500000 {
+			compatible = "dspg,dvf99-qspi";
+			reg = <0x05500000 0x800>, <0x80000000 0x01000000>;
+			v90d,writable = <0x060000 0x071000>,
+					<0x080000 0x090000>,
+					<0x1a0000 0x1a1000>,
+					<0x1b0000 0x1b1000>,
+					<0x1c0000 0x1d0000>,
+					<0x2e0000 0x8e0000>,
+					<0xfbe000 0xfc0000>;
+
+			partitions {
+				compatible = "fixed-partitions";
+				#address-cells = <1>;
+				#size-cells = <1>;
+
+				/* the whole chip by physical offset: what v90nv works on */
+				all@0 {
+					label = "all";
+					reg = <0x000000 0x1000000>;
+				};
+				/*
+				 * The three of the bench scheme, kept under their
+				 * names and numbers for the bench (flashcp, the
+				 * older v90nv commands). On a box started by the
+				 * loader from set B the first is stock "core".
+				 */
+				conf@60000 {
+					label = "v90d-conf";
+					reg = <0x060000 0x010000>;
+				};
+				image@2e0000 {
+					label = "v90d-image";
+					reg = <0x2e0000 0x300000>;
+				};
+				env@fbe000 {
+					label = "uboot-env";
+					reg = <0xfbe000 0x002000>;
+				};
+			};
+		};
+
+		watchdog@5700000 {
+			compatible = "dspg,dvf99-wdt";
+			reg = <0x05700000 0x10>;
+		};
+
+		line: line@5f00000 {
+			compatible = "v90d,ht802-line";
+			reg = <0x05f00000 0x2000>,	/* TDM1 */
+			      <0x05e00000 0x100>;	/* SPI2 */
+			reg-names = "tdm", "spi";
+			interrupts = <60>;
+			cs-gpios = <&gpio 112 0>, <&gpio 113 0>;	/* DGPIO16, DGPIO17 */
+			reset-gpios = <&gpio 149 0>, <&gpio 147 0>;	/* EGPIO21, EGPIO19 */
+		};
+
+		ethernet@6e00000 {
+			compatible = "snps,dwmac-3.70a", "snps,dwmac";
+			reg = <0x06e00000 0x8000>;
+			interrupts = <23>;
+			interrupt-names = "macirq";
+			clocks = <&hclk>;
+			clock-names = "stmmaceth";
+			phy-mode = "rmii";
+			phy-handle = <&phy0>;
+			snps,pbl = <8>;
+
+			mdio {
+				compatible = "snps,dwmac-mdio";
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				phy0: ethernet-phy@0 {
+					reg = <0>;
+				};
+			};
+		};
+	};
+};

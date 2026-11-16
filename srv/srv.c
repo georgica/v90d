@@ -1,0 +1,319 @@
+/* The dial-up server without its operating system: see srv.h. */
+#include <string.h>
+#include "srv.h"
+#include "pcmenc.h"
+#include "v90_pcm.h"
+#include "probe.h"
+
+/* RMS of a tone of 0 dBm0 in 16-bit sample units (mu-law: a sine of
+ * +3.17 dBm0 just reaches the top codeword, 32124) */
+#define RMS_0DBM0 15770
+
+int srv_level_rms(int dbm0)
+{
+    /* 10^(-1/20) in Q15 per dB below 0 dBm0 */
+    int32_t v = RMS_0DBM0;
+    if (dbm0 > 0) dbm0 = 0;
+    for (; dbm0 < 0; dbm0++) v = (v * 29205 + 16384) >> 15;
+    return (int)v;
+}
+
+static uint8_t silence(const srv_t *s) { return pcm_encode(s->cfg.law == CFG_LAW_ALAW, 0); }
+
+/* the port is set up for a game console: config.h, console.h */
+static int for_console(const cfg_t *c) { return c->service == CFG_SERVICE_DREAMCAST; }
+
+static void ip_from_caller(void *ctx, const uint8_t *pkt, size_t len)
+{
+    srv_t *s = (srv_t *)ctx;
+    tel_activity(&s->tel);
+    s->status.rx_packets++; s->status.rx_octets += len;
+    if (for_console(&s->cfg) && len <= sizeof s->pkt) {
+        memcpy(s->pkt, pkt, len);
+        if (!console_from_caller(&s->console, s->pkt, len, s->call_s * 1000u + (uint32_t)s->sub / 8u)) return;
+        pkt = s->pkt;
+    }
+    if (s->ip_out) s->ip_out(s->ctx, pkt, len);
+}
+
+
+static void tel_settings(const srv_t *s, tel_cfg *t)
+{
+    const cfg_t *c = &s->cfg;
+    memset(t, 0, sizeof *t);
+    memcpy(t->number, c->line_number, TEL_NUMBER_MAX); t->number[TEL_NUMBER_MAX] = 0;
+    t->tones = c->line_tones == CFG_TONES_EU ? TEL_TONES_EU : TEL_TONES_US;
+    t->rings = c->rings;
+    t->busy_chance = c->busy_chance;
+    t->drop_mean_min = c->drop_mean_min;
+    t->session_limit_min = c->session_limit_min;
+    t->idle_timeout_min = c->idle_timeout_min;
+    t->tone_level = srv_level_rms(-13) * 181 / 128;     /* each component -13 dBm0, as a peak */
+    t->seed = s->seed;
+}
+
+static void adopt(srv_t *s, const cfg_t *cfg)
+{
+    tel_cfg t; int i;
+    s->cfg = *cfg; s->have_next = 0;
+    s->status.service = cfg->service;
+    s->status.v92 = cfg->v92 && !for_console(cfg);
+    s->status.ppp_compression = cfg->compression && !for_console(cfg);
+    for (i = 0; i < CFG_MAX_USERS; i++) {
+        s->users[i].name = s->cfg.users[i].name;
+        s->users[i].secret = s->cfg.users[i].secret;
+    }
+    tel_settings(s, &t);
+    tel_reconfigure(&s->tel, &t);
+}
+
+void srv_init(srv_t *s, const cfg_t *cfg, uint32_t seed, srv_ip_fn ip_out, void *ctx)
+{
+    tel_cfg t;
+    memset(s, 0, sizeof *s);
+    s->seed = seed ? seed : 1; s->ip_out = ip_out; s->ctx = ctx;
+    s->echo_delay = -1;                 /* measured by the modem */
+    s->cfg = *cfg;
+    tel_settings(s, &t);
+    tel_init(&s->tel, &t);
+    status_init(&s->status);
+    adopt(s, cfg);                      /* after status_init: it reports the settings */
+    s->last_tel = TEL_ONHOOK;
+}
+
+void srv_reconfigure(srv_t *s, const cfg_t *cfg)
+{
+    if (s->tel.state == TEL_ONHOOK) adopt(s, cfg);
+    else { s->next = *cfg; s->have_next = 1; }
+}
+
+void srv_set_echo_delay(srv_t *s, int samples) { s->echo_delay = samples; }
+void srv_set_rx_linear(srv_t *s, int on) { s->rx_linear = on != 0; }
+void srv_set_max_tx_code(srv_t *s, int code) { s->max_tx_code = code >= 1 && code <= 31 ? code : 0; }
+
+void srv_set_clock(srv_t *s, uint32_t utc_seconds) { s->clock = utc_seconds; }
+
+int srv_ip_up(const srv_t *s)
+{
+    return s->in_call && s->dce.state == DCE_ONLINE && s->ds.ip_up;
+}
+
+int srv_send_ip(srv_t *s, const uint8_t *pkt, size_t len)
+{
+    int r;
+    if (!s->in_call) return PPP_ERR_DOWN;
+    r = dce_send_ip(&s->dce, pkt, len);
+    if (r == 0) { tel_activity(&s->tel); s->status.tx_packets++; s->status.tx_octets += len; }
+    else if (r != PPP_ERR_FULL) s->status.tx_errors++;
+    return r;
+}
+
+static void call_start(srv_t *s)
+{
+    dce_cfg_t d;
+    const cfg_t *c = &s->cfg;
+    dce_cfg_default(&d);
+    d.tx_level = srv_level_rms(c->tx_level);
+    d.modes = 0;
+    if (c->modulations & CFG_MOD_V90) d.modes |= ANS_MODE_V90;
+    /* V.92 rides on the V.90 offer. Only with error control: a V.92 caller
+     * that saw LAPM in our JM skips ODP / ADP (V.92 9.3.1) and would wait
+     * for a LAPM that v42 = off never starts */
+    if ((c->modulations & CFG_MOD_V90) && c->v92 && c->v42 && !for_console(c)) d.modes |= ANS_MODE_V92;
+    if (c->modulations & CFG_MOD_V34) d.modes |= V8_MOD_V34;
+    if (c->modulations & CFG_MOD_V32BIS) d.modes |= V8_MOD_V32;
+    if (c->modulations & (CFG_MOD_V22BIS | CFG_MOD_V22)) d.modes |= V8_MOD_V22;
+    if (c->modulations & CFG_MOD_V21) d.modes |= V8_MOD_V21;
+    d.alaw = c->law == CFG_LAW_ALAW;
+    d.echo_delay = s->echo_delay;
+    d.rx_linear = s->rx_linear; d.max_tx_code = s->max_tx_code;
+    d.max_down = c->max_down; d.max_up = c->max_up;
+    if (!c->v42) { d.v42.detect = 1; d.v42.fallback = 1; d.v42.t400_ms = 1; }  /* straight to start-stop */
+    if (!c->v42bis) {
+        /* the switch is for data compression as a whole: V.42 bis and V.44 */
+        d.v42.lapm.comp_tx = 0; d.v42.lapm.comp_rx = 0;
+        d.v42.lapm.v44_tx = 0; d.v42.lapm.v44_rx = 0;
+    }
+    d.ppp.auth = c->auth == CFG_AUTH_CHAP ? PPP_AUTH_CHAP : c->auth == CFG_AUTH_PAP ? PPP_AUTH_PAP : PPP_AUTH_NONE;
+    d.ppp.users = s->users; d.ppp.n_users = (size_t)c->n_users;
+    d.ppp.our_ip = c->ppp_local; d.ppp.peer_ip = c->ppp_peer;
+    d.ppp.dns1 = c->dns[0]; d.ppp.dns2 = c->dns[1];
+    d.ppp.mru = (uint16_t)c->mru;
+    d.ppp.echo_interval_ms = (uint32_t)c->echo_interval * 1000u;
+    /* [ppp] compression: CCP with Deflate and MPPC, or no CCP at all */
+    d.ppp.comp = c->compression ? (PPP_COMP_DEFLATE | PPP_COMP_MPPC) : PPP_COMP_NONE;
+    if (for_console(c)) {
+        /* The number and the login are the port's, as for every service.
+         * Whatever [ppp] and [network] say: no CCP (one game is known to
+         * get it wrong, and the console has no use for it), and the name
+         * servers that know where the games' servers are today. V.92 is
+         * left out above: the console's modem is older than it. */
+        d.ppp.comp = PPP_COMP_NONE;
+        d.ppp.dns1 = CONSOLE_DNS1; d.ppp.dns2 = CONSOLE_DNS2;
+        console_init(&s->console);
+    }
+    /* a different seed for every call */
+    s->seed = s->seed * 1664525u + 1013904223u;
+    d.ppp.seed = s->seed ^ s->clock;
+    d.ppp.ctx = s; d.ppp.ip_rx = ip_from_caller;
+    dce_init(&s->dce, &d);
+    dce_get_status(&s->dce, &s->ds);
+    s->in_call = 1; s->hangup_sent = 0;
+    s->call_start = s->clock; s->call_s = 0;
+}
+
+static st_mod_t mod_of(int m)
+{
+    switch (m) {
+    case ANS_MOD_V90: return ST_MOD_V90;
+    case ANS_MOD_V92: return ST_MOD_V92;
+    case ANS_MOD_V34: return ST_MOD_V34;
+    case ANS_MOD_V32BIS: return ST_MOD_V32BIS;
+    case ANS_MOD_V22BIS: return ST_MOD_V22BIS;
+    case ANS_MOD_V22: return ST_MOD_V22;
+    case ANS_MOD_V21: return ST_MOD_V21;
+    default: return ST_MOD_NONE;
+    }
+}
+
+/* the live part of the status page */
+static void refresh(srv_t *s)
+{
+    status_t *st = &s->status;
+    const dce_status_t *d = &s->ds;
+    switch (s->tel.state) {
+    case TEL_ONHOOK: st->line = ST_LINE_IDLE; break;
+    case TEL_ANSWERED: st->line = s->in_call && d->modem_connected ? ST_LINE_CONNECTED : ST_LINE_TRAINING; break;
+    case TEL_ENDED: st->line = ST_LINE_HANGUP; break;
+    default: st->line = ST_LINE_RINGING; break;         /* dialling, ringing tone, busy and the like */
+    }
+    if (!s->in_call) {
+        st->modulation = ST_MOD_NONE; st->down_bps = st->up_bps = 0;
+        st->v42 = ST_V42_OFF; st->compression = 0; st->ppp = ST_PPP_DEAD;
+        st->peer_name[0] = 0; st->peer_ip = 0; st->local_ip = 0;
+        st->ppp_comp_tx = st->ppp_comp_rx = ST_COMP_NONE;
+        st->comp_tx_in = st->comp_tx_out = st->comp_rx_in = st->comp_rx_out = 0;
+        st->rtd_ms = 0; st->rx_level_x10 = 0; st->snr_x10 = 0;
+        return;
+    }
+    st->modulation = d->modem_connected ? mod_of(d->modulation) : ST_MOD_NONE;
+    st->down_bps = d->modem_connected ? (uint32_t)d->bitrate : 0;
+    st->up_bps = d->modem_connected ? (uint32_t)d->rx_bitrate : 0;
+    st->snr_x10 = d->modem_connected && d->snr_db10 > 0 ? d->snr_db10 : 0;
+    st->rtd_ms = d->modem_connected && d->rtd > 0 ? (uint32_t)(d->rtd + 4) / 8 : 0;
+    /* what came off the line in the last whole second, the echo of our own
+     * signal included, against the 0 dBm0 sine */
+    st->rx_level_x10 = d->modem_connected && s->rx_pow_last > 0 ?
+        probe_db10(s->rx_pow_last, (int64_t)RMS_0DBM0 * RMS_0DBM0) : 0;
+    st->v42 = !d->modem_connected ? ST_V42_OFF :
+              d->error_control ? ST_V42_LAPM :
+              d->v42_state == V42EC_ASYNC ? ST_V42_ASYNC : ST_V42_DETECT;
+    st->compression = d->comp_tx || d->comp_rx;
+    switch (d->ppp_phase) {
+    case PPP_PHASE_ESTABLISH: st->ppp = ST_PPP_ESTABLISH; break;
+    case PPP_PHASE_AUTHENTICATE: st->ppp = ST_PPP_AUTHENTICATE; break;
+    case PPP_PHASE_NETWORK: st->ppp = d->ip_up ? ST_PPP_RUNNING : ST_PPP_NETWORK; break;
+    case PPP_PHASE_TERMINATE: st->ppp = ST_PPP_TERMINATE; break;
+    default: st->ppp = ST_PPP_DEAD; break;
+    }
+    memcpy(st->peer_name, d->peer_name, STATUS_NAME_MAX); st->peer_name[STATUS_NAME_MAX] = 0;
+    st->peer_ip = d->ip_up ? d->peer_ip : 0;
+    st->local_ip = d->ip_up ? d->our_ip : 0;
+    /* PPP compression: what is agreed now, and what went through it in this call */
+    st->ppp_comp_tx = (int)d->ppp_comp_tx; st->ppp_comp_rx = (int)d->ppp_comp_rx;
+    st->comp_tx_in = d->ppp_counters.comp_tx_in; st->comp_tx_out = d->ppp_counters.comp_tx_out;
+    st->comp_rx_in = d->ppp_counters.comp_rx_in; st->comp_rx_out = d->ppp_counters.comp_rx_out;
+}
+
+/* the line is back on hook: one line of history for what happened */
+static void episode_end(srv_t *s)
+{
+    st_call_t h;
+    const dce_status_t *d = &s->ds;
+    memset(&h, 0, sizeof h);
+    memcpy(h.dialed, s->tel.dialed, STATUS_DIALED_MAX); h.dialed[STATUS_DIALED_MAX] = 0;
+    if (s->tel.answered_this) {
+        h.start_time = s->call_start;
+        h.duration_s = s->call_s;
+        h.modulation = mod_of(d->modulation);
+        h.down_bps = (uint32_t)d->bitrate; h.up_bps = (uint32_t)d->rx_bitrate;
+        switch (s->tel.end) {
+        case TEL_END_DROP:  h.tel_result = ST_TEL_DROPPED; h.end = ST_END_LOCAL; break;
+        case TEL_END_LIMIT: h.tel_result = ST_TEL_SESSION_LIMIT; h.end = ST_END_LOCAL; break;
+        case TEL_END_IDLE:  h.tel_result = ST_TEL_IDLE; h.end = ST_END_LOCAL; break;
+        case TEL_END_CALLER: h.tel_result = ST_TEL_ANSWERED; h.end = ST_END_CALLER_HANGUP; break;
+        default:
+            h.tel_result = ST_TEL_ANSWERED;
+            switch (d->end_reason) {
+            case DCE_END_NO_CARRIER: h.end = ST_END_TRAIN_FAILED; break;
+            case DCE_END_CARRIER_LOST: h.end = ST_END_CARRIER_LOST; break;
+            case DCE_END_AUTH_FAILED: h.end = ST_END_AUTH_FAILED; break;
+            case DCE_END_PEER_CLOSED: case DCE_END_V42_RELEASED: h.end = ST_END_PPP_CLOSED; break;
+            case DCE_END_PPP_FAILED: h.end = d->ppp_end == PPP_END_KEEPALIVE ? ST_END_ECHO_TIMEOUT : ST_END_ERROR; break;
+            case DCE_END_LOCAL: h.end = ST_END_LOCAL; break;
+            case DCE_END_CLEARDOWN: h.end = ST_END_CALLER_HANGUP; break;
+            default: h.end = ST_END_ERROR; break;
+            }
+            break;
+        }
+    } else {
+        h.start_time = s->clock;
+        h.tel_result = s->tel.was_busy ? ST_TEL_BUSY : s->tel.was_wrong ? ST_TEL_WRONG_NUMBER : ST_TEL_ABANDONED;
+        h.end = ST_END_NONE;
+    }
+    status_add_call(&s->status, &h);
+}
+
+uint8_t srv_tick(srv_t *s, int offhook, uint8_t rx)
+{
+    return srv_tick_lin(s, offhook, (int16_t)v90_octet_linear(s->cfg.law == CFG_LAW_ALAW, rx));
+}
+
+uint8_t srv_tick_lin(srv_t *s, int offhook, int16_t lin)
+{
+    int alaw = s->cfg.law == CFG_LAW_ALAW;
+    int16_t tone = tel_tick(&s->tel, offhook, lin);
+    tel_state ts = s->tel.state;
+    uint8_t out;
+
+    if (ts != s->last_tel) {
+        if (ts == TEL_ANSWERED) call_start(s);
+        else if (s->last_tel == TEL_ANSWERED && s->in_call) {
+            /* dropped, or the caller hung up: the call object is abandoned as it is */
+            dce_get_status(&s->dce, &s->ds);
+            s->in_call = 0;
+        }
+        if (ts != TEL_ONHOOK) s->episode = 1;
+        if (ts == TEL_ONHOOK && s->episode) {
+            episode_end(s);
+            s->episode = 0;
+            if (s->have_next) adopt(s, &s->next);
+        }
+        s->last_tel = ts;
+        refresh(s);
+    }
+
+    if (s->in_call) {
+        if (s->tel.want_hangup && !s->hangup_sent) { dce_hangup(&s->dce); s->hangup_sent = 1; }
+        if (!dce_tick_lin(&s->dce, lin, &out)) {
+            dce_get_status(&s->dce, &s->ds);
+            s->in_call = 0;
+            tel_call_ended(&s->tel);
+            s->last_tel = s->tel.state;
+            refresh(s);
+        }
+    } else {
+        out = tone ? pcm_encode(alaw, tone) : silence(s);
+    }
+
+    s->rx_pow += (int32_t)lin * lin;
+    if (++s->sub >= 8000) {
+        s->sub = 0;
+        s->rx_pow_last = s->rx_pow / 8000; s->rx_pow = 0;
+        s->status.uptime_s++;
+        if (s->clock) s->clock++;
+        if (s->in_call) { s->call_s++; dce_get_status(&s->dce, &s->ds); }
+        refresh(s);
+    }
+    return out;
+}

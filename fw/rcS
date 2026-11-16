@@ -1,0 +1,160 @@
+#!/bin/sh
+# v90d boot script (busybox init: ::sysinit:/etc/init.d/rcS)
+# Ours; written for this image.
+
+/bin/busybox mount -t proc proc /proc
+/bin/busybox --install -s
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev 2>/dev/null
+mkdir -p /dev/pts /dev/net /tmp /var/run
+mount -t devpts devpts /dev/pts
+mount -t tmpfs tmpfs /tmp
+# progress to the kernel log: the serial console, and the network console of
+# a bring-up build
+say() { echo "rcS: $*" > /dev/kmsg; }
+say "file systems mounted"
+# bring-up: "v90d.trace=HOST:PORT" streams the uptime there, to time a death
+T=$(sed -n 's/.*v90d.trace=\([^ ]*\).*/\1/p' /proc/cmdline)
+[ -c /dev/net/tun ] || mknod /dev/net/tun c 10 200
+
+# the kernel feeds the hardware watchdog until this starts; from here on a
+# user space that stops for a minute means a reboot
+say "watchdog"
+if grep -q v90d.nowd /proc/cmdline; then
+    say "watchdog left to the kernel, as asked"
+elif [ -c /dev/watchdog ]; then
+    watchdog -T 60 -t 10 /dev/watchdog
+    say "watchdog fed from user space"
+elif [ -f /etc/debug ]; then
+    # bring-up kernel without the watchdog driver, RAM-booted with the
+    # watchdog armed: feed it by hand
+    (while :; do peek -W 05700008 a5a5; peek -W 05700008 5a5a; sleep 15; done) >/dev/null 2>&1 &
+    say "no watchdog driver: fed through /dev/mem"
+fi
+
+# What we keep in flash, and where, depends on how this box starts us: the
+# bench way (U-Boot's trial script, image and settings in fixed places) or
+# through our loader from one of the two stock sets. `v90nv where` reads
+# that off the flash; `v90nv confirm`, `conf-load` and `conf-save` then do
+# the right thing for either (fw/tools/v90nv.c, DESIGN.md). A system started
+# from RAM finds neither scheme and writes nothing. /etc/v90d.conf is what
+# a box starts with. "v90d.noflash" on the kernel command line (bring-up)
+# keeps this script from writing to the flash at all.
+WHERE=/tmp/v90d.where
+where() { v90nv where > $WHERE.new 2>/dev/null && mv $WHERE.new $WHERE; }
+SCHEME=none
+where && SCHEME=$(sed -n 's/^scheme=//p' $WHERE)
+say "started: scheme $SCHEME, set $(sed -n 's/^set=//p' $WHERE 2>/dev/null)"
+NOFLASH=; grep -q v90d.noflash /proc/cmdline && NOFLASH=1
+[ "$SCHEME" = none ] && NOFLASH=1
+CONF=/tmp/v90d.conf
+if [ "$SCHEME" != none ] && v90nv conf-load $CONF; then
+    say "settings from flash"
+else
+    cp /etc/v90d.conf $CONF
+    say "factory settings"
+fi
+# Settings saved by a newer firmware may hold keys this one does not know,
+# and the daemon refuses a file it does not understand. Then it would never
+# start, no start would be confirmed and the box would end up in the stock
+# firmware. Start with the factory settings instead; what is in flash stays
+# as it is until somebody saves on the settings page.
+if ! /usr/sbin/v90d -c $CONF -p >/dev/null 2>&1; then
+    say "the saved settings are not understood by this firmware: factory settings for now"
+    cp /etc/v90d.conf $CONF
+fi
+chmod 600 $CONF
+cp $CONF $CONF.kept
+LAN=eth0
+
+hostname v90d
+ifconfig lo 127.0.0.1 up
+
+# LAN side: v90d -p prints LAN_MODE, LAN_ADDRESS, LAN_NETMASK from the config
+eval "$(/usr/sbin/v90d -c $CONF -p)" || LAN_MODE=dhcp
+say "LAN $LAN_MODE"
+ifconfig $LAN up
+# The lights show state and nothing else: the socket light follows the
+# Ethernet link and its traffic, the network light is on while the LAN side
+# has its address (udhcpc.script, or below for a fixed one), and each
+# telephone light is lit by the daemon while that port is off hook.
+L=/sys/class/leds/ht802
+if [ -d $L:rj45 ]; then
+    echo netdev > $L:rj45/trigger 2>/dev/null && {
+        echo $LAN > $L:rj45/device_name; echo 1 > $L:rj45/link; echo 1 > $L:rj45/rx; echo 1 > $L:rj45/tx; }
+fi
+# the rescue address: whatever the settings say, the box also answers here
+# (the settings page names it)
+ifconfig $LAN:9 169.254.90.1 netmask 255.255.0.0 2>/dev/null
+if [ "$LAN_MODE" = static ]; then
+    ifconfig $LAN "$LAN_ADDRESS" netmask "$LAN_NETMASK"
+    echo 1 > $L:wan/brightness 2>/dev/null
+    [ -n "$LAN_GATEWAY" ] && route add default gw "$LAN_GATEWAY" dev $LAN
+    : > /tmp/resolv.conf
+    for d in $LAN_DNS1 $LAN_DNS2; do echo "nameserver $d" >> /tmp/resolv.conf; done
+else
+    # -b: go on in the background if no lease comes at once; the daemon
+    # starts its status page when the address appears
+    udhcpc -i $LAN -b -s /etc/udhcpc.script -x hostname:v90d
+fi
+
+# bring-up builds only (fw/mkinitramfs.sh debug): a root shell on the LAN
+[ -f /etc/debug ] && telnetd -l /bin/sh
+[ -n "$T" ] && (sleep 3; while :; do cat /proc/uptime; usleep 200000; done | nc ${T%:*} ${T#*:}) &
+
+# the box has no battery clock: the call history wants the time of day
+( sleep 10; ntpd -q -p pool.ntp.org ) >/dev/null 2>&1 &
+
+# the telephone lines: the character devices of our SLIC driver (fw/drv),
+# port 1 and port 2
+LINE=${V90D_LINE:-dev:/dev/v90line}
+LINE2=${V90D_LINE2:-dev:/dev/v90line2}
+say "starting the daemon on $LINE and $LINE2"
+
+# bring-up: "v90d.nodaemon" on the kernel command line leaves the line alone
+grep -q v90d.nodaemon /proc/cmdline && { say "no daemon, as asked"; exit 0; }
+
+if [ -z "$NOFLASH" ]; then
+    # the settings page saves to $CONF; carry a change to the flash
+    while sleep 5; do
+        cmp -s $CONF $CONF.kept && continue
+        cp $CONF $CONF.new
+        if v90nv conf-save $CONF.new; then mv $CONF.new $CONF.kept; say "settings kept in flash"
+        else say "settings NOT kept in flash"; sleep 60; fi
+    done &
+    # Whoever started us counted this start before making it (U-Boot's
+    # script, or our loader) and gives the box back to the stock firmware
+    # after three that nobody confirmed. Up for a minute with the daemon
+    # alive: this start was a good one.
+    ( sleep 60
+        pidof v90d >/dev/null || exit 0
+        v90nv confirm >/dev/null 2>&1 && say "start confirmed"
+        where ) &
+fi
+
+# The Restart button of the settings page, and the Firmware page after it
+# has written the flash: a note is left. The settings go to flash if the
+# loop above has not got to them yet, and this start counts as a good one
+# even if it is younger than a minute (or three quick restarts would end in
+# the stock firmware). After "back to the stock firmware" there is nothing
+# of ours left to confirm, and confirm does nothing.
+(while sleep 1; do
+    [ -f /tmp/v90d.restart ] || continue
+    say "restart asked"
+    if [ -z "$NOFLASH" ]; then
+        v90nv conf-save $CONF
+        v90nv confirm >/dev/null 2>&1
+    fi
+    sync
+    reboot
+    sleep 30
+done) &
+
+# respawn: a daemon that dies must not leave the line dead
+while :; do
+    [ -c "${LINE#dev:}" ] || [ "${LINE#dev:}" = "$LINE" ] || { sleep 5; continue; }
+    if [ -c "${LINE2#dev:}" ]; then /usr/sbin/v90d -c $CONF -l "$LINE" -l "$LINE2" -i $LAN -t ppp0
+    else /usr/sbin/v90d -c $CONF -l "$LINE" -i $LAN -t ppp0; fi
+    echo "v90d exited with $?; restarting in 2 s" >/dev/console
+    sleep 2
+done &

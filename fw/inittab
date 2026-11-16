@@ -1,0 +1,4 @@
+# v90d: busybox init. Ours; written for this image.
+::sysinit:/etc/init.d/rcS
+::ctrlaltdel:/bin/busybox reboot
+::shutdown:/bin/busybox killall v90d
