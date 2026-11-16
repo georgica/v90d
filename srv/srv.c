@@ -22,6 +22,40 @@ static uint8_t silence(const srv_t *s) { return pcm_encode(s->cfg.law == CFG_LAW
 
 /* the port is set up for a game console: config.h, console.h */
 static int for_console(const cfg_t *c) { return c->service == CFG_SERVICE_DREAMCAST; }
+/* two consoles joined modem to modem: saturn.h */
+static int for_link(const cfg_t *c) { return c->service == CFG_SERVICE_SATURN; }
+
+static void raw_from_caller(void *ctx, const uint8_t *oct, size_t n)
+{
+    srv_t *s = (srv_t *)ctx;
+    tel_activity(&s->tel);
+    s->status.rx_octets += n;
+    if (s->raw_out) s->raw_out(s->ctx, oct, n);
+}
+
+void srv_set_raw(srv_t *s, srv_raw_fn raw_out) { s->raw_out = raw_out; }
+
+int srv_link(const srv_t *s, uint32_t *addr, int *online)
+{
+    if (!s->in_call || s->link == SATURN_NONE) { *online = 0; return SATURN_NONE; }
+    *addr = s->link_addr;
+    *online = s->dce.state == DCE_ONLINE;
+    return s->link;
+}
+
+size_t srv_send_raw(srv_t *s, const uint8_t *oct, size_t n)
+{
+    size_t r;
+    if (!s->in_call || s->link == SATURN_NONE) return 0;
+    r = dce_raw_write(&s->dce, oct, n);
+    if (r) { tel_activity(&s->tel); s->status.tx_octets += r; }
+    return r;
+}
+
+void srv_hangup(srv_t *s)
+{
+    if (s->in_call && !s->hangup_sent) { dce_hangup(&s->dce); s->hangup_sent = 1; }
+}
 
 static void ip_from_caller(void *ctx, const uint8_t *pkt, size_t len)
 {
@@ -42,6 +76,7 @@ static void tel_settings(const srv_t *s, tel_cfg *t)
     const cfg_t *c = &s->cfg;
     memset(t, 0, sizeof *t);
     memcpy(t->number, c->line_number, TEL_NUMBER_MAX); t->number[TEL_NUMBER_MAX] = 0;
+    if (c->service == CFG_SERVICE_SATURN) t->number[0] = 0;     /* what is dialled is an instruction: saturn.h */
     t->tones = c->line_tones == CFG_TONES_EU ? TEL_TONES_EU : TEL_TONES_US;
     t->rings = c->rings;
     t->busy_chance = c->busy_chance;
@@ -57,8 +92,8 @@ static void adopt(srv_t *s, const cfg_t *cfg)
     tel_cfg t; int i;
     s->cfg = *cfg; s->have_next = 0;
     s->status.service = cfg->service;
-    s->status.v92 = cfg->v92 && !for_console(cfg);
-    s->status.ppp_compression = cfg->compression && !for_console(cfg);
+    s->status.v92 = cfg->v92 && !for_console(cfg) && !for_link(cfg);
+    s->status.ppp_compression = cfg->compression && !for_console(cfg) && !for_link(cfg);
     for (i = 0; i < CFG_MAX_USERS; i++) {
         s->users[i].name = s->cfg.users[i].name;
         s->users[i].secret = s->cfg.users[i].secret;
@@ -112,6 +147,20 @@ static void call_start(srv_t *s)
 {
     dce_cfg_t d;
     const cfg_t *c = &s->cfg;
+    s->link = SATURN_NONE;
+    s->call_start = s->clock; s->call_s = 0;
+    if (for_link(c)) {
+        s->link = saturn_number(s->tel.dialed, &s->link_addr);
+        if (s->link == SATURN_NONE) {
+            /* not a number of this service: no call. (The telephony layer
+             * takes any number on such a port; it cannot know them.) */
+            memset(&s->ds, 0, sizeof s->ds);
+            s->ds.state = DCE_ENDED; s->ds.end_reason = DCE_END_LOCAL;
+            s->in_call = 0;
+            tel_call_ended(&s->tel);
+            return;
+        }
+    }
     dce_cfg_default(&d);
     d.tx_level = srv_level_rms(c->tx_level);
     d.modes = 0;
@@ -119,7 +168,7 @@ static void call_start(srv_t *s)
     /* V.92 rides on the V.90 offer. Only with error control: a V.92 caller
      * that saw LAPM in our JM skips ODP / ADP (V.92 9.3.1) and would wait
      * for a LAPM that v42 = off never starts */
-    if ((c->modulations & CFG_MOD_V90) && c->v92 && c->v42 && !for_console(c)) d.modes |= ANS_MODE_V92;
+    if ((c->modulations & CFG_MOD_V90) && c->v92 && c->v42 && !for_console(c) && !for_link(c)) d.modes |= ANS_MODE_V92;
     if (c->modulations & CFG_MOD_V34) d.modes |= V8_MOD_V34;
     if (c->modulations & CFG_MOD_V32BIS) d.modes |= V8_MOD_V32;
     if (c->modulations & (CFG_MOD_V22BIS | CFG_MOD_V22)) d.modes |= V8_MOD_V22;
@@ -156,10 +205,10 @@ static void call_start(srv_t *s)
     s->seed = s->seed * 1664525u + 1013904223u;
     d.ppp.seed = s->seed ^ s->clock;
     d.ppp.ctx = s; d.ppp.ip_rx = ip_from_caller;
+    if (for_link(c)) d.raw_rx = raw_from_caller;
     dce_init(&s->dce, &d);
     dce_get_status(&s->dce, &s->ds);
     s->in_call = 1; s->hangup_sent = 0;
-    s->call_start = s->clock; s->call_s = 0;
 }
 
 static st_mod_t mod_of(int m)

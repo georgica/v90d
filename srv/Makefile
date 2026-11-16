@@ -16,7 +16,7 @@ V42_SRC := $(addprefix ../v42/,v42_hdlc.c v42_detect.c v42_comp.c v44_comp.c v42
 PPP_SRC := $(addprefix ../ppp/,ppp_md5.c ppp_hdlc.c ppp_fsm.c ppp_deflate.c ppp_mppc.c ppp.c)
 CFG_SRC := ../cfg/config.c ../cfg/status.c
 # everything portable that goes into the daemon
-CORE_SRC := srv.c console.c dclist.c dcnow.c upnp.c line.c ../tel/tel.c ../dce/dce.c $(MODEM_SRC) $(V42_SRC) $(PPP_SRC) $(CFG_SRC)
+CORE_SRC := srv.c console.c dclist.c dcnow.c upnp.c saturn.c line.c ../tel/tel.c ../dce/dce.c $(MODEM_SRC) $(V42_SRC) $(PPP_SRC) $(CFG_SRC)
 SIM_SRC := $(addprefix ../sim/,g711.c noise.c filt.c channel.c v8call.c callpeer.c p2a.c qammod.c p34a.c p2c.c v34peer.c v32call.c v32line.c resamp.c v92a.c v92chan.c v92call.c) \
            ../v90/test/v90_dec.c ../dce/test/caller.c ../ppp/test/pppc.c
 HDRS := $(wildcard *.h ../tel/*.h ../dce/*.h ../dce/test/*.h ../cfg/*.h ../modem/*.h ../v90/*.h ../v34/*.h ../v92/*.h ../v42/*.h ../ppp/*.h ../sim/*.h)

@@ -75,7 +75,10 @@ daemon's decision.
 | line | `drop_mean` | 0..10080, mean minutes of connect time before the line drops at random, 0 = never | `0` |
 | line | `session_limit` | 0..10080 minutes, hard limit of one call, 0 = none | `0` |
 | line | `idle_timeout` | 0..10080 minutes without IP traffic before we hang up, 0 = none | `0` |
-| line | `service` | `internet`, `archive`, `dreamcast`: what a caller on this port gets (below) | `internet` |
+| line | `service` | `internet`, `archive`, `dreamcast`, `saturn`: what a caller on this port gets (below) | `internet` |
+| line | `dreamcast_now` | `on`, `off`: with `service = dreamcast`, report the game being played to the Dreamcast Now site | `off` |
+| line | `dreamcast_lan` | `on`, `off`: with `service = dreamcast`, the console is a host on the network with an address of its own (DHCP) | `off` |
+| line | `dreamcast_upnp` | `on`, `off`: with `service = dreamcast`, ask the network's router to pass the games' ports on (UPnP) | `off` |
 | status | `listen` | `lan`, `off` | `lan` |
 | status | `port` | 1..65535 | `80` |
 | status | `admin_password` | 0..64 octets, written like a user secret; empty = settings page open | empty |
@@ -110,8 +113,37 @@ settings page asks for the user name `admin` and this password.
   209.50.50.129) instead of `dns1` and `dns2`; and its packets leave with a
   hop count of 64, an opening of a connection from the ports 3200 to 3205
   that is repeated within a second being passed on once (`srv/console.h`).
+  Connections of the games to servers that are gone are turned to the ones
+  that stand in for them today (a list fetched when the service starts),
+  the ports the games need are let in from the network to the console, and
+  an opening of a connection that carries the push flag is mended. Three
+  switches, each off unless asked for:
+  - `dreamcast_now`: every 15 seconds while the console is connected, the
+    site dcnow-2016.appspot.com is told a hash of the box's hardware address
+    and a hash of the last name the console looked up, which is how its
+    "who is playing" page works. Nothing is sent with the switch off.
+  - `dreamcast_lan`: the box asks the network's DHCP server for a second
+    address and gives it to the console, answering for it on the network
+    (proxy ARP); the console is then not behind the box's NAT. The address
+    is renewed at half its lease and given up when the lease runs out.
+  - `dreamcast_upnp`: the network's router is asked to pass the games'
+    ports on (to the console with `dreamcast_lan`, else to the box), again
+    every half hour, and to stop when the daemon ends. Only the router's own
+    answer to the search is believed.
   The facts behind it are in `refs/dreampi-facts.md`. It has not been tried
   with a real console.
+- `saturn`: for two consoles that would telephone each other (the Sega
+  Saturn with its NetLink modem). Each player dials into a box of their
+  own, and the boxes carry the octets of the two modems to each other over
+  the network, in the words of the tunnel the DreamPi project uses, so the
+  other player may have one of those. What is dialled is an instruction:
+  `0` or `00` waits for the other player (two minutes), `#a*b*c*d#` or `#`
+  and twelve digits and `#` calls the player at that IPv4 address. The
+  port's `number`, the users and the PPP settings play no part; error
+  control is not offered. The waiting side must be reachable on TCP port
+  65432 and UDP port 20001, the calling side on UDP port 20002. The numbers
+  that ask a matchmaking service for an opponent are not understood. Not
+  tried with a real console (`srv/saturn.h`).
 
 Settings written before the ports had a service each may hold `archive = on`
 in `[network]`. That still reads, and means `service = archive` for every
@@ -189,10 +221,19 @@ session_limit = 0
 # minutes without IP traffic before we hang up, 0 = none
 idle_timeout = 0
 # what a caller on this port gets: internet (as it is), archive (web and
-# FTP from Protoweb, the web as it was) or dreamcast (for the game console:
-# no PPP compression, no V.92, the game revival name servers; not tried with
-# a real console)
+# FTP from Protoweb, the web as it was), dreamcast (for the game console:
+# no PPP compression, no V.92, the game revival name servers) or saturn
+# (two consoles that telephone each other, joined over the network: dial 0
+# to wait, #a*b*c*d# to call the player at that address). The last two have
+# not been tried with a real console.
 service = internet
+# for service = dreamcast, all off unless asked for: tell the "Dreamcast
+# Now" site which game is being played; make the console a host of its own
+# on the network (an address by DHCP) instead of hiding it behind the box;
+# ask the network's router to pass the games' ports on (UPnP)
+#dreamcast_now = off
+#dreamcast_lan = off
+#dreamcast_upnp = off
 
 [status]
 # lan (default) or off

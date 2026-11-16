@@ -104,7 +104,7 @@ typedef struct {
     /* error control */
     st_v42_t  v42;
     int       compression;      /* V.42bis in use */
-    int       service;          /* the port's service, 0 internet, 1 archive, 2 dreamcast (the setting) */
+    int       service;          /* the port's service, 0 internet, 1 archive, 2 dreamcast, 3 saturn (the setting) */
     int       v92;              /* V.92 is allowed on this port (the setting, not a measurement) */
     /* PPP */
     st_ppp_t  ppp;

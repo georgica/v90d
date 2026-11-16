@@ -54,6 +54,8 @@
 #include <sched.h>
 #include <sys/mman.h>
 #include <sys/wait.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
 #include "srv.h"
 #include "httpd.h"
 #include "line.h"
@@ -386,6 +388,197 @@ static void up_poll(uint32_t now_ms)
     if (up_pid == 0) upnp_child(!want ? 0 : want != up_ip ? 2 : 1, want);
     if (up_pid < 0) { up_pid = 0; return; }
     up_ip = want;
+}
+
+/* ---- service = saturn: the network side of a console-to-console call
+ * (saturn.h). Nothing here waits: every socket is non-blocking and looked
+ * at once per block of the line. One conversation per port; the two ports
+ * of one box can even call each other. ---- */
+enum { SL_IDLE = 0, SL_LISTEN, SL_HELLO_IN, SL_CONNECT, SL_HELLO_OUT, SL_LINKED, SL_OVER };
+#define SL_WAIT_MS   120000u    /* waiting for the other player's call */
+#define SL_REACH_MS   60000u    /* trying to reach the other player's box */
+#define SL_HELLO_MS    5000u    /* for the greeting, once connected */
+#define SL_SILENT_MS  30000u    /* the other box sends a ping every second */
+static struct sat_link {
+    int      st, lis, tcp, udp;
+    uint32_t peer; uint16_t peer_port;
+    uint32_t t0, t_hello, next_try, ping_at, heard;
+    char     hello[8]; size_t hello_n;
+    saturn_tx tx; saturn_rx rx;
+    uint8_t  up[SATURN_REC_MAX]; size_t up_n;      /* from the modem, for the next datagram */
+    uint8_t  dn[4096]; size_t dn_n;                /* for the modem, as it takes them */
+} sl[2] = { { .lis = -1, .tcp = -1, .udp = -1 }, { .lis = -1, .tcp = -1, .udp = -1 } };
+
+static void sl_close(struct sat_link *l)
+{
+    if (l->lis >= 0) close(l->lis);
+    if (l->tcp >= 0) close(l->tcp);
+    if (l->udp >= 0) close(l->udp);
+    l->lis = l->tcp = l->udp = -1;
+}
+static void sl_over(int k, const char *why)
+{
+    logf_(CFG_LOG_INFO, "port %d: %s", k + 1, why);
+    sl_close(&sl[k]);
+    sl[k].st = SL_OVER;
+    srv_hangup(&S[k]);
+}
+static void sl_send(struct sat_link *l, const void *b, size_t n)
+{
+    struct sockaddr_in sa;
+    memset(&sa, 0, sizeof sa);
+    sa.sin_family = AF_INET; sa.sin_port = htons(l->peer_port); sa.sin_addr.s_addr = htonl(l->peer);
+    (void)sendto(l->udp, b, n, MSG_DONTWAIT | MSG_NOSIGNAL, (struct sockaddr *)(void *)&sa, sizeof sa);
+}
+static void sl_flush(struct sat_link *l)
+{
+    static uint8_t dg[SATURN_DGRAM_MAX]; size_t n;
+    if (!l->up_n) return;
+    n = saturn_pack(&l->tx, l->up, l->up_n, dg);
+    l->up_n = 0;
+    sl_send(l, dg, n); sl_send(l, dg, n);           /* every datagram twice: nothing is asked for again */
+}
+/* octets from the console's modem */
+static void sat_from_modem(void *ctx, const uint8_t *oct, size_t n)
+{
+    struct sat_link *l = &sl[(int)(((srv_t *)ctx) - S)];
+    if (l->st != SL_LINKED) return;                 /* nobody to tell yet */
+    while (n) {
+        size_t m = sizeof l->up - l->up_n;
+        if (m > n) m = n;
+        memcpy(l->up + l->up_n, oct, m); l->up_n += m; oct += m; n -= m;
+        if (l->up_n == sizeof l->up) sl_flush(l);
+    }
+}
+static int sl_tcp(void)
+{
+    int fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0), one = 1;
+    if (fd >= 0) (void)setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+    return fd;
+}
+/* the two boxes have greeted each other: datagrams from now on */
+static void sl_linked(int k, uint32_t now_ms, int local_port, int peer_port)
+{
+    struct sat_link *l = &sl[k]; struct sockaddr_in sa; int one = 1, tos = SATURN_TOS; char a[16];
+    if (l->tcp >= 0) close(l->tcp);
+    if (l->lis >= 0) close(l->lis);
+    l->tcp = l->lis = -1;
+    l->udp = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    memset(&sa, 0, sizeof sa);
+    sa.sin_family = AF_INET; sa.sin_port = htons((uint16_t)local_port);
+    if (l->udp >= 0) (void)setsockopt(l->udp, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+    if (l->udp < 0 || bind(l->udp, (struct sockaddr *)(void *)&sa, sizeof sa) < 0) { sl_over(k, "no UDP port for the game's octets"); return; }
+    (void)setsockopt(l->udp, IPPROTO_IP, IP_TOS, &tos, sizeof tos);
+    l->peer_port = (uint16_t)peer_port;
+    saturn_tx_init(&l->tx); saturn_rx_init(&l->rx);
+    l->up_n = 0; l->dn_n = 0;
+    l->heard = l->ping_at = now_ms;
+    l->st = SL_LINKED;
+    sl_send(l, SATURN_OPEN, sizeof SATURN_OPEN - 1);
+    logf_(CFG_LOG_INFO, "port %d: the other player is %s", k + 1, ip_str(l->peer, a));
+}
+static void sl_poll(uint32_t now_ms)
+{
+    int k;
+    for (k = 0; k < n_ports; k++) {
+        struct sat_link *l = &sl[k]; uint32_t addr = 0; int on = 0, kind = srv_link(&S[k], &addr, &on);
+        struct sockaddr_in sa; socklen_t sl_n; ssize_t r; int i; char a[16];
+
+        if (kind == SATURN_NONE) { if (l->st != SL_IDLE) { sl_close(l); l->st = SL_IDLE; } continue; }
+        switch (l->st) {
+        case SL_IDLE:
+            if (!on) break;                         /* the modem first */
+            l->t0 = now_ms; l->next_try = now_ms; l->hello_n = 0;
+            if (kind == SATURN_WAIT) {
+                memset(&sa, 0, sizeof sa);
+                sa.sin_family = AF_INET; sa.sin_port = htons(SATURN_TCP_PORT);
+                l->lis = sl_tcp();
+                if (l->lis < 0 || bind(l->lis, (struct sockaddr *)(void *)&sa, sizeof sa) < 0 || listen(l->lis, 2) < 0) {
+                    sl_over(k, "cannot wait for the other player: the port for it is taken");
+                    break;
+                }
+                l->st = SL_LISTEN;
+                logf_(CFG_LOG_INFO, "port %d: waiting for the other player to call", k + 1);
+            } else {
+                l->peer = addr;
+                l->st = SL_CONNECT;
+                logf_(CFG_LOG_INFO, "port %d: calling the player at %s", k + 1, ip_str(addr, a));
+            }
+            break;
+        case SL_LISTEN:
+            sl_n = sizeof sa;
+            l->tcp = accept4(l->lis, (struct sockaddr *)(void *)&sa, &sl_n, SOCK_NONBLOCK | SOCK_CLOEXEC);
+            if (l->tcp >= 0) { l->peer = ntohl(sa.sin_addr.s_addr); l->hello_n = 0; l->t_hello = now_ms; l->st = SL_HELLO_IN; }
+            else if (now_ms - l->t0 >= SL_WAIT_MS) sl_over(k, "nobody called");
+            break;
+        case SL_HELLO_IN:
+            r = recv(l->tcp, l->hello + l->hello_n, 7 - l->hello_n, 0);
+            if (r > 0) l->hello_n += (size_t)r;
+            if (l->hello_n == 7 && memcmp(l->hello, SATURN_HELLO, 7) == 0) {
+                (void)send(l->tcp, SATURN_HELLO_ACK, 5, MSG_NOSIGNAL);
+                sl_linked(k, now_ms, SATURN_UDP_WAIT, SATURN_UDP_CALL);
+                /* the game here has been waiting for its telephone to ring */
+                if (l->st == SL_LINKED) { memcpy(l->dn, SATURN_RING, sizeof SATURN_RING - 1); l->dn_n = sizeof SATURN_RING - 1; }
+            } else if (l->hello_n == 7 || r == 0 || (r < 0 && errno != EAGAIN && errno != EINTR) || now_ms - l->t_hello >= SL_HELLO_MS) {
+                close(l->tcp); l->tcp = -1; l->st = SL_LISTEN;      /* not the other player */
+            }
+            break;
+        case SL_CONNECT:
+            if (l->tcp < 0) {
+                if ((int32_t)(now_ms - l->next_try) < 0) break;
+                if (now_ms - l->t0 >= SL_REACH_MS) { sl_over(k, "the other player's box does not answer"); break; }
+                l->next_try = now_ms + 2000u;
+                l->tcp = sl_tcp();
+                if (l->tcp < 0) break;
+                memset(&sa, 0, sizeof sa);
+                sa.sin_family = AF_INET; sa.sin_port = htons(SATURN_TCP_PORT); sa.sin_addr.s_addr = htonl(l->peer);
+                if (connect(l->tcp, (struct sockaddr *)(void *)&sa, sizeof sa) < 0 && errno != EINPROGRESS) { close(l->tcp); l->tcp = -1; }
+            } else {
+                struct pollfd pf; int err = 0; socklen_t el = sizeof err;
+                pf.fd = l->tcp; pf.events = POLLOUT; pf.revents = 0;
+                if (poll(&pf, 1, 0) <= 0) {
+                    if ((int32_t)(now_ms - l->next_try) >= 0) { close(l->tcp); l->tcp = -1; }     /* try again */
+                    break;
+                }
+                if (getsockopt(l->tcp, SOL_SOCKET, SO_ERROR, &err, &el) < 0 || err) { close(l->tcp); l->tcp = -1; break; }
+                (void)send(l->tcp, SATURN_HELLO, 7, MSG_NOSIGNAL);
+                l->hello_n = 0; l->t_hello = now_ms; l->st = SL_HELLO_OUT;
+            }
+            break;
+        case SL_HELLO_OUT:
+            r = recv(l->tcp, l->hello + l->hello_n, 5 - l->hello_n, 0);
+            if (r > 0) l->hello_n += (size_t)r;
+            if (l->hello_n == 5 && memcmp(l->hello, SATURN_HELLO_ACK, 5) == 0) sl_linked(k, now_ms, SATURN_UDP_CALL, SATURN_UDP_WAIT);
+            else if (l->hello_n == 5 || r == 0 || (r < 0 && errno != EAGAIN && errno != EINTR) || now_ms - l->t_hello >= SL_HELLO_MS)
+                sl_over(k, "the box at that address is not waiting for a call");
+            break;
+        case SL_LINKED:
+            for (i = 0; i < 32; i++) {
+                static uint8_t dg[8192];
+                sl_n = sizeof sa;
+                r = recvfrom(l->udp, dg, sizeof dg, 0, (struct sockaddr *)(void *)&sa, &sl_n);
+                if (r <= 0) break;
+                if (ntohl(sa.sin_addr.s_addr) != l->peer) continue;     /* only the other player is heard */
+                l->peer_port = ntohs(sa.sin_port);                      /* as its router shows it to us */
+                l->heard = now_ms;
+                switch (saturn_control(dg, (size_t)r)) {
+                case 1: sl_send(l, SATURN_PONG, sizeof SATURN_PONG - 1); break;
+                case 2: break;
+                default: l->dn_n += saturn_unpack(&l->rx, dg, (size_t)r, l->dn + l->dn_n, sizeof l->dn - l->dn_n); break;
+                }
+            }
+            if (l->dn_n) {
+                size_t took = srv_send_raw(&S[k], l->dn, l->dn_n);
+                if (took) { memmove(l->dn, l->dn + took, l->dn_n - took); l->dn_n -= took; }
+            }
+            sl_flush(l);
+            if (now_ms - l->ping_at >= 1000u) { l->ping_at = now_ms; sl_send(l, SATURN_PING, sizeof SATURN_PING - 1); }
+            if (now_ms - l->heard >= SL_SILENT_MS) sl_over(k, "the other player is gone");
+            break;
+        default:        /* SL_OVER: until the call has ended */
+            break;
+        }
+    }
 }
 
 /* the network side answers ARP for the console's address, or not */
@@ -726,6 +919,7 @@ int main(int argc, char **argv)
         line_law[p] = view.law == CFG_LAW_ALAW;
         if (line_set_law(&line[p], line_law[p]) < 0) logf_(CFG_LOG_WARN, "line %s: cannot set the law: %s", line_spec[p], strerror(errno));
         srv_init(&S[p], &view, seed + 0x9E3779B9u * (uint32_t)p, ip_to_kernel, &S[p]);
+        srv_set_raw(&S[p], sat_from_modem);
         srv_set_echo_delay(&S[p], echo_delay);
         srv_set_max_tx_code(&S[p], max_tx_code);
         if ((size_t)p < strlen(rx_formats)) {
@@ -827,6 +1021,7 @@ int main(int argc, char **argv)
                 if (net_dirty) net_apply();
             }
             arch_clock = now_ms;
+            sl_poll(now_ms);
             if (now_ms % 2000 == 0) arch_poll(now_ms);
             if (now_ms % 1000 == 0) { dc_poll(now_ms); dn_poll(now_ms); la_poll(now_ms); up_poll(now_ms); }
             if (fw_pid > 0 && now_ms % 1000 == 0 && waitpid(fw_pid, NULL, WNOHANG) == fw_pid) fw_pid = 0;

@@ -203,6 +203,64 @@ static void check_all_down(void)
     CHECK_EQ_I(dce_send_ip(&D, pkt, sizeof pkt), PPP_ERR_DOWN);
 }
 
+/* ------------------------------------------------------------------ (r) */
+/* A call that carries octets and no PPP (dce.h, raw_rx): what a game
+ * console's modem sends comes out as it is, what is written goes to it. */
+static uint8_t raw_up[4096], raw_dn[4096]; static size_t raw_up_n, raw_dn_n, raw_cli_at, raw_cli_n;
+static void raw_srv_rx(void *ctx, const uint8_t *b, size_t n) { (void)ctx; if (raw_up_n + n <= sizeof raw_up) { memcpy(raw_up + raw_up_n, b, n); raw_up_n += n; } }
+static void raw_cli_rx(void *ctx, const uint8_t *b, size_t n) { (void)ctx; if (raw_dn_n + n <= sizeof raw_dn) { memcpy(raw_dn + raw_dn_n, b, n); raw_dn_n += n; } }
+static size_t raw_cli_tx(void *ctx, uint8_t *b, size_t max)
+{
+    size_t n = 0; (void)ctx;
+    while (n < max && raw_cli_at < raw_cli_n) { b[n++] = (uint8_t)(raw_cli_at * 13 + 5); raw_cli_at++; }
+    return n;
+}
+static int p_raw_online(void) { return status()->state == DCE_ONLINE; }
+static int p_raw_done(void) { return raw_up_n >= 700 && raw_dn_n >= 3000; }
+
+static void test_raw(void)
+{
+    dce_cfg_t sc; caller_cfg_t cc; dce_status_t *s; static uint8_t dn[3000]; size_t i, sent = 0; int t, bad = 0;
+
+    printf("(r) octets instead of PPP: a console's modem, no error control\n");
+    server_cfg(&sc); client_cfg(&cc);
+    sc.raw_rx = raw_srv_rx;
+    cc.use_v42 = 0; cc.raw_rx = raw_cli_rx; cc.raw_tx = raw_cli_tx;
+    raw_up_n = raw_dn_n = raw_cli_at = raw_cli_n = 0;
+    CHECK_EQ_I(dce_raw_write(&D, dn, 10), 0);          /* nobody there */
+    call_begin(&sc, &cc, &line_clean);
+    CHECK_EQ_I(dce_raw_write(&D, dn, 10), 0);          /* not yet */
+    t = run_until(p_raw_online, 40000);
+    CHECK(t > 0);
+    s = status();
+    CHECK_EQ_I(s->v42_state, V42EC_ASYNC);
+    CHECK_EQ_I(s->error_control, 0);
+    CHECK_EQ_I(s->ppp_phase, PPP_PHASE_DEAD);
+    CHECK_EQ_I(s->ip_up, 0);
+    run_ms(500);
+    CHECK_EQ_I(raw_up_n, 0); CHECK_EQ_I(raw_dn_n, 0);  /* nothing of our own goes out: no PPP */
+    for (i = 0; i < sizeof dn; i++) dn[i] = (uint8_t)(i * 7 + 1);
+    raw_cli_n = 700;
+    for (t = 0; t < 200000 && !p_raw_done(); t++) {
+        if (sent < sizeof dn) sent += dce_raw_write(&D, dn + sent, sizeof dn - sent);
+        step();
+        if ((t & 7) == 7 && status()->state != DCE_ONLINE) break;
+    }
+    CHECK_EQ_I(sent, sizeof dn);
+    CHECK_EQ_I(raw_up_n, 700); CHECK_EQ_I(raw_dn_n, 3000);
+    for (i = 0; i < raw_up_n; i++) if (raw_up[i] != (uint8_t)(i * 13 + 5)) bad++;
+    for (i = 0; i < raw_dn_n; i++) if (raw_dn[i] != dn[i]) bad++;
+    CHECK_EQ_I(bad, 0);
+    s = status();
+    CHECK_EQ_I(s->state, DCE_ONLINE);
+    CHECK_EQ_I(s->octets_up, 700); CHECK_EQ_I(s->octets_down, 3000);
+    /* ended from our side */
+    dce_hangup(&D);
+    CHECK(run_until(p_ended, 10000) >= 0);
+    CHECK_EQ_I(status()->end_reason, DCE_END_LOCAL);
+    CHECK_EQ_I(dce_raw_write(&D, dn, 10), 0);
+}
+
 /* ------------------------------------------------------------------ (d) */
 static void test_wrong_password(void)
 {
@@ -1419,6 +1477,7 @@ int main(int argc, char **argv)
     RUN('a', test_v22bis_lapm);
     RUN('b', test_noisy_line);
     RUN('c', test_no_error_control);
+    RUN('r', test_raw);
     RUN('d', test_wrong_password);
     RUN('e', test_caller_hangs_up);
     RUN('f', test_v21);

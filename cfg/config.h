@@ -147,8 +147,15 @@ enum { CFG_TONES_US = 0, CFG_TONES_EU = 1 };
  *              always, but no PPP compression and no V.92, the DNS servers
  *              of the game revival projects are handed out and the packets
  *              are mended on the way (srv/console.h). Not tried with a real
+ *              console.
+ *   saturn     two consoles that would telephone each other (the Sega
+ *              Saturn's NetLink modem), joined over the network: what is
+ *              dialled says who waits and who calls whom, the port's number
+ *              and the PPP settings play no part, the call carries the
+ *              octets of the game (srv/saturn.h). Not tried with a real
  *              console. */
-enum { CFG_SERVICE_INTERNET = 0, CFG_SERVICE_ARCHIVE = 1, CFG_SERVICE_DREAMCAST = 2, CFG_SERVICE_COUNT = 3 };
+enum { CFG_SERVICE_INTERNET = 0, CFG_SERVICE_ARCHIVE = 1, CFG_SERVICE_DREAMCAST = 2, CFG_SERVICE_SATURN = 3,
+       CFG_SERVICE_COUNT = 4 };
 enum { CFG_LISTEN_OFF = 0, CFG_LISTEN_LAN = 1 };
 enum { CFG_LOG_ERROR = 0, CFG_LOG_WARN = 1, CFG_LOG_INFO = 2, CFG_LOG_DEBUG = 3 };
 

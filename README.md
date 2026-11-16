@@ -23,10 +23,20 @@ the stock firmware stays in the box, one click away.
   - **Internet**: the plain connection.
   - **Archive**: web names are steered to Protoweb, so period browsers get
     period sites.
-  - **Dreamcast**: what a Dreamcast's built-in modem needs (no compression,
-    the DNS servers of the Dreamcast Live community, a few packet fixes).
-    Written from the DreamPi project's published behaviour; not yet tried
-    with a real console.
+  - **Dreamcast**: what a Dreamcast's built-in modem needs: no compression,
+    the DNS servers of the Dreamcast Live community, the packet fixes, the
+    games' dead server addresses turned to today's, the games' ports let
+    in. Optional: the console as a host of its own on the network, port
+    mapping on the router by UPnP, reporting to "Dreamcast Now".
+  - **Saturn**: two consoles that telephone each other (NetLink), each
+    dialling into its own box, joined over the network. Dial `0` to wait,
+    `#a*b*c*d#` to call the player at that address. Speaks the DreamPi
+    tunnel's protocol, so the other side can be a DreamPi.
+
+  The two console services are written from the DreamPi project's
+  published behaviour and tested against simulations; neither has been
+  tried with a real console yet. Not done: DreamPi's matchmaking numbers,
+  its VPN for the IWANGO games and its closed helper programs.
 - A web interface ("Nestaliga") for all of it: dashboard, line, modem,
   users, network, system, firmware.
 
@@ -54,7 +64,8 @@ tested on models only.
 Tested with a Conexant USB modem on every modulation in the list, from
 Linux pppd and from Dial-Up Networking in Windows 98 SE and Windows XP
 (V.90 with MPPC compression in both). Not tested yet: other modem brands,
-two calls at the same time, a real Dreamcast, Windows 95 and Windows Me.
+two calls at the same time, a real Dreamcast or Saturn, Windows 95 and
+Windows Me.
 
 ## Installing
 

@@ -38,8 +38,9 @@ static const char *const n_auth[]  = { "none", "pap", "chap" };
 static const char *const t_auth[]  = { "none", "PAP", "CHAP" };
 static const char *const n_lan[]   = { "static", "dhcp" };      /* the value of lan_dhcp */
 static const char *const t_lan[]   = { "Static address", "DHCP" };
-static const char *const n_service[] = { "internet", "archive", "dreamcast" };
-static const char *const t_service[] = { "Internet: as it is", "Archive: the old web (Protoweb)", "Dreamcast: for the game console" };
+static const char *const n_service[] = { "internet", "archive", "dreamcast", "saturn" };
+static const char *const t_service[] = { "Internet: as it is", "Archive: the old web (Protoweb)", "Dreamcast: for the game console",
+                                         "Saturn: console to console (NetLink)" };
 static const char *const n_v92[]   = { "off", "on" };
 static const char *const t_dcnow[]  = { "Off", "On: tell the Dreamcast Now site that a console is online and which game server it asked for" };
 static const char *const t_dclan[]  = { "Off: the console is behind this box's address", "On: the console gets an address of its own on the network" };
@@ -520,7 +521,7 @@ static void set_field(form_t *f, int fi, const char *v, size_t len)
     case F_TONES:   set_enum(f, fi, &c->line_tones, v, n_tones, 2, "us, eu"); break;
     case F_AUTH:    set_enum(f, fi, &c->auth, v, n_auth, 3, "none, pap, chap"); break;
     case F_LAN:     set_enum(f, fi, &c->lan_dhcp, v, n_lan, 2, "dhcp, static"); break;
-    case F_SERVICE: set_enum(f, fi, &c->service, v, n_service, CFG_SERVICE_COUNT, "internet, archive, dreamcast"); break;
+    case F_SERVICE: set_enum(f, fi, &c->service, v, n_service, CFG_SERVICE_COUNT, "internet, archive, dreamcast, saturn"); break;
     case F_V92:     set_enum(f, fi, &c->v92, v, n_v92, 2, "on, off"); break;
     case F_DCNOW:   set_enum(f, fi, &c->dc_now, v, n_v92, 2, "on, off"); break;
     case F_DCLAN:   set_enum(f, fi, &c->dc_lan, v, n_v92, 2, "on, off"); break;

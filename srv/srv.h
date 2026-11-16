@@ -20,8 +20,10 @@
 #include "tel.h"
 #include "dce.h"
 #include "console.h"
+#include "saturn.h"
 
 typedef void (*srv_ip_fn)(void *ctx, const uint8_t *pkt, size_t len);
+typedef void (*srv_raw_fn)(void *ctx, const uint8_t *oct, size_t n);
 
 typedef struct {
     cfg_t      cfg;             /* in force for the current / next call */
@@ -44,6 +46,8 @@ typedef struct {
     uint32_t   call_start;      /* clock when the line was answered */
     uint32_t   call_s;          /* seconds since the answer */
     dce_status_t ds;            /* scratch */
+    srv_raw_fn raw_out;         /* service = saturn: octets from the caller's modem */
+    int        link; uint32_t link_addr;   /* the call in progress there: SATURN_*, whom to call */
     console_t  console;         /* service = dreamcast: the packets on their way out */
     uint8_t    pkt[1500];
 } srv_t;
@@ -76,6 +80,17 @@ void    srv_set_echo_delay(srv_t *s, int samples);
  * 1..31; 0 = the default 23 (-12 dBm0). */
 void    srv_set_rx_linear(srv_t *s, int on);
 void    srv_set_max_tx_code(srv_t *s, int code);
+/* service = saturn (config.h, saturn.h). raw_out receives, with the ctx of
+ * srv_init, what the caller's modem sends. srv_link() tells about the call
+ * in progress: SATURN_WAIT, SATURN_CALL with the address dialled in *addr,
+ * or SATURN_NONE when there is none; *online is 1 once the modem carries
+ * octets, and from then on srv_send_raw() takes octets for it (returns how
+ * many it took). srv_hangup() ends the call from our side: the other
+ * player never came, or has gone. */
+void    srv_set_raw(srv_t *s, srv_raw_fn raw_out);
+int     srv_link(const srv_t *s, uint32_t *addr, int *online);
+size_t  srv_send_raw(srv_t *s, const uint8_t *oct, size_t n);
+void    srv_hangup(srv_t *s);
 /* 1 while a caller has IP up (packets can be sent to it) */
 int     srv_ip_up(const srv_t *s);
 

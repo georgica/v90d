@@ -30,6 +30,7 @@
 #include "caller.h"
 #include "channel.h"
 #include "tun.h"
+#include "saturn.h"
 
 #define FS 8000
 #define BLK 80
@@ -127,6 +128,65 @@ static int wait_ip(int limit_ms)
     return -1;
 }
 static void hang_up(void) { if (modem_on) caller_hangup(&C); if (modem_on && C.cfg.v92) v92call_hangup(&C.vc); modem_on = 0; hook = 0; c_tx = 0; run_ms(1000); }
+
+/* ---- a console that plays modem to modem (service = saturn) ---- */
+static uint8_t sat_dn[2048]; static size_t sat_dn_n, sat_at, sat_n;
+static void sat_rx(void *ctx, const uint8_t *b, size_t n) { (void)ctx; if (sat_dn_n + n <= sizeof sat_dn) { memcpy(sat_dn + sat_dn_n, b, n); sat_dn_n += n; } }
+static size_t sat_tx(void *ctx, uint8_t *b, size_t max)
+{
+    size_t n = 0; (void)ctx;
+    while (n < max && sat_at < sat_n) { b[n++] = (uint8_t)(sat_at * 9 + 2); sat_at++; }
+    return n;
+}
+static void sat_call(const char *num)
+{
+    caller_cfg_t cc; long i;
+    hook = 1; run_ms(500);
+    dial(num);
+    run_ms(3000 + 2000 + 300);
+    caller_cfg_default(&cc);
+    cc.use_v42 = 0; cc.raw_rx = sat_rx; cc.raw_tx = sat_tx;
+    caller_init(&C, &cc);
+    modem_on = 1; sat_dn_n = sat_at = sat_n = 0;
+    for (i = 0; i < 30L * FS && !C.connected && !dead; i++) step(0);
+    CHECK(C.connected);
+    run_ms(1500);
+}
+static int udp_at(uint32_t addr, int port)
+{
+    int fd = socket(AF_INET, SOCK_DGRAM, 0), one = 1; struct sockaddr_in sa;
+    memset(&sa, 0, sizeof sa); sa.sin_family = AF_INET; sa.sin_port = htons((uint16_t)port); sa.sin_addr.s_addr = htonl(addr);
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+    if (bind(fd, (struct sockaddr *)(void *)&sa, sizeof sa) < 0) { close(fd); return -1; }
+    return fd;
+}
+static void udp_to(int fd, int port, const char *b, size_t n)
+{
+    struct sockaddr_in sa;
+    memset(&sa, 0, sizeof sa); sa.sin_family = AF_INET; sa.sin_port = htons((uint16_t)port); sa.sin_addr.s_addr = htonl(IP4(127, 0, 0, 1));
+    (void)sendto(fd, b, n, 0, (struct sockaddr *)(void *)&sa, sizeof sa);
+}
+/* everything waiting on the socket: pings and pongs counted, the octets of
+ * the data datagrams put together as the receiving box would */
+static saturn_rx sat_peer_rx; static uint8_t sat_got[2048]; static size_t sat_got_n; static int sat_pings, sat_pongs, sat_from;
+static char sat_first[64];
+static void udp_drain(int fd)
+{
+    static uint8_t dg[8192]; struct sockaddr_in from; socklen_t fl; ssize_t r;
+    for (;;) {
+        fl = sizeof from;
+        r = recvfrom(fd, dg, sizeof dg, MSG_DONTWAIT, (struct sockaddr *)(void *)&from, &fl);
+        if (r <= 0) break;
+        sat_from = ntohs(from.sin_port);
+        if (r == 10 && !memcmp(dg, "PING_SHIRO", 10)) sat_pings++;
+        else if (r == 10 && !memcmp(dg, "PONG_SHIRO", 10)) sat_pongs++;
+        else if (r == 10 && !memcmp(dg, "OPEN_SHIRO", 10)) ;
+        else {
+            if (!sat_first[0]) { size_t k = (size_t)r < sizeof sat_first - 1 ? (size_t)r : sizeof sat_first - 1; memcpy(sat_first, dg, k); sat_first[k] = 0; }
+            sat_got_n += saturn_unpack(&sat_peer_rx, dg, (size_t)r, sat_got + sat_got_n, sizeof sat_got - sat_got_n);
+        }
+    }
+}
 
 /* ---- IP ---- */
 static uint16_t csum(const uint8_t *p, size_t n)
@@ -681,6 +741,133 @@ int main(int argc, char **argv)
         CHECK_EQ_I(waitpid(pid, &st, 0), pid);
         CHECK(WIFEXITED(st) && WEXITSTATUS(st) == 0);
         CHECK(file_has("/proc/sys/net/ipv4/conf/lo/proxy_arp", "0"));
+    }
+    /* 8. two consoles that telephone each other: service = saturn. This
+     * program is the player's console on the line and, on the network, the
+     * other player's box. */
+    {
+        static char lanlog[300]; struct sockaddr_in sa; int tcp, udp, evil, lis; char b5[8]; size_t k; int bad = 0;
+        cfg_default(&c);
+        strcpy(c.line_number, "5551234"); c.rings = 1;
+        c.service = CFG_SERVICE_SATURN;
+        c.status_port = 8080;
+        CHECK_EQ_I(cfg_save(&c, conf, err, sizeof err), CFG_OK);
+        CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
+        snprintf(lanlog, sizeof lanlog, "%s/ns_sat.log", argv[2]);
+        pid = fork();
+        if (pid == 0) {
+            int a = fcntl(sv[1], F_DUPFD, 20), lfd = open(lanlog, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            dup2(a, 3); if (lfd >= 0) dup2(lfd, 2);
+            for (i = 4; i < 64; i++) close(i);
+            execl(argv[1], "v90d", "-c", conf, "-l", "fd:3", "-i", "lo", "-t", "ppp0", "-A", "", (char *)NULL);
+            _exit(127);
+        }
+        close(sv[1]);
+        line_fd = sv[0]; idle_fd = -1;
+        dead = quiet_exit = 0; hook = modem_on = 0; blk_n = 0; c_tx = 0; c_rx_pw = 0;
+        channel_init(&CH, &cc);
+        memset(prev_tx, 0xFF, sizeof prev_tx);
+        run_ms(1500);
+        memset(&sa, 0, sizeof sa); sa.sin_family = AF_INET; sa.sin_port = htons(SATURN_TCP_PORT); sa.sin_addr.s_addr = htonl(IP4(127, 0, 0, 1));
+        /* nothing listens while nobody waits */
+        tcp = socket(AF_INET, SOCK_STREAM, 0);
+        CHECK(connect(tcp, (struct sockaddr *)(void *)&sa, sizeof sa) < 0);
+        close(tcp);
+
+        /* (a) the player here waits: 0 is dialled. The other box calls. */
+        sat_call("0");
+        CHECK(file_has(lanlog, "port 1: waiting for the other player to call"));
+        CHECK_EQ_I(sat_dn_n, 0);
+        tcp = socket(AF_INET, SOCK_STREAM, 0);
+        CHECK_EQ_I(connect(tcp, (struct sockaddr *)(void *)&sa, sizeof sa), 0);
+        CHECK_EQ_I(send(tcp, "readyip", 7, MSG_NOSIGNAL), 7);
+        run_ms(300);
+        memset(b5, 0, sizeof b5);
+        CHECK_EQ_I(recv(tcp, b5, 5, MSG_DONTWAIT), 5); CHECK(memcmp(b5, "g2gip", 5) == 0);
+        close(tcp);
+        udp = udp_at(IP4(127, 0, 0, 1), SATURN_UDP_CALL);
+        evil = udp_at(IP4(127, 0, 0, 2), 20444);
+        CHECK(udp >= 0 && evil >= 0);
+        saturn_rx_init(&sat_peer_rx); sat_got_n = 0; sat_pings = sat_pongs = 0; sat_first[0] = 0;
+        run_ms(2500);
+        /* the game here is shown a ring and a connect */
+        CHECK_EQ_I(sat_dn_n, 15); CHECK(memcmp(sat_dn, "RING\r\nCONNECT\r\n", 15) == 0);
+        CHECK(file_has(lanlog, "port 1: the other player is 127.0.0.1"));
+        udp_drain(udp);
+        CHECK(sat_pings >= 1); CHECK_EQ_I(sat_from, SATURN_UDP_WAIT);
+        udp_to(udp, SATURN_UDP_WAIT, "PING_SHIRO", 10);
+        run_ms(100); udp_drain(udp);
+        CHECK(sat_pongs >= 1);
+        /* octets from the other console: each datagram comes twice, counts once */
+        sat_dn_n = 0;
+        udp_to(udp, SATURN_UDP_WAIT, "hello<dataSplit>0", 17); udp_to(udp, SATURN_UDP_WAIT, "hello<dataSplit>0", 17);
+        udp_to(evil, SATURN_UDP_WAIT, "EVIL!<dataSplit>1", 17);        /* not the other player: not heard */
+        udp_to(udp, SATURN_UDP_WAIT, " you<dataSplit>1<packetSplit>hello<dataSplit>0", 46);
+        run_ms(1000);
+        CHECK_EQ_I(sat_dn_n, 9); CHECK(memcmp(sat_dn, "hello you", 9) == 0);
+        /* and the octets of the console here go out, numbered from 0 */
+        sat_n = 200;
+        run_ms(3000); udp_drain(udp);
+        CHECK_EQ_I(sat_got_n, 200);
+        for (k = 0; k < sat_got_n; k++) if (sat_got[k] != (uint8_t)(k * 9 + 2)) bad++;
+        CHECK_EQ_I(bad, 0);
+        CHECK(strstr(sat_first, "<dataSplit>0") != NULL);
+        CHECK(http("GET /status.json HTTP/1.0\r\n\r\n", resp, sizeof resp) > 0);
+        CHECK(strstr(resp, "\"service\":\"saturn\"") != NULL);
+        hang_up();
+        run_ms(500);
+        close(udp); close(evil);
+        tcp = socket(AF_INET, SOCK_STREAM, 0);
+        CHECK(connect(tcp, (struct sockaddr *)(void *)&sa, sizeof sa) < 0);
+        close(tcp);
+
+        /* (b) the player here calls the other one by address */
+        lis = socket(AF_INET, SOCK_STREAM, 0);
+        { int one = 1; setsockopt(lis, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one); }
+        CHECK_EQ_I(bind(lis, (struct sockaddr *)(void *)&sa, sizeof sa), 0);
+        CHECK_EQ_I(listen(lis, 2), 0);
+        udp = udp_at(IP4(127, 0, 0, 1), SATURN_UDP_WAIT);
+        CHECK(udp >= 0);
+        sat_call("#127*0*0*1#");
+        tcp = accept4(lis, NULL, NULL, SOCK_NONBLOCK);
+        CHECK(tcp >= 0);
+        memset(b5, 0, sizeof b5);
+        CHECK_EQ_I(recv(tcp, b5, 7, 0), 7); CHECK(memcmp(b5, "readyip", 7) == 0);
+        CHECK_EQ_I(send(tcp, "g2gip", 5, MSG_NOSIGNAL), 5);
+        saturn_rx_init(&sat_peer_rx); sat_got_n = 0; sat_pings = sat_pongs = 0; sat_first[0] = 0; sat_from = 0;
+        run_ms(2500); udp_drain(udp);
+        CHECK(file_has(lanlog, "port 1: the other player is 127.0.0.1"));
+        CHECK(sat_pings >= 1); CHECK_EQ_I(sat_from, SATURN_UDP_CALL);
+        CHECK_EQ_I(sat_dn_n, 0);                        /* the calling console is shown nothing */
+        udp_to(udp, SATURN_UDP_CALL, "abc<dataSplit>0", 15);
+        sat_n = 50;
+        run_ms(1500); udp_drain(udp);
+        CHECK_EQ_I(sat_dn_n, 3); CHECK(memcmp(sat_dn, "abc", 3) == 0);
+        CHECK_EQ_I(sat_got_n, 50);
+        /* the other box falls silent: after half a minute the call is ended */
+        close(tcp); close(lis); close(udp);
+        run_ms(32000);
+        CHECK(file_has(lanlog, "port 1: the other player is gone"));
+        hang_up();
+
+        /* (c) a number that asks for an opponent from a matchmaking service:
+         * not understood, no call */
+        hook = 1; run_ms(500); dial("#001#"); run_ms(3000 + 2000 + 300);
+        hook = 0; run_ms(1000);
+        CHECK(http("GET /status.json HTTP/1.0\r\n\r\n", resp, sizeof resp) > 0);
+
+        /* (d) waiting, and nobody calls: given up after two minutes */
+        sat_call("00");
+        run_ms(121000);
+        CHECK(file_has(lanlog, "port 1: nobody called"));
+        hang_up();
+
+        quiet_exit = 1;
+        kill(pid, SIGTERM);
+        for (i = 0; i < 400 && !dead; i++) step(0);
+        close(line_fd);
+        CHECK_EQ_I(waitpid(pid, &st, 0), pid);
+        CHECK(WIFEXITED(st) && WEXITSTATUS(st) == 0);
     }
     T_REPORT("ns_call");
 }

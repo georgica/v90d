@@ -414,7 +414,11 @@ static void test_ethernet(void)
     CHECK_EQ_I(out.service, CFG_SERVICE_ARCHIVE);
     c.service = CFG_SERVICE_INTERNET;
     CHECK_EQ_I(apply(&c, "service=netlink", &out), SETTINGS_INVALID);
-    CHECK(strcmp(err, "[line] service: 'netlink' is not one of: internet, archive, dreamcast") == 0);
+    CHECK(strcmp(err, "[line] service: 'netlink' is not one of: internet, archive, dreamcast, saturn") == 0);
+    CHECK_EQ_I(apply(&c, "service=saturn", &out), SETTINGS_OK);
+    CHECK_EQ_I(out.service, CFG_SERVICE_SATURN);
+    n = settings_render_html(&out, 0, NULL, html, sizeof html);
+    CHECK(has(html, "<option value=\"saturn\" selected>"));
     /* three switches for a console's port, off unless asked, one set per port */
     n = settings_render_html(&c, 0, NULL, html, sizeof html);
     CHECK(has(html, "<select name=\"dreamcast_now\">")); CHECK(has(html, "<select name=\"dreamcast_lan\">"));

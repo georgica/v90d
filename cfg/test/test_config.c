@@ -985,8 +985,12 @@ static void test_service(void)
     CHECK(strstr(text, "archive =") == NULL);
     /* anything else is refused, by name */
     CHECK_EQ_I(parse(&c, "[line]\nservice = netlink\n"), CFG_ERR);
-    CHECK_EQ_S(err, "t.conf:2: [line] service: 'netlink' is not one of: internet, archive, dreamcast");
-    cfg_default(&c); c.port2.service = 3;
+    CHECK_EQ_S(err, "t.conf:2: [line] service: 'netlink' is not one of: internet, archive, dreamcast, saturn");
+    CHECK_EQ_I(parse(&c, "[line2]\nservice = saturn\n"), CFG_OK);
+    CHECK_EQ_I(c.service, CFG_SERVICE_INTERNET); CHECK_EQ_I(c.port2.service, CFG_SERVICE_SATURN);
+    CHECK(cfg_write(&c, 1, text, sizeof text) > 0);
+    CHECK(strstr(text, "service = saturn") != NULL);
+    cfg_default(&c); c.port2.service = 4;
     CHECK_EQ_I(cfg_validate(&c, err, sizeof err), CFG_ERR);
     CHECK(strstr(err, "[line2] service") != NULL);
 }

@@ -12,6 +12,7 @@
 #include "dclist.h"
 #include "dcnow.h"
 #include "upnp.h"
+#include "saturn.h"
 #include "caller.h"
 #include "channel.h"
 #include "g711.h"
@@ -576,6 +577,84 @@ static void test_dcnow(void)
     CHECK_EQ_I(dcnow_body(&d, "master.quake3arena.com", body, 20), 0);
 }
 
+/* The words of the console-to-console tunnel (saturn.h). */
+static void test_saturn_words(void)
+{
+    uint32_t a = 0; static saturn_tx t; saturn_rx r; static uint8_t dg[SATURN_DGRAM_MAX], dg2[SATURN_DGRAM_MAX], out[4096];
+    static uint8_t big[SATURN_REC_MAX]; size_t n, n2, i; int k;
+
+    CHECK_EQ_I(saturn_number("0", &a), SATURN_WAIT);
+    CHECK_EQ_I(saturn_number("00", &a), SATURN_WAIT);
+    CHECK_EQ_I(saturn_number("#192*0*2*7", &a), SATURN_CALL); CHECK(a == 0xC0000207u);
+    CHECK_EQ_I(saturn_number("#192000002007", &a), SATURN_CALL); CHECK(a == 0xC0000207u);
+    CHECK_EQ_I(saturn_number("#010020030040", &a), SATURN_CALL); CHECK(a == 0x0A141E28u);
+    CHECK_EQ_I(saturn_number("#192*0*2*256", &a), SATURN_NONE);
+    CHECK_EQ_I(saturn_number("#192*0*2", &a), SATURN_NONE);
+    CHECK_EQ_I(saturn_number("#192*0*2*7*1", &a), SATURN_NONE);
+    CHECK_EQ_I(saturn_number("#192**2*7", &a), SATURN_NONE);
+    CHECK_EQ_I(saturn_number("#0*0*0*0", &a), SATURN_NONE);
+    CHECK_EQ_I(saturn_number("#300000002007", &a), SATURN_NONE);
+    CHECK_EQ_I(saturn_number("#001", &a), SATURN_NONE);            /* matchmaking: not understood */
+    CHECK_EQ_I(saturn_number("#12345", &a), SATURN_NONE);
+    CHECK_EQ_I(saturn_number("", &a), SATURN_NONE);
+    CHECK_EQ_I(saturn_number("000", &a), SATURN_NONE);
+    CHECK_EQ_I(saturn_number("5551234", &a), SATURN_NONE);
+
+    CHECK_EQ_I(saturn_control((const uint8_t *)"PING_SHIRO", 10), 1);
+    CHECK_EQ_I(saturn_control((const uint8_t *)"PONG_SHIRO", 10), 2);
+    CHECK_EQ_I(saturn_control((const uint8_t *)"OPEN_SHIRO", 10), 2);
+    CHECK_EQ_I(saturn_control((const uint8_t *)"ab<dataSplit>0", 14), 0);
+
+    /* the first datagram: one record, number 0 */
+    saturn_tx_init(&t); saturn_rx_init(&r);
+    n = saturn_pack(&t, (const uint8_t *)"ab", 2, dg);
+    CHECK_EQ_I(n, 14); CHECK(memcmp(dg, "ab<dataSplit>0", 14) == 0);
+    /* the second brings the first along, behind it */
+    n2 = saturn_pack(&t, (const uint8_t *)"\0\r\xff", 3, dg2);
+    CHECK_EQ_I(n2, 15 + 13 + 14);
+    CHECK(memcmp(dg2, "\0\r\xff<dataSplit>1<packetSplit>ab<dataSplit>0", n2) == 0);
+    /* in order; each datagram comes twice and counts once */
+    CHECK_EQ_I(saturn_unpack(&r, dg, n, out, sizeof out), 2); CHECK(memcmp(out, "ab", 2) == 0);
+    CHECK_EQ_I(saturn_unpack(&r, dg, n, out, sizeof out), 0);
+    CHECK_EQ_I(saturn_unpack(&r, dg2, n2, out, sizeof out), 3); CHECK(memcmp(out, "\0\r\xff", 3) == 0);
+    CHECK_EQ_I(saturn_unpack(&r, dg2, n2, out, sizeof out), 0);
+    /* three datagrams lost: the next one makes up for them */
+    for (k = 2; k < 6; k++) { char c = (char)('a' + k); n = saturn_pack(&t, (const uint8_t *)&c, 1, dg); }
+    CHECK(memcmp(dg, "f<dataSplit>5<packetSplit>e<dataSplit>4<packetSplit>d<dataSplit>3<packetSplit>c<dataSplit>2<packetSplit>"
+                     "\0\r\xff<dataSplit>1", n) == 0);
+    CHECK_EQ_I(saturn_unpack(&r, dg, n, out, sizeof out), 4); CHECK(memcmp(out, "cdef", 4) == 0);
+    /* more lost than a datagram repeats: on with the newest */
+    for (k = 6; k < 20; k++) { char c = (char)('a' + k); n = saturn_pack(&t, (const uint8_t *)&c, 1, dg); }
+    CHECK_EQ_I(saturn_unpack(&r, dg, n, out, sizeof out), 1); CHECK(out[0] == 't');
+    n = saturn_pack(&t, (const uint8_t *)"u", 1, dg);
+    CHECK_EQ_I(saturn_unpack(&r, dg, n, out, sizeof out), 1); CHECK(out[0] == 'u');
+    /* an old one arriving late is dropped */
+    CHECK_EQ_I(saturn_unpack(&r, dg2, n2, out, sizeof out), 0);
+    /* full records, all five, fit the datagram; a small buffer loses the rest, not its mind */
+    saturn_tx_init(&t); saturn_rx_init(&r);
+    for (i = 0; i < sizeof big; i++) big[i] = (uint8_t)(i * 7);
+    for (k = 0; k < 5; k++) n = saturn_pack(&t, big, sizeof big, dg);
+    CHECK(n <= SATURN_DGRAM_MAX);
+    CHECK_EQ_I(saturn_unpack(&r, dg, n, out, sizeof out), 5 * SATURN_REC_MAX);
+    CHECK(memcmp(out + 4 * SATURN_REC_MAX, big, sizeof big) == 0);
+    saturn_rx_init(&r);
+    CHECK_EQ_I(saturn_unpack(&r, dg, n, out, 300), 300);
+    /* a peer's longer record (up to 1024 octets a read) and a large number */
+    {
+        static uint8_t in[1100]; size_t m = 1024;
+        memset(in, 'x', m); memcpy(in + m, "<dataSplit>4000000000", 21);
+        r.expect = 4000000000u;
+        CHECK_EQ_I(saturn_unpack(&r, in, m + 21, out, sizeof out), 1024);
+        CHECK(r.expect == 4000000001u);
+    }
+    /* rubbish */
+    saturn_rx_init(&r);
+    CHECK_EQ_I(saturn_unpack(&r, (const uint8_t *)"abc", 3, out, sizeof out), 0);
+    CHECK_EQ_I(saturn_unpack(&r, (const uint8_t *)"abc<dataSplit>", 14, out, sizeof out), 0);
+    CHECK_EQ_I(saturn_unpack(&r, (const uint8_t *)"abc<dataSplit>1x", 16, out, sizeof out), 0);
+    CHECK_EQ_I(saturn_unpack(&r, (const uint8_t *)"", 0, out, sizeof out), 0);
+}
+
 /* The words of UPnP port mapping (upnp.h): the answer to a search, the
  * device's description, and the two requests. */
 static void test_upnp_words(void)
@@ -847,6 +926,93 @@ static void test_dreamcast_call(void)
     CHECK_EQ_I(lan_last[8], 30);
     hang_up();
     lan_bad = 0;
+}
+
+/* service = saturn: the dialled digits say which side of a console-to-
+ * console call this is, the call carries octets and no PPP (srv.h) */
+static uint8_t sat_up[2048], sat_dn[2048]; static size_t sat_up_n, sat_dn_n, sat_cli_at, sat_cli_n;
+static void sat_srv_rx(void *ctx, const uint8_t *b, size_t n) { (void)ctx; if (sat_up_n + n <= sizeof sat_up) { memcpy(sat_up + sat_up_n, b, n); sat_up_n += n; } }
+static void sat_cli_rx(void *ctx, const uint8_t *b, size_t n) { (void)ctx; if (sat_dn_n + n <= sizeof sat_dn) { memcpy(sat_dn + sat_dn_n, b, n); sat_dn_n += n; } }
+static size_t sat_cli_tx(void *ctx, uint8_t *b, size_t max)
+{
+    size_t n = 0; (void)ctx;
+    while (n < max && sat_cli_at < sat_cli_n) { b[n++] = (uint8_t)(sat_cli_at * 11 + 3); sat_cli_at++; }
+    return n;
+}
+static void sat_modem(void)
+{
+    caller_cfg_t cc;
+    caller_cfg_default(&cc);
+    c_oct = 0xFF; c_lin = 0;
+    cc.use_v42 = 0; cc.raw_rx = sat_cli_rx; cc.raw_tx = sat_cli_tx;
+    caller_init(&C, &cc);
+    modem_on = 1;
+    sat_up_n = sat_dn_n = sat_cli_at = sat_cli_n = 0;
+}
+static void test_saturn_call(void)
+{
+    cfg_t c; uint32_t a = 0; int on = 9; long i; size_t k, sent = 0; int bad = 0; static uint8_t dn[600];
+
+    base_cfg(&c); c.rings = 0; c.service = CFG_SERVICE_SATURN;
+    line_init();
+    srv_init(&S, &c, 91, lan_rx, NULL);
+    srv_set_raw(&S, sat_srv_rx);
+    CHECK_EQ_I(S.status.service, CFG_SERVICE_SATURN);
+    CHECK_EQ_I(srv_link(&S, &a, &on), SATURN_NONE);
+    /* waiting for the other player */
+    place_call("0", 6000);
+    CHECK_EQ_I(S.tel.state, TEL_ANSWERED);
+    CHECK_EQ_I(srv_link(&S, &a, &on), SATURN_WAIT); CHECK_EQ_I(on, 0);
+    CHECK_EQ_I(srv_send_raw(&S, dn, 4), 0);
+    sat_modem();
+    for (i = 0; i < 40L * FS && !(srv_link(&S, &a, &on) && on); i++) step(0);
+    CHECK_EQ_I(on, 1);
+    run_ms(1100);                                   /* the status page is brought up to date once a second */
+    CHECK_EQ_I(S.status.line, ST_LINE_CONNECTED);
+    CHECK_EQ_I(S.status.ppp, ST_PPP_DEAD);
+    CHECK_EQ_I(srv_ip_up(&S), 0);
+    for (k = 0; k < sizeof dn; k++) dn[k] = (uint8_t)(k * 5 + 1);
+    sat_cli_n = 300;
+    for (i = 0; i < 60L * FS && (sat_up_n < 300 || sat_dn_n < sizeof dn); i++) {
+        if (sent < sizeof dn) sent += srv_send_raw(&S, dn + sent, sizeof dn - sent);
+        step(0);
+    }
+    CHECK_EQ_I(sat_up_n, 300); CHECK_EQ_I(sat_dn_n, sizeof dn);
+    for (k = 0; k < sat_up_n; k++) if (sat_up[k] != (uint8_t)(k * 11 + 3)) bad++;
+    for (k = 0; k < sat_dn_n; k++) if (sat_dn[k] != dn[k]) bad++;
+    CHECK_EQ_I(bad, 0);
+    /* the owner ends it: the other player has gone */
+    srv_hangup(&S);
+    for (i = 0; i < 10L * FS && S.tel.state == TEL_ANSWERED; i++) step(0);
+    CHECK_EQ_I(S.tel.state, TEL_ENDED);
+    CHECK_EQ_I(srv_link(&S, &a, &on), SATURN_NONE);
+    hang_up();
+    CHECK(strcmp(status_call(&S.status, 0)->dialed, "0") == 0);
+    CHECK(status_call(&S.status, 0)->end == ST_END_LOCAL);
+    /* calling a player by address */
+    place_call("#192*0*2*7#", 6000);
+    CHECK_EQ_I(S.tel.state, TEL_ANSWERED);
+    CHECK_EQ_I(srv_link(&S, &a, &on), SATURN_CALL); CHECK(a == IPA(192, 0, 2, 7)); CHECK_EQ_I(on, 0);
+    hang_up();
+    CHECK_EQ_I(srv_link(&S, &a, &on), SATURN_NONE);
+    /* numbers that mean nothing here are not answered into a call: the
+     * port's own, a matchmaking code */
+    place_call("5551234", 6000);
+    run_ms(200);
+    CHECK_EQ_I(S.tel.state, TEL_ENDED); CHECK_EQ_I(srv_link(&S, &a, &on), SATURN_NONE);
+    hang_up();
+    place_call("#001#", 6000);
+    run_ms(200);
+    CHECK_EQ_I(S.tel.state, TEL_ENDED); CHECK_EQ_I(srv_link(&S, &a, &on), SATURN_NONE);
+    hang_up();
+    /* on a port with another service these are ordinary wrong numbers */
+    c.service = CFG_SERVICE_INTERNET;
+    line_init();
+    srv_init(&S, &c, 92, lan_rx, NULL);
+    place_call("0", 6000);
+    CHECK(S.tel.state != TEL_ANSWERED);
+    CHECK_EQ_I(srv_link(&S, &a, &on), SATURN_NONE);
+    hang_up();
 }
 
 /* a V.92 caller: PCM upstream when the configuration allows it (v92 = on,
@@ -1150,7 +1316,9 @@ int main(void)
     test_dclist();
     test_dcnow();
     test_upnp_words();
+    test_saturn_words();
     test_dreamcast_call();
+    test_saturn_call();
     test_v34_call();
     test_v32bis_call();
     /* the same server on a line with linear receive (srv_tick_lin): whole

@@ -173,7 +173,8 @@ static void pump_up(dce_t *d)
     size_t n;
     while ((n = v42ec_read(&d->v42, buf, sizeof buf)) > 0) {
         d->octets_up += n;
-        ppp_input_bytes(&d->ppp, buf, n);
+        if (d->cfg.raw_rx) d->cfg.raw_rx(d->cfg.ppp.ctx, buf, n);
+        else ppp_input_bytes(&d->ppp, buf, n);
     }
 }
 
@@ -192,7 +193,14 @@ static void pump_down(dce_t *d)
         if (room > n) room = n;
         if (room > sizeof buf) room = sizeof buf;
         if (room == 0) break;
-        n = ppp_output_bytes(&d->ppp, buf, room);
+        if (d->cfg.raw_rx) {
+            for (n = 0; n < room && d->raw_n; n++) {
+                buf[n] = d->raw_q[d->raw_head];
+                d->raw_head = (d->raw_head + 1) % DCE_RAW_QUEUE; d->raw_n--;
+            }
+        } else {
+            n = ppp_output_bytes(&d->ppp, buf, room);
+        }
         if (n == 0) break;
         v42ec_write(&d->v42, buf, n);       /* takes all of it: room was checked */
         d->octets_down += n;
@@ -342,7 +350,11 @@ static void v42_start(dce_t *d)
 
     vc.originator = 0;
     if (!d->cfg.fixed_timers && vc.lapm.t401_ms < t401) vc.lapm.t401_ms = (int)t401;
-    if (d->modulation == ANS_MOD_V21) {
+    if (d->cfg.raw_rx) {
+        /* octets as they are: straight to start-stop, as below */
+        vc.detect = 1; vc.fallback = 1; vc.t400_ms = 1;
+        vc.lapm.comp_tx = 0; vc.lapm.comp_rx = 0; vc.lapm.v44_tx = 0; vc.lapm.v44_rx = 0;
+    } else if (d->modulation == ANS_MOD_V21) {
         /* No error control at 300 bit/s FSK: the modem delivers characters,
          * not the bit-transparent stream LAPM needs. v42ec has no "start in
          * start-stop mode" switch; the shortest detection phase does it. */
@@ -384,6 +396,9 @@ static void ms_step(dce_t *d)
         if (d->hangup_req) {
             v42ec_release(&d->v42);
             begin_close(d, DCE_END_LOCAL, 1);
+        } else if (d->cfg.raw_rx && (vs == V42EC_CONNECTED || vs == V42EC_ASYNC)) {
+            d->raw_head = 0; d->raw_n = 0;
+            d->state = DCE_ONLINE;
         } else if (vs == V42EC_CONNECTED || vs == V42EC_ASYNC) {
             d->ppp_dead = 0;
             d->ppp_up = 1;
@@ -404,6 +419,12 @@ static void ms_step(dce_t *d)
     case DCE_ONLINE:
         d->online_ms++;
         pump_up(d);
+        if (d->cfg.raw_rx) {
+            pump_down(d);
+            if (v42ec_state(&d->v42) == V42EC_DISCONNECTED) v42_lost(d);
+            else if (d->hangup_req) { v42ec_release(&d->v42); begin_close(d, DCE_END_LOCAL, 1); }
+            break;
+        }
         if (d->hangup_req == 1) {           /* ask PPP to terminate, once */
             d->hangup_req = 2;
             ppp_close(&d->ppp);
@@ -506,6 +527,17 @@ int dce_send_ip(dce_t *d, const uint8_t *pkt, size_t len)
 {
     if (d->state != DCE_ONLINE) return PPP_ERR_DOWN;
     return ppp_send_ip(&d->ppp, pkt, len);
+}
+
+size_t dce_raw_write(dce_t *d, const uint8_t *oct, size_t n)
+{
+    size_t i;
+    if (d->state != DCE_ONLINE || !d->cfg.raw_rx) return 0;
+    for (i = 0; i < n && d->raw_n < DCE_RAW_QUEUE; i++) {
+        d->raw_q[(d->raw_head + d->raw_n) % DCE_RAW_QUEUE] = oct[i];
+        d->raw_n++;
+    }
+    return i;
 }
 
 void dce_hangup(dce_t *d) { if (!d->hangup_req) d->hangup_req = 1; }

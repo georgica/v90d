@@ -36,8 +36,9 @@ secondary pages. Nothing here is code, and none of DreamPi's code is used.
 - Saturn NetLink / XBAND and some dial-code games: numbers of the form
   `#...#` answer the modem with error control and compression off and relay
   the raw octets to a peer over UDP (matchmaking at saturn.dreampipe.net);
-  some dial codes bridge the modem to TCP game servers. A Pi cannot ring,
-  so it cannot be the called side. (V)
+  some dial codes bridge the modem to TCP game servers. A Pi cannot ring;
+  the called side's console dials too and is shown the text of a ring
+  (second pass, below). (V)
 
 ## The console
 

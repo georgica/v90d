@@ -139,7 +139,7 @@ for them with the DIL; ours just sends what it asks for).
 | `ppp/` | PPP server: HDLC framing, LCP, PAP/CHAP, IPCP, CCP with Deflate and MPPC (`ppp_deflate`, `ppp_mppc`) | yes |
 | `dce/` | one-call glue: modem + V.42 + PPP | yes |
 | `tel/` | telephony layer: tones, DTMF and pulse digits, number check, busy, drops, limits | yes |
-| `srv/` | the server (tel + dce + cfg + status) and the Linux daemon `v90d`: line back end, TUN, NAT by nftables netlink | yes |
+| `srv/` | the server (tel + dce + cfg + status) and the Linux daemon `v90d`: line back end, TUN, NAT by nftables netlink; the console services (`console`, `dclist`, `dcnow`, `upnp`, `saturn`) | yes |
 | `sim/` | test peers and channel simulator (double allowed) | no |
 | `test/` | unit and end-to-end tests, spandsp wrappers | no |
 | `rig/` | real-modem test rig that rides the stock firmware's SIP/RTP | no |
@@ -308,6 +308,52 @@ decode. `v92/README.md` has the detail and every reading of the text.
 - `dce/`: pumps bits and octets between the three, converts the sample clock
   to milliseconds, turns carrier loss into a clean PPP teardown and a call-end
   reason.
+
+### 5a. The services for game consoles
+
+Written from what the DreamPi project is seen to do (`refs/dreampi-facts.md`,
+facts only); nothing of it is copied, and none of it has met a real console.
+
+`service = dreamcast` is an ordinary PPP call with changes around it:
+
+- In the call (`srv/console.c`, pure, in the packet path): the hop count,
+  the doubled connection openings, the opening with the push flag set, and
+  the last name the console asked the DNS for.
+- In the NAT (`srv/nat.c`, one nftables transaction with everything else):
+  destination rewrites from a list of dead server addresses
+  (`srv/dclist.c`; at most 32 rules, fetched once at start by a child
+  running busybox `wget` and read through a pipe), and the games' ports
+  let in from the network towards the console (24 ranges, compiled in).
+- Around it, in the daemon, each as a child process so that the line's
+  loop never waits for the network: the report to Dreamcast Now every 15 s
+  (`srv/dcnow.c`, with a SHA-256 of our own), a DHCP lease for the console
+  (busybox `udhcpc` with a client identifier of our own, renewed at half
+  time, the address dropped when it runs out) with proxy ARP, and the UPnP
+  conversation with the router (`srv/upnp.c`: search, description,
+  AddPortMapping / DeletePortMapping; the answer to the search is believed
+  only from the search port of the device it names).
+
+Children are forked from a loop that runs with a real-time priority and
+locked memory: each resets its scheduling and unlocks before anything else.
+Those that become another program rely on close-on-exec; the UPnP child
+does not, and closes every descriptor above 2 itself (it once held the TUN
+device open across a call).
+
+`service = saturn` is not a PPP call at all. The call object has a second
+way of working (`dce_cfg_t.raw_rx`): no error control is offered, V.42 goes
+straight to its start-stop mode, and the octets go to the owner instead of
+to PPP, with a 2 kB queue towards the modem. The telephony layer accepts
+any number on such a port and the server reads the digits as an
+instruction (`srv/saturn.c`: wait, or call an address); a number that is
+neither gets no call. The network side lives in the daemon (`sl_poll` in
+`srv/main.c`), non-blocking sockets looked at once per 10 ms block: TCP
+65432 for the greeting, then UDP 20001 / 20002 with the tunnel's records
+(up to five to a datagram, every datagram twice, 256 octets a record at
+the most from us, any size from the peer). Only datagrams from the other
+player's address are heard; its source port is taken as its router shows
+it. Two things are ours and not the tunnel's: a call that waits ends after
+two minutes without a caller, and a peer that has been silent for 30 s
+(it should ping every second) ends the call.
 
 ## 6. Firmware (Track A)
 

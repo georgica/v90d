@@ -102,6 +102,11 @@ typedef struct {
     /* PPP: an ordinary ppp_config_t. Its callbacks (ip_rx, phase_cb,
      * secret_cb, pap_cb) are called with ppp.ctx as usual. */
     ppp_config_t ppp;
+    /* Not NULL: the call carries octets and no PPP (two game consoles
+     * joined modem to modem, srv/saturn.h). No error control is offered;
+     * what the caller's modem sends is handed to raw_rx (with ppp.ctx) as it
+     * is, and dce_raw_write() sends to it. PPP stays down. */
+    void   (*raw_rx)(void *ctx, const uint8_t *oct, size_t n);
     /* closing sequence limits, ms; 0 = the defaults in brackets */
     uint32_t flush_ms;         /* wait for PPP's last frames to go out [5000] */
     uint32_t release_ms;       /* wait for the answer to DISC [3000] */
@@ -156,6 +161,8 @@ typedef struct {
     unsigned long octets_down, octets_up;      /* PPP octets handed to / taken from V.42 */
 } dce_status_t;
 
+#define DCE_RAW_QUEUE 2048
+
 /* The call object. Contents are private; it is defined here so the caller
  * can allocate it. */
 typedef struct dce {
@@ -181,6 +188,8 @@ typedef struct dce {
     ppp_end_t   ppp_end;
     uint64_t    line_bits_tx, line_bits_rx;
     unsigned long octets_down, octets_up;
+    uint8_t     raw_q[DCE_RAW_QUEUE];  /* raw_rx set: octets waiting for the line */
+    size_t      raw_head, raw_n;
 } dce_t;
 
 /* Defaults: transmit level 3000, V.22bis and V.21 offered (V.90 is not: add
@@ -219,6 +228,9 @@ int dce_tick(dce_t *d, int16_t rx, int16_t *tx);
  * right now: keep the packet and try again later). */
 int dce_send_ip(dce_t *d, const uint8_t *pkt, size_t len);
 
+/* A call with raw_rx, once it is DCE_ONLINE: octets for the caller's modem.
+ * Returns how many were taken (0..n): the rest later. */
+size_t dce_raw_write(dce_t *d, const uint8_t *oct, size_t n);
 /* End the call from our side, in order: PPP Terminate, LAPM release, then
  * DCE_ENDED with DCE_END_LOCAL. Takes effect in the following ticks. */
 void dce_hangup(dce_t *d);

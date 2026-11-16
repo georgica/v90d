@@ -151,7 +151,7 @@ int status_render_json(const status_t *s, char *buf, size_t cap)
     sb_init(&b, buf, cap);
     sb_putc(&b, '{');
     j_num(&b, "uptime_s", s->uptime_s, ",");
-    j_key(&b, "service"); sb_puts(&b, s->service == 1 ? "\"archive\"," : s->service == 2 ? "\"dreamcast\"," : "\"internet\",");
+    j_key(&b, "service"); sb_puts(&b, s->service == 1 ? "\"archive\"," : s->service == 2 ? "\"dreamcast\"," : s->service == 3 ? "\"saturn\"," : "\"internet\",");
     j_key(&b, "v92"); sb_puts(&b, s->v92 ? "true," : "false,");
     j_key(&b, "ppp_compression"); sb_puts(&b, s->ppp_compression ? "true," : "false,");
     j_str(&b, "line", name_of(line_names, COUNT(line_names), (long)s->line), ",");
@@ -414,7 +414,7 @@ static int render(const status_t *s, const status_t *const *ports, int sel, char
     h_comp(&b, "Compressed to caller", s->ppp_comp_tx, s->comp_tx_in, s->comp_tx_out, "sent");
     h_comp(&b, "Compressed from caller", s->ppp_comp_rx, s->comp_rx_out, s->comp_rx_in, "received");
     h_num(&b, "Calls", s->calls_total, "");
-    h_str(&b, "Service", s->service == 1 ? "Archive (Protoweb)" : s->service == 2 ? "Dreamcast" : "Internet");
+    h_str(&b, "Service", s->service == 1 ? "Archive (Protoweb)" : s->service == 2 ? "Dreamcast" : s->service == 3 ? "Saturn (console to console)" : "Internet");
     h_str(&b, "V.92", s->v92 ? "on" : "off");
     h_str(&b, "PPP compression", s->ppp_compression ? "on" : "off");
     h_open(&b, "Uptime");
