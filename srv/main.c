@@ -58,6 +58,7 @@
 #include "line.h"
 #include "tun.h"
 #include "nat.h"
+#include "dclist.h"
 
 #define PORTS CFG_PORTS
 static srv_t    S[PORTS];
@@ -130,6 +131,60 @@ static int any_archive(void)
     int i;
     for (i = 0; i < n_ports; i++) if (S[i].cfg.service == CFG_SERVICE_ARCHIVE) return 1;
     return 0;
+}
+
+/* a port has the game console service */
+static int any_console(void)
+{
+    int i;
+    for (i = 0; i < n_ports; i++) if (S[i].cfg.service == CFG_SERVICE_DREAMCAST) return 1;
+    return 0;
+}
+
+/* The address list of the game revival projects (dclist.h): fetched by a
+ * child process into a file while a port has the console service, read when
+ * the child is done, in force from the next time the line is idle. A fetch
+ * that fails leaves the list as it was. */
+#define DC_FILE "/tmp/v90d.dclist"
+static const char *dc_cmd = "wget -q -T 8 -O " DC_FILE ".new " DCLIST_URL " && mv " DC_FILE ".new " DC_FILE;
+static nat_rewrite dc_rw[NAT_REWRITE_MAX]; static int dc_n;
+static pid_t    dc_pid; static uint32_t dc_next_ms; static int dc_started;
+static void dc_poll(uint32_t now_ms)
+{
+    int st;
+    if (dc_pid > 0) {
+        if (waitpid(dc_pid, &st, WNOHANG) != dc_pid) return;
+        dc_pid = 0;
+        if (WIFEXITED(st) && WEXITSTATUS(st) == 0) {
+            static char text[8192]; static nat_rewrite got[NAT_REWRITE_MAX];
+            int fd = open(DC_FILE, O_RDONLY | O_CLOEXEC), n = 0; ssize_t len = 0;
+            if (fd >= 0) { len = read(fd, text, sizeof text); close(fd); }
+            if (len > 0) n = dclist_parse(text, (size_t)len, got, NAT_REWRITE_MAX);
+            if (n == 0) logf_(CFG_LOG_WARN, "console service: the address list that came holds no rule; keeping %d", dc_n);
+            else if (n != dc_n || memcmp(got, dc_rw, (size_t)n * sizeof got[0]) != 0) {
+                memcpy(dc_rw, got, (size_t)n * sizeof got[0]); dc_n = n; net_dirty = 1;
+                logf_(CFG_LOG_INFO, "console service: address list with %d rules", n);
+            }
+            dc_next_ms = now_ms + 6u * 3600u * 1000u;
+        } else {
+            logf_(CFG_LOG_WARN, "console service: the address list could not be fetched; trying again in 5 minutes");
+            dc_next_ms = now_ms + 300000u;
+        }
+        return;
+    }
+    if (!dc_cmd[0] || !any_console()) return;
+    if (dc_started && (int32_t)(now_ms - dc_next_ms) < 0) return;
+    dc_started = 1; dc_next_ms = now_ms + 300000u;
+    dc_pid = fork();
+    if (dc_pid == 0) {
+        struct sched_param sp;
+        memset(&sp, 0, sizeof sp);
+        (void)sched_setscheduler(0, SCHED_OTHER, &sp);
+        (void)munlockall();
+        execl("/bin/sh", "sh", "-c", dc_cmd, (char *)NULL);
+        _exit(127);
+    }
+    if (dc_pid < 0) dc_pid = 0;
 }
 
 static int all_onhook(void)
@@ -238,13 +293,17 @@ static void net_apply(void)
         else logf_(CFG_LOG_INFO, "%s up: %s -> %s", tun_name[i], ip_str(c->ppp_local, a), ip_str(c->ppp_peer, b));
     }
     if (nat_ip_forward(1) < 0) logf_(CFG_LOG_WARN, "cannot enable IP forwarding: %s", strerror(errno));
-    if (S[0].cfg.nat || any_archive()) {
+    if (S[0].cfg.nat || any_archive() || any_console()) {
         nat_plan p;
         uint32_t p2 = n_ports > 1 ? S[1].cfg.ppp_peer : 0;
         memset(&p, 0, sizeof p);
         p.peer[0] = S[0].cfg.ppp_peer; p.peer[1] = p2;
         p.masquerade = S[0].cfg.nat;
         for (i = 0; i < n_ports; i++) p.archive[i] = S[i].cfg.service == CFG_SERVICE_ARCHIVE;
+        for (i = 0; i < n_ports; i++) p.console[i] = S[i].cfg.service == CFG_SERVICE_DREAMCAST;
+        p.rewrite = dc_rw; p.n_rewrite = dc_n;
+        p.n_open = dclist_ports(&p.open);
+        strncpy(p.wan, lan_if, sizeof p.wan - 1);
         p.http_port = ARCH_HTTP; p.ftp_port = ARCH_FTP; p.dns_port = ARCH_DNS; p.pasv_lo = ARCH_PASV_LO; p.pasv_hi = ARCH_PASV_HI;
         if (nat_apply(&p) < 0) logf_(CFG_LOG_ERROR, "cannot install the NAT rules: %s", strerror(errno));
         else {
@@ -252,6 +311,8 @@ static void net_apply(void)
             else if (p.masquerade) logf_(CFG_LOG_INFO, "NAT: %s is masqueraded", ip_str(S[0].cfg.ppp_peer, a));
             for (i = 0; i < n_ports; i++)
                 if (p.archive[i]) logf_(CFG_LOG_INFO, "archive mode: the web, FTP and name questions of port %d go to the gateway", i + 1);
+            for (i = 0; i < n_ports; i++)
+                if (p.console[i]) logf_(CFG_LOG_INFO, "console service on port %d: %d address rules, %d port ranges opened from %s", i + 1, dc_n, p.n_open, lan_if);
         }
     } else if (nat_remove() < 0 && errno != ENOENT) {
         logf_(CFG_LOG_WARN, "cannot remove the NAT rule: %s", strerror(errno));
@@ -354,7 +415,7 @@ static void log_last_call(int port)
 
 static void usage(void)
 {
-    fprintf(stderr, "usage: v90d [-c FILE] -l LINE [-l LINE2] [-d N] [-i LAN-IF] [-t TUN] [-A GATEWAY] [-v]\n       v90d [-c FILE] -p\n"
+    fprintf(stderr, "usage: v90d [-c FILE] -l LINE [-l LINE2] [-d N] [-i LAN-IF] [-t TUN] [-A GATEWAY] [-D FETCH-COMMAND] [-v]\n       v90d [-c FILE] -p\n"
                     "bench: [-R l|c per port, e.g. lc] [-P 1..31: maximum downstream power code] [-w|-W FILE: record port 1|2]\n");
     exit(2);
 }
@@ -377,7 +438,7 @@ int main(int argc, char **argv)
     /* the telephone lights: <prefix><port>/brightness, lit while the port is off hook */
     const char *led_prefix = "/sys/class/leds/ht802:phone"; int led_fd[PORTS] = { -1, -1 }, led_on[PORTS] = { -1, -1 };
 
-    while ((opt = getopt(argc, argv, "c:l:d:i:t:vpw:W:L:A:N:R:P:")) != -1) {
+    while ((opt = getopt(argc, argv, "c:l:d:i:t:vpw:W:L:A:N:R:P:D:")) != -1) {
         switch (opt) {
         case 'c': cfg_path = optarg; break;
         case 'l': if (n_ports >= PORTS) usage(); line_spec[n_ports++] = optarg; break;
@@ -396,6 +457,7 @@ int main(int argc, char **argv)
         case 'p': print_net = 1; break;
         case 'L': led_prefix = optarg; break;
         case 'N': fw_tool = optarg; break;      /* the flash tool behind the Firmware page */
+        case 'D': dc_cmd = optarg; break;       /* the command that fetches the console address list; "" = none */
         case 'A': arch_path = optarg; break;  /* the archive gateway program; "" = do not start one */
         case 'R': rx_formats = optarg; if (strlen(optarg) > PORTS || strspn(optarg, "lc") != strlen(optarg)) usage(); break;
         case 'P': max_tx_code = atoi(optarg); if (max_tx_code < 1 || max_tx_code > 31) usage(); break;
@@ -535,6 +597,7 @@ int main(int argc, char **argv)
             }
             arch_clock = now_ms;
             if (now_ms % 2000 == 0) arch_poll(now_ms);
+            if (now_ms % 1000 == 0) dc_poll(now_ms);
             if (fw_pid > 0 && now_ms % 1000 == 0 && waitpid(fw_pid, NULL, WNOHANG) == fw_pid) fw_pid = 0;
             /* the Restart button, once its answer has gone out */
             if (H.restart_asked && httpd_active(&H) == 0) {
@@ -581,7 +644,7 @@ int main(int argc, char **argv)
 
     httpd_close(&H);
     arch_stop();
-    if (S[0].cfg.nat || any_archive()) (void)nat_remove();
+    if (S[0].cfg.nat || any_archive() || any_console()) (void)nat_remove();
     for (p = 0; p < n_ports; p++) line_close(&line[p]);
     logf_(CFG_LOG_INFO, "stopped");
     return 0;

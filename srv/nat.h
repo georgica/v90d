@@ -17,11 +17,27 @@ int nat_masquerade2(uint32_t peer_ip, uint32_t peer2_ip);
  * destination address, is redirected to the gateway (arch/) on this box at
  * http_port, ftp_port, the same port, and dns_port. Needs the kernel's
  * redirect expression (CONFIG_NFT_REDIR). */
+/* For a peer that is a game console (console[i] set):
+ *  - rewrite: what it sends to address `from` (TCP or UDP as `proto` says,
+ *    to port `port`, or to any port when that is 0) goes to address `to`
+ *    instead, the port unchanged;
+ *  - open: what arrives on the network interface `wan` for this box on the
+ *    ports lo..hi of protocol `proto` is passed on to the console. Only one
+ *    console can have them: the first port that is one. */
+typedef struct { uint32_t from, to; uint16_t port; uint8_t proto; } nat_rewrite;
+typedef struct { uint8_t proto; uint16_t lo, hi; } nat_open;
+#define NAT_REWRITE_MAX 32
+#define NAT_OPEN_MAX    40
+
 typedef struct {
     uint32_t peer[2];           /* host byte order; peer[1] 0 = one port only */
     int      masquerade;
     int      archive[2];        /* per peer */
     uint16_t http_port, ftp_port, dns_port, pasv_lo, pasv_hi;
+    int      console[2];        /* per peer */
+    const nat_rewrite *rewrite; int n_rewrite;
+    const nat_open *open; int n_open;
+    char     wan[16];           /* interface name; "" = no ports opened */
 } nat_plan;
 int nat_apply(const nat_plan *p);
 /* Remove our table. 0, or -1 with errno (ENOENT if it was not there). */

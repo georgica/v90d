@@ -9,6 +9,7 @@
 #include "srv.h"
 #include "line.h"
 #include "console.h"
+#include "dclist.h"
 #include "caller.h"
 #include "channel.h"
 #include "g711.h"
@@ -451,6 +452,128 @@ static void mktcp(uint8_t *p, int ttl, int sport, int dport, int flags)
     c = 0xffff - ip_sum(p); p[10] = (uint8_t)(c >> 8); p[11] = (uint8_t)c;
 }
 
+/* the TCP checksum of a packet made by mktcp (20 + 20 octets), summed with
+ * its pseudo header: 0xffff when it is sound */
+static unsigned tcp_sum(const uint8_t *p, int len)
+{
+    unsigned long s = 6 + (unsigned long)(len - 20); int i;
+    for (i = 12; i < 20; i += 2) s += ((unsigned)p[i] << 8) | p[i + 1];
+    for (i = 20; i + 1 < len; i += 2) s += ((unsigned)p[i] << 8) | p[i + 1];
+    if (i < len) s += (unsigned)p[i] << 8;
+    while (s >> 16) s = (s & 0xffff) + (s >> 16);
+    return (unsigned)s;
+}
+static void tcp_seal(uint8_t *p, int len)
+{
+    unsigned c; p[36] = p[37] = 0; c = 0xffff - tcp_sum(p, len); p[36] = (uint8_t)(c >> 8); p[37] = (uint8_t)c;
+}
+/* a DNS question in a UDP packet from the caller; returns its length */
+static int mkdns(uint8_t *p, const char *name, int qtype, int flags_hi, int dport)
+{
+    int n = 28, lab; unsigned c; const char *q = name;
+    memset(p, 0, 300); p[0] = 0x45; p[8] = 64; p[9] = 17;
+    p[12] = 10; p[13] = 64; p[14] = 64; p[15] = 2; p[16] = 46; p[17] = 101; p[18] = 91; p[19] = 123;
+    p[20] = 0x10; p[21] = 0x00; p[22] = (uint8_t)(dport >> 8); p[23] = (uint8_t)dport;
+    p[28] = 0x12; p[29] = 0x34; p[30] = (uint8_t)flags_hi; p[33] = 1; n = 40;
+    while (*q) {
+        lab = n++;
+        while (*q && *q != '.') p[n++] = (uint8_t)*q++;
+        p[lab] = (uint8_t)(n - lab - 1);
+        if (*q == '.') q++;
+    }
+    p[n++] = 0; p[n++] = 0; p[n++] = (uint8_t)qtype; p[n++] = 0; p[n++] = 1;
+    p[2] = (uint8_t)(n >> 8); p[3] = (uint8_t)n; p[24] = (uint8_t)((n - 20) >> 8); p[25] = (uint8_t)(n - 20);
+    c = 0xffff - ip_sum(p); p[10] = (uint8_t)(c >> 8); p[11] = (uint8_t)c;
+    return n;
+}
+
+/* The address list of the game revival projects (refs/dreampi-facts.md):
+ * text in, rules out. */
+static void test_dclist(void)
+{
+    static const char txt[] =
+        "172.17.18.2 146.185.135.179 9500\n"
+        "172.17.1.14 146.185.135.179 9500 udp\n"
+        "63.251.242.131 146.185.135.179\r\n"
+        "\n"
+        "45.79.32.243 10.200.0.1 8888 tcp\n"
+        "not an address 1.2.3.4 80\n"
+        "1.2.3.4 5.6.7.8 0\n"
+        "1.2.3.4 5.6.7.8 70000\n"
+        "1.2.3.4 5.6.7.8 80 icmp\n"
+        "1.2.3.4 5.6.7.8 80 tcp more\n"
+        "1.2.3.999 5.6.7.8 80\n"
+        "0.0.0.0 5.6.7.8 80\n"
+        "9.9.9.9 8.8.8.8 53 UDP";                     /* no line end on the last one */
+    nat_rewrite r[8]; const nat_open *op; int n, i, wide = 0;
+
+    n = dclist_parse(txt, sizeof txt - 1, r, 8);
+    CHECK_EQ_I(n, 5);
+    CHECK(r[0].from == IPA(172, 17, 18, 2) && r[0].to == IPA(146, 185, 135, 179) && r[0].port == 9500 && r[0].proto == 6);
+    CHECK(r[1].from == IPA(172, 17, 1, 14) && r[1].port == 9500 && r[1].proto == 17);
+    CHECK(r[2].from == IPA(63, 251, 242, 131) && r[2].port == 0 && r[2].proto == 6);
+    CHECK(r[3].to == IPA(10, 200, 0, 1) && r[3].port == 8888 && r[3].proto == 6);
+    CHECK(r[4].from == IPA(9, 9, 9, 9) && r[4].to == IPA(8, 8, 8, 8) && r[4].port == 53 && r[4].proto == 17);
+    /* no more than there is room for; nothing from nothing */
+    CHECK_EQ_I(dclist_parse(txt, sizeof txt - 1, r, 2), 2);
+    CHECK_EQ_I(dclist_parse("", 0, r, 8), 0);
+    CHECK_EQ_I(dclist_parse("<html>404</html>\n", 17, r, 8), 0);
+
+    /* the ports games want opened towards the console */
+    n = dclist_ports(&op);
+    CHECK(n > 20 && n <= NAT_OPEN_MAX);
+    for (i = 0; i < n; i++) {
+        CHECK(op[i].proto == 6 || op[i].proto == 17);
+        CHECK(op[i].lo >= 1024 && op[i].hi >= op[i].lo);
+        if (op[i].lo == 2300 && op[i].hi == 2400) wide++;
+        CHECK(op[i].lo > 80 && !(op[i].lo <= 53 && op[i].hi >= 53));
+    }
+    CHECK_EQ_I(wide, 2);                                /* Starlancer: TCP and UDP */
+}
+
+/* Two more things a console's packets get (refs/dreampi-facts.md, second
+ * pass): an opening packet that also carries PSH loses the PSH, and the
+ * names it asks the name server for are remembered (for "Dreamcast Now"). */
+static void test_console_more(void)
+{
+    console_t k; uint8_t p[300], q[40]; uint32_t seq = 99; int n;
+
+    console_init(&k);
+    mktcp(p, 64, 1024, 6500, 0x0a); tcp_seal(p, 40);
+    CHECK_EQ_I(tcp_sum(p, 40), 0xffff);
+    CHECK_EQ_I(console_from_caller(&k, p, 40, 0), 1);
+    CHECK_EQ_I(p[33], 0x02);
+    CHECK_EQ_I(tcp_sum(p, 40), 0xffff); CHECK_EQ_I(ip_sum(p), 0xffff);
+    mktcp(q, 64, 1024, 6500, 0x02); tcp_seal(q, 40);
+    CHECK(memcmp(p, q, 40) == 0);
+    /* only exactly SYN with PSH: with ACK as well, or PSH on data, nothing changes */
+    mktcp(p, 64, 1024, 6500, 0x1a); tcp_seal(p, 40); memcpy(q, p, 40);
+    CHECK_EQ_I(console_from_caller(&k, p, 40, 0), 1); CHECK(memcmp(p, q, 40) == 0);
+    mktcp(p, 64, 1024, 6500, 0x18); tcp_seal(p, 40); memcpy(q, p, 40);
+    CHECK_EQ_I(console_from_caller(&k, p, 40, 0), 1); CHECK(memcmp(p, q, 40) == 0);
+    /* a packet too short to hold the checksum is left alone */
+    mktcp(p, 64, 1024, 6500, 0x0a); memcpy(q, p, 40);
+    CHECK_EQ_I(console_from_caller(&k, p, 36, 0), 1); CHECK_EQ_I(p[33], 0x0a);
+
+    /* names asked for */
+    console_init(&k);
+    CHECK(console_name(&k, &seq)[0] == 0); CHECK_EQ_I((int)seq, 0);
+    n = mkdns(p, "master.quake3arena.com", 1, 0x01, 53);
+    CHECK_EQ_I(console_from_caller(&k, p, (size_t)n, 0), 1);
+    CHECK(strcmp(console_name(&k, &seq), "master.quake3arena.com") == 0); CHECK_EQ_I((int)seq, 1);
+    n = mkdns(p, "Example.ORG", 1, 0x01, 53);            /* as it was asked, case and all */
+    CHECK_EQ_I(console_from_caller(&k, p, (size_t)n, 0), 1);
+    CHECK(strcmp(console_name(&k, &seq), "Example.ORG") == 0); CHECK_EQ_I((int)seq, 2);
+    /* not counted: another record type, an answer, another port, a cut-off
+     * question, a name with a pointer in it */
+    n = mkdns(p, "aaaa.example", 28, 0x01, 53); console_from_caller(&k, p, (size_t)n, 0);
+    n = mkdns(p, "answer.example", 1, 0x81, 53); console_from_caller(&k, p, (size_t)n, 0);
+    n = mkdns(p, "port.example", 1, 0x01, 5353); console_from_caller(&k, p, (size_t)n, 0);
+    n = mkdns(p, "short.example", 1, 0x01, 53); console_from_caller(&k, p, (size_t)n - 3, 0);
+    n = mkdns(p, "ptr.example", 1, 0x01, 53); p[40] = 0xc0; console_from_caller(&k, p, (size_t)n, 0);
+    CHECK(strcmp(console_name(&k, &seq), "Example.ORG") == 0); CHECK_EQ_I((int)seq, 2);
+}
+
 /* What is done to the packets of a game console on their way out
  * (console.h): the hop count is lifted, and an opening of a connection that
  * is repeated within a second is not passed on. */
@@ -881,6 +1004,8 @@ int main(void)
     test_v92_call();
     test_ppp_compression();
     test_console_packets();
+    test_console_more();
+    test_dclist();
     test_dreamcast_call();
     test_v34_call();
     test_v32bis_call();

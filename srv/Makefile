@@ -16,7 +16,7 @@ V42_SRC := $(addprefix ../v42/,v42_hdlc.c v42_detect.c v42_comp.c v44_comp.c v42
 PPP_SRC := $(addprefix ../ppp/,ppp_md5.c ppp_hdlc.c ppp_fsm.c ppp_deflate.c ppp_mppc.c ppp.c)
 CFG_SRC := ../cfg/config.c ../cfg/status.c
 # everything portable that goes into the daemon
-CORE_SRC := srv.c console.c line.c ../tel/tel.c ../dce/dce.c $(MODEM_SRC) $(V42_SRC) $(PPP_SRC) $(CFG_SRC)
+CORE_SRC := srv.c console.c dclist.c line.c ../tel/tel.c ../dce/dce.c $(MODEM_SRC) $(V42_SRC) $(PPP_SRC) $(CFG_SRC)
 SIM_SRC := $(addprefix ../sim/,g711.c noise.c filt.c channel.c v8call.c callpeer.c p2a.c qammod.c p34a.c p2c.c v34peer.c v32call.c v32line.c resamp.c v92a.c v92chan.c v92call.c) \
            ../v90/test/v90_dec.c ../dce/test/caller.c ../ppp/test/pppc.c
 HDRS := $(wildcard *.h ../tel/*.h ../dce/*.h ../dce/test/*.h ../cfg/*.h ../modem/*.h ../v90/*.h ../v34/*.h ../v92/*.h ../v42/*.h ../ppp/*.h ../sim/*.h)
@@ -35,7 +35,7 @@ $(BUILD)/arm_test_rig: test/test_rig.c $(RIG_SRC) $(HDRS) ../rig/pppcall.h
 	@mkdir -p $(BUILD)
 	$(ARM_CC) $(CFLAGS) $(INC) -I../rig -static -o $@ test/test_rig.c $(RIG_SRC) $(LDLIBS)
 
-.PHONY: test test-arm test-ns test-ns-pppd v90d v90d-arm clean
+.PHONY: test test-arm test-ns test-ns-nat test-ns-pppd v90d v90d-arm clean
 v90d: $(BUILD)/v90d
 v90d-arm: $(BUILD)/v90d-arm
 $(BUILD)/v90d: $(DAEMON_SRC) $(HDRS) ../fw/VERSION
@@ -69,7 +69,13 @@ test-ns-pppd: $(BUILD)/v90d $(BUILD)/ns_pppd
 # host and a file that stands for the flash (fw/tools); without python3 or
 # fw/ that part is left out.
 FW_NV := ../fw/tools/v90nv.host
-test-ns: $(BUILD)/v90d $(BUILD)/ns_call
+$(BUILD)/ns_nat: test/ns_nat.c nat.c nat.h tun.c tun.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) $(INC) -o $@ test/ns_nat.c nat.c tun.c
+test-ns-nat: $(BUILD)/ns_nat
+	unshare -Urn ./$(BUILD)/ns_nat
+
+test-ns: $(BUILD)/v90d $(BUILD)/ns_call test-ns-nat
 	@$(MAKE) -s -C ../fw tools/v90nv.host && python3 ../fw/tools/test_v90nv_boot.py --make-flash $(BUILD)/ns_flash.bin $(BUILD)/ns_new.uimage \
 	  || echo "  (no flash tool or no python3: the Firmware page is not tried)"
 	unshare -Urn ./$(BUILD)/ns_call ./$(BUILD)/v90d $(BUILD) $$(test -f $(BUILD)/ns_flash.bin && test -x $(FW_NV) && echo $(FW_NV) $(BUILD)/ns_flash.bin $(BUILD)/ns_new.uimage)

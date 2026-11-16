@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
+#include <net/if.h>
 #include <linux/netlink.h>
 #include <linux/netfilter.h>
 #include <linux/netfilter/nfnetlink.h>
@@ -18,7 +19,7 @@
 #define CHAIN "postrouting"
 #define CHAIN_PRE "prerouting"
 
-typedef struct { uint8_t b[8192]; size_t n; int bad; uint32_t seq; } nlbuf;
+typedef struct { uint8_t b[65536]; size_t n; int bad; uint32_t seq; } nlbuf;
 
 static size_t al(size_t n) { return (n + 3u) & ~(size_t)3u; }
 
@@ -207,6 +208,56 @@ static void redirect_msg(nlbuf *mp, uint32_t peer_ip, uint8_t proto, uint16_t lo
     msg_end(mp, at);
 }
 
+/* [ip saddr <src>] [iifname <ifn>] [ip daddr <dst>] <proto> [dport lo-hi] dnat to <to>
+ * (src, dst 0 = any; ifn null = any; lo 0 = any port). The port is kept. */
+static void dnat_msg(nlbuf *mp, uint32_t src, const char *ifn, uint32_t dst, uint8_t proto, uint16_t lo, uint16_t hi, uint32_t to)
+{
+    size_t at, exprs, el, data, val;
+    uint32_t bsrc = htonl(src), bdst = htonl(dst), bto = htonl(to);
+    uint16_t blo = htons(lo), bhi = htons(hi);
+    at = msg_begin(mp, nft(NFT_MSG_NEWRULE), NLM_F_CREATE | NLM_F_APPEND | NLM_F_ACK, NFPROTO_IPV4, 0);
+    attr_str(mp, NFTA_RULE_TABLE, TABLE);
+    attr_str(mp, NFTA_RULE_CHAIN, CHAIN_PRE);
+    exprs = nest_begin(mp, NFTA_RULE_EXPRESSIONS);
+    if (ifn) {
+        char name[IFNAMSIZ];
+        memset(name, 0, sizeof name); strncpy(name, ifn, sizeof name - 1);
+        el = expr_begin(mp, "meta", &data);             /* the name of the interface it came in on */
+        attr_u32(mp, NFTA_META_KEY, NFT_META_IIFNAME);
+        attr_u32(mp, NFTA_META_DREG, NFT_REG_1);
+        expr_end(mp, el, data);
+        el = expr_begin(mp, "cmp", &data);
+        attr_u32(mp, NFTA_CMP_SREG, NFT_REG_1);
+        attr_u32(mp, NFTA_CMP_OP, NFT_CMP_EQ);
+        val = nest_begin(mp, NFTA_CMP_DATA);
+        attr(mp, NFTA_DATA_VALUE, name, sizeof name);
+        nest_end(mp, val);
+        expr_end(mp, el, data);
+    }
+    if (src) match(mp, NFT_PAYLOAD_NETWORK_HEADER, 12, &bsrc, 4, NFT_CMP_EQ);
+    if (dst) match(mp, NFT_PAYLOAD_NETWORK_HEADER, 16, &bdst, 4, NFT_CMP_EQ);
+    match(mp, NFT_PAYLOAD_NETWORK_HEADER, 9, &proto, 1, NFT_CMP_EQ);
+    if (lo && lo == hi) {
+        match(mp, NFT_PAYLOAD_TRANSPORT_HEADER, 2, &blo, 2, NFT_CMP_EQ);
+    } else if (lo) {
+        match(mp, NFT_PAYLOAD_TRANSPORT_HEADER, 2, &blo, 2, NFT_CMP_GTE);
+        match(mp, NFT_PAYLOAD_TRANSPORT_HEADER, 2, &bhi, 2, NFT_CMP_LTE);
+    }
+    el = expr_begin(mp, "immediate", &data);            /* the new address into register 1 */
+    attr_u32(mp, NFTA_IMMEDIATE_DREG, NFT_REG_1);
+    val = nest_begin(mp, NFTA_IMMEDIATE_DATA);
+    attr(mp, NFTA_DATA_VALUE, &bto, 4);
+    nest_end(mp, val);
+    expr_end(mp, el, data);
+    el = expr_begin(mp, "nat", &data);
+    attr_u32(mp, NFTA_NAT_TYPE, NFT_NAT_DNAT);
+    attr_u32(mp, NFTA_NAT_FAMILY, NFPROTO_IPV4);
+    attr_u32(mp, NFTA_NAT_REG_ADDR_MIN, NFT_REG_1);
+    expr_end(mp, el, data);
+    nest_end(mp, exprs);
+    msg_end(mp, at);
+}
+
 int nat_masquerade(uint32_t peer_ip) { return nat_masquerade2(peer_ip, 0); }
 
 int nat_masquerade2(uint32_t peer_ip, uint32_t peer2_ip)
@@ -219,7 +270,7 @@ int nat_masquerade2(uint32_t peer_ip, uint32_t peer2_ip)
 
 int nat_apply(const nat_plan *p)
 {
-    static nlbuf m;                 /* not on the stack: 8 kB */
+    static nlbuf m;                 /* not on the stack: 64 kB */
     size_t at, hook;
     uint32_t first;
     int i;
@@ -245,7 +296,7 @@ int nat_apply(const nat_plan *p)
 
     for (i = 0; i < 2; i++) if (p->masquerade && p->peer[i]) rule_msg(&m, p->peer[i]);
 
-    if ((p->peer[0] && p->archive[0]) || (p->peer[1] && p->archive[1])) {
+    if ((p->peer[0] && (p->archive[0] || p->console[0])) || (p->peer[1] && (p->archive[1] || p->console[1]))) {
         at = msg_begin(&m, nft(NFT_MSG_NEWCHAIN), NLM_F_CREATE | NLM_F_ACK, NFPROTO_IPV4, 0);
         attr_str(&m, NFTA_CHAIN_TABLE, TABLE);
         attr_str(&m, NFTA_CHAIN_NAME, CHAIN_PRE);
@@ -260,6 +311,19 @@ int nat_apply(const nat_plan *p)
             redirect_msg(&m, p->peer[i], 6, 80, 80, p->http_port);
             redirect_msg(&m, p->peer[i], 6, 21, 21, p->ftp_port);
             if (p->pasv_lo && p->pasv_hi >= p->pasv_lo) redirect_msg(&m, p->peer[i], 6, p->pasv_lo, p->pasv_hi, 0);
+        }
+        {
+            int opened = 0, j;
+            for (i = 0; i < 2; i++) if (p->peer[i] && p->console[i]) {
+                for (j = 0; j < p->n_rewrite && j < NAT_REWRITE_MAX; j++)
+                    dnat_msg(&m, p->peer[i], NULL, p->rewrite[j].from, p->rewrite[j].proto,
+                             p->rewrite[j].port, p->rewrite[j].port, p->rewrite[j].to);
+                if (!opened && p->wan[0]) {
+                    opened = 1;
+                    for (j = 0; j < p->n_open && j < NAT_OPEN_MAX; j++)
+                        dnat_msg(&m, 0, p->wan, 0, p->open[j].proto, p->open[j].lo, p->open[j].hi, p->peer[i]);
+                }
+            }
         }
     }
 

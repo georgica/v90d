@@ -504,10 +504,11 @@ int main(int argc, char **argv)
      * hook; the call comes in on port 2, which has its own number, its own
      * network device and its own address for the caller. */
     {
-        int sv2[2]; static char ledp[300], led[2][340];
+        int sv2[2]; static char ledp[300], led[2][340], dclog[300];
         cfg_default(&c);
         strcpy(c.line_number, "5551234"); c.rings = 1;
         strcpy(c.port2.line_number, "777"); c.port2.rings = 1;
+        c.port2.service = CFG_SERVICE_DREAMCAST;   /* port 2 is a game console's */
         c.auth = CFG_AUTH_CHAP; c.n_users = 1; strcpy(c.users[0].name, "alice"); strcpy(c.users[0].secret, "wonderland");
         c.status_port = 8080;
         CHECK_EQ_I(cfg_save(&c, conf, err, sizeof err), CFG_OK);
@@ -527,7 +528,16 @@ int main(int argc, char **argv)
             int a = fcntl(sv[1], F_DUPFD, 20), b = fcntl(sv2[1], F_DUPFD, 20);
             dup2(a, 3); dup2(b, 4);
             for (i = 5; i < 64; i++) close(i);
-            execl(argv[1], "v90d", "-c", conf, "-l", "fd:3", "-l", "fd:4", "-i", "lo", "-t", "ppp0", "-L", ledp, (char *)NULL);
+            {   /* this daemon's log goes to a file, to be read below */
+                int lfd;
+                snprintf(dclog, sizeof dclog, "%s/ns_dc.log", argv[2]);
+                lfd = open(dclog, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                if (lfd >= 0) { dup2(lfd, 2); close(lfd); }
+            }
+            /* the address list of the console service comes from a command;
+             * here one that writes two lines, one of them no rule */
+            execl(argv[1], "v90d", "-c", conf, "-l", "fd:3", "-l", "fd:4", "-i", "lo", "-t", "ppp0", "-L", ledp,
+                  "-D", "printf '203.0.113.9 198.51.100.7 9500 udp\\nnonsense\\n' > /tmp/v90d.dclist", (char *)NULL);
             _exit(127);
         }
         close(sv[1]); close(sv2[1]);
@@ -543,6 +553,11 @@ int main(int argc, char **argv)
         CHECK(strstr(resp, "<b>Port 1</b> <a href=\"/port2\">Port 2</a>") != NULL);
         CHECK_EQ_I(if_address("ppp0"), PPP_LOCAL);
         CHECK_EQ_I(if_address("ppp1"), PPP_LOCAL);
+        /* the console service of port 2: the list was fetched and read, and
+         * the rules went in with it once the lines were idle */
+        snprintf(dclog, sizeof dclog, "%s/ns_dc.log", argv[2]);
+        CHECK(file_has(dclog, "console service: address list with 1 rules"));
+        CHECK(file_has(dclog, "console service on port 2: 1 address rules, 24 port ranges opened from lo"));
         /* port 1's number is a wrong number on port 2 */
         hook = 1; run_ms(500); dial("5551234"); run_ms(4000);
         c_rx_pw = 0; run_ms(3000);
