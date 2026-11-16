@@ -79,6 +79,7 @@ daemon's decision.
 | line | `dreamcast_now` | `on`, `off`: with `service = dreamcast`, report the game being played to the Dreamcast Now site | `off` |
 | line | `dreamcast_lan` | `on`, `off`: with `service = dreamcast`, the console is a host on the network with an address of its own (DHCP) | `off` |
 | line | `dreamcast_upnp` | `on`, `off`: with `service = dreamcast`, ask the network's router to pass the games' ports on (UPnP) | `off` |
+| line | `saturn_matchmaking` | `on`, `off`: with `service = saturn`, pair players through saturn.dreampipe.net (off = direct only) | `off` |
 | status | `listen` | `lan`, `off` | `lan` |
 | status | `port` | 1..65535 | `80` |
 | status | `admin_password` | 0..64 octets, written like a user secret; empty = settings page open | empty |

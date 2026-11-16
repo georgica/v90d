@@ -315,7 +315,7 @@ static void test_escaping(void)
 
     /* fields outside their range do not index anything */
     base(&c);
-    c.line_tones = 7; c.auth = -3; c.lan_dhcp = 5; c.service = 9; c.dc_now = c.dc_lan = c.dc_upnp = c.dc_iwango = 9; c.v92 = 9; c.compression = 9; c.n_users = 1000; c.modulations = 0xffffffffu;
+    c.line_tones = 7; c.auth = -3; c.lan_dhcp = 5; c.service = 9; c.dc_now = c.dc_lan = c.dc_upnp = c.dc_iwango = c.sat_match = 9; c.v92 = 9; c.compression = 9; c.n_users = 1000; c.modulations = 0xffffffffu;
     c.rings = -2147483647 - 1; c.max_down = 2147483647;
     CHECK(settings_render_html(&c, 0, NULL, html, sizeof html) > 0);
     CHECK(has(html, "name=\"rings\" size=\"6\" maxlength=\"5\" value=\"-2147483648\">"));
@@ -542,6 +542,37 @@ static void test_dreamcast_page(void)
     CHECK_EQ_I(apply(&c, "dreamcast_now=on&dreamcast_lan=off&dreamcast_upnp=on", &out), SETTINGS_OK);
     CHECK_EQ_I(out.dc_now, 1); CHECK_EQ_I(out.dc_lan, 0); CHECK_EQ_I(out.dc_upnp, 1);
     CHECK_EQ_I(out.service, CFG_SERVICE_DREAMCAST); CHECK(strcmp(out.line_number, c.line_number) == 0);
+}
+
+/* the Saturn tab: one switch (matchmaking), a page per port, shown only
+ * while a port has the saturn service */
+static void test_saturn_page(void)
+{
+    cfg_t c, out;
+
+    CHECK_EQ_I(settings_page_of("/saturn", 7), SETTINGS_SATURN);
+    CHECK_EQ_I(settings_page_of("/saturn2", 8), SETTINGS_SATURN2);
+    base(&c);
+    CHECK(settings_render_page(&c, SETTINGS_LINE, 0, NULL, html, sizeof html) > 0);
+    CHECK(!has(html, "/saturn"));
+    c.service = CFG_SERVICE_SATURN; c.port2.sat_match = 1;
+    CHECK(settings_render_page(&c, SETTINGS_LINE, 0, NULL, html, sizeof html) > 0);
+    CHECK(has(html, "<a href=\"/saturn\">Saturn</a>"));          /* the tab */
+    CHECK(!has(html, "name=\"saturn_matchmaking\""));           /* not on the Line page */
+    CHECK(settings_render_page(&c, SETTINGS_SATURN, 0, NULL, html, sizeof html) > 0);
+    CHECK(has(html, "<b>Saturn</b>"));
+    CHECK(has(html, "<p class=\"sw\"><b>Port 1</b> <a href=\"/saturn2\">Port 2</a></p>"));
+    CHECK(has(html, "<form method=\"post\" action=\"/saturn\">"));
+    CHECK(has(html, "<select name=\"saturn_matchmaking\">"));
+    CHECK(has(html, "saturn.dreampipe.net"));
+    CHECK(has(html, "The service of this port is Saturn"));
+    CHECK(settings_render_page(&c, SETTINGS_SATURN2, 0, NULL, html, sizeof html) > 0);
+    CHECK(has(html, "<input type=\"hidden\" name=\"port\" value=\"2\">"));
+    CHECK(has(html, "<option value=\"on\" selected>"));          /* port 2 has it on */
+    /* its post changes only the switch */
+    CHECK_EQ_I(apply(&c, "saturn_matchmaking=on", &out), SETTINGS_OK);
+    CHECK_EQ_I(out.sat_match, 1); CHECK_EQ_I(out.service, CFG_SERVICE_SATURN);
+    CHECK_EQ_I(apply(&c, "saturn_matchmaking=maybe", &out), SETTINGS_INVALID);
 }
 
 /* port 2 has a Line and a Modem page of its own */
@@ -1053,7 +1084,7 @@ static void test_round_trip(void)
     cfg_default(&c);
     CHECK(settings_render_html(&c, 0, NULL, html, sizeof html) > 0);
     n = submit(html, body, sizeof body);
-    CHECK_EQ_I(n, 7 + 1 + 1 + 6 + 2 + 2 * CFG_MAX_USERS + 6 + 1 + 1 + 1 + 1 + 4);     /* service, v92, compression, and the four console switches */
+    CHECK_EQ_I(n, 7 + 1 + 1 + 6 + 2 + 2 * CFG_MAX_USERS + 6 + 1 + 1 + 1 + 1 + 5);     /* service, v92, compression, the four Dreamcast switches, the Saturn one */
     CHECK_EQ_I(apply(&c, body, &out), SETTINGS_OK);
     CHECK(memcmp(&c, &out, sizeof c) == 0);
 
@@ -1075,7 +1106,7 @@ static void test_round_trip(void)
     strcpy(c.users[1].name, "caf\xe9\x01");
     CHECK(settings_render_html(&c, 0, NULL, html, sizeof html) > 0);
     n = submit(html, body, sizeof body);
-    CHECK_EQ_I(n, 7 + 1 + 1 + 1 + 2 + 2 * CFG_MAX_USERS - 1 + 6 + 1 + 1 + 1 + 1 + 4);
+    CHECK_EQ_I(n, 7 + 1 + 1 + 1 + 2 + 2 * CFG_MAX_USERS - 1 + 6 + 1 + 1 + 1 + 1 + 5);
     CHECK_EQ_I(apply(&c, body, &out), SETTINGS_OK);
     CHECK(memcmp(&c, &out, sizeof c) == 0);
 
@@ -1192,6 +1223,7 @@ int main(void)
     test_port2();
     test_one_port();
     test_dreamcast_page();
+    test_saturn_page();
     test_apply();
     test_users();
     test_invalid();

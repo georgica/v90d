@@ -6,6 +6,7 @@
 #include "page.h"
 
 int page_dreamcast_tab;     /* page.h */
+int page_saturn_tab;
 
 #define COUNT(a) ((int)(sizeof(a) / sizeof((a)[0])))
 

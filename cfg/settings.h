@@ -90,7 +90,9 @@ enum { SETTINGS_ALL, SETTINGS_LINE, SETTINGS_MODEM, SETTINGS_USERS, SETTINGS_NET
        SETTINGS_LINE2, SETTINGS_MODEM2,
        /* the Dreamcast tab (/dreamcast, /dreamcast2): the switches of the
         * dreamcast service, per port */
-       SETTINGS_DREAMCAST, SETTINGS_DREAMCAST2, SETTINGS_PAGES };
+       SETTINGS_DREAMCAST, SETTINGS_DREAMCAST2,
+       /* the Saturn tab (/saturn, /saturn2): the matchmaking switch, per port */
+       SETTINGS_SATURN, SETTINGS_SATURN2, SETTINGS_PAGES };
 int settings_render_page(const cfg_t *c, int page, int saved, const char *error, char *buf, size_t cap);
 /* What the Dreamcast page says about the VPN profile (vpn.h) that the
  * owner keeps: "host port" of its server, or NULL when none is stored. The

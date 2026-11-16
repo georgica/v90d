@@ -1631,6 +1631,14 @@ static void test_two_ports(void)
     C.port2.service = CFG_SERVICE_INTERNET;
     len = exchange("GET /firmware HTTP/1.0\r\n\r\n", resp, sizeof resp);
     CHECK(strstr(resp, "/dreamcast") == NULL);
+    /* the Saturn tab, likewise, only with a saturn port */
+    CHECK(strstr(resp, "/saturn") == NULL);
+    C.service = CFG_SERVICE_SATURN;
+    len = exchange("GET /firmware HTTP/1.0\r\n\r\n", resp, sizeof resp);
+    CHECK(strstr(resp, "<a href=\"/saturn\">Saturn</a>") != NULL);
+    len = exchange("GET /saturn HTTP/1.0\r\nHost: 192.168.1.2\r\n\r\n", resp, sizeof resp);
+    CHECK(parse_resp(resp, len, &r) && r.code == 200 && strstr(resp, "<select name=\"saturn_matchmaking\">") != NULL);
+    C.service = CFG_SERVICE_INTERNET;
     CHECK_EQ_I(code_of("POST /calls HTTP/1.0\r\nContent-Length: 0\r\n\r\n"), 405);
     /* behind the login like the rest */
     strcpy(C.admin_password, "pw");

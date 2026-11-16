@@ -13,7 +13,7 @@ enum {
     F_NUMBER, F_TONES, F_RINGS, F_BUSY, F_DROP, F_SESSION, F_IDLE, F_AUTH,
     F_MODS, F_V90, F_V34, F_V32BIS, F_V22BIS, F_V22, F_V21, F_DOWN, F_UP, F_ADMINPW, F_ADMINCLR,
     F_LAN, F_ADDRESS, F_NETMASK, F_GATEWAY, F_DNS1, F_DNS2, F_PORT, F_SERVICE, F_V92, F_COMPRESSION,
-    F_DCNOW, F_DCLAN, F_DCUPNP, F_DCIWANGO,
+    F_DCNOW, F_DCLAN, F_DCUPNP, F_DCIWANGO, F_SATMATCH,
     F_COUNT,
     F_USER = 100, F_PASS = 200      /* plus the row */
 };
@@ -30,7 +30,7 @@ static const struct { const char *name; const char *sec; } fields[F_COUNT] = {
     { "lan", "network" }, { "address", "network" }, { "netmask", "network" },
     { "gateway", "network" }, { "dns1", "network" }, { "dns2", "network" },
     { "port", "line" }, { "service", "line" }, { "v92", "modem" }, { "compression", "ppp" },
-    { "dreamcast_now", "line" }, { "dreamcast_lan", "line" }, { "dreamcast_upnp", "line" }, { "dreamcast_iwango", "line" },
+    { "dreamcast_now", "line" }, { "dreamcast_lan", "line" }, { "dreamcast_upnp", "line" }, { "dreamcast_iwango", "line" }, { "saturn_matchmaking", "line" },
 };
 
 static const char *const n_tones[] = { "us", "eu" };
@@ -47,6 +47,8 @@ static const char *const t_dcnow[]  = { "Off", "On: tell the Dreamcast Now site 
 static const char *const t_dclan[]  = { "Off: the console is behind this box's address", "On: the console gets an address of its own on the network" };
 static const char *const t_dcupnp[] = { "Off", "On: ask the router to send the game ports here (UPnP)" };
 static const char *const t_dciwango[] = { "Off", "On: reach the IWANGO games' servers through the VPN (needs a profile, below)" };
+static const char *const t_satmatch[] = { "Off: direct only (dial 0 to wait, #a*b*c*d# to call an address)",
+                                          "On: pair players through saturn.dreampipe.net (dial #0NN# and #NN)" };
 static const char *const t_v92[]   = { "Off: V.90 upstream (V.34, up to 33600 bit/s)",
                                        "On: offer PCM upstream to V.92 callers (experimental)" };
 static const char *const n_comp[]  = { "off", "on" };
@@ -162,6 +164,7 @@ static const struct { const char *path, *title; } pages[SETTINGS_PAGES] = {
     { "/network", "network" }, { "/system", "system" },
     { "/line2", "line, port 2" }, { "/modem2", "modem, port 2" },
     { "/dreamcast", "Dreamcast" }, { "/dreamcast2", "Dreamcast, port 2" },
+    { "/saturn", "Saturn" }, { "/saturn2", "Saturn, port 2" },
 };
 
 const char *settings_page_path(int page)
@@ -177,7 +180,7 @@ int settings_page_of(const char *path, size_t len)
     int i;
     for (i = 0; i < SETTINGS_PAGES; i++)
         if (strlen(pages[i].path) == len && memcmp(pages[i].path, path, len) == 0) {
-            if (!two_ports && (i == SETTINGS_LINE2 || i == SETTINGS_MODEM2 || i == SETTINGS_DREAMCAST2)) return -1;
+            if (!two_ports && (i == SETTINGS_LINE2 || i == SETTINGS_MODEM2 || i == SETTINGS_DREAMCAST2 || i == SETTINGS_SATURN2)) return -1;
             return i;
         }
     return -1;
@@ -205,13 +208,16 @@ int settings_render_page(const cfg_t *c, int page, int saved, const char *error,
     sb_init(&b, buf, cap);
     if (page < 0 || page >= SETTINGS_PAGES) page = own = SETTINGS_ALL;
     page_dreamcast_tab = c->service == CFG_SERVICE_DREAMCAST || c->port2.service == CFG_SERVICE_DREAMCAST;
-    if (page == SETTINGS_LINE2 || page == SETTINGS_MODEM2 || page == SETTINGS_DREAMCAST2) {
+    page_saturn_tab = c->service == CFG_SERVICE_SATURN || c->port2.service == CFG_SERVICE_SATURN;
+    if (page == SETTINGS_LINE2 || page == SETTINGS_MODEM2 || page == SETTINGS_DREAMCAST2 || page == SETTINGS_SATURN2) {
         /* port 2: the same sections, filled from its settings */
         port2 = 1;
         cfg_for_port(c, 1, &two); c = &two;
-        page = page == SETTINGS_LINE2 ? SETTINGS_LINE : page == SETTINGS_MODEM2 ? SETTINGS_MODEM : SETTINGS_DREAMCAST;
+        page = page == SETTINGS_LINE2 ? SETTINGS_LINE : page == SETTINGS_MODEM2 ? SETTINGS_MODEM
+             : page == SETTINGS_DREAMCAST2 ? SETTINGS_DREAMCAST : SETTINGS_SATURN;
     }
-    page_top(&b, pages[own].title, "", page == SETTINGS_DREAMCAST ? PAGE_TAB_DREAMCAST : page ? page : -1, NULL);
+    page_top(&b, pages[own].title, "",
+             page == SETTINGS_DREAMCAST ? PAGE_TAB_DREAMCAST : page == SETTINGS_SATURN ? PAGE_TAB_SATURN : page ? page : -1, NULL);
     if (error) {
         sb_puts(&b, "<p><b>Not saved:</b> ");
         sb_html(&b, error, SETTINGS_MSG_MAX, 0);
@@ -219,7 +225,7 @@ int settings_render_page(const cfg_t *c, int page, int saved, const char *error,
     } else if (saved) {
         sb_puts(&b, "<p><b>Settings saved.</b></p>\n");
     }
-    if (two_ports && (page == SETTINGS_LINE || page == SETTINGS_MODEM || page == SETTINGS_DREAMCAST)) {
+    if (two_ports && (page == SETTINGS_LINE || page == SETTINGS_MODEM || page == SETTINGS_DREAMCAST || page == SETTINGS_SATURN)) {
         const char *base = pages[page].path;
         sb_puts(&b, "<p class=\"sw\">");
         if (port2) { sb_puts(&b, "<a href=\""); sb_puts(&b, base); sb_puts(&b, "\">Port 1</a> <b>Port 2</b>"); }
@@ -276,6 +282,21 @@ int settings_render_page(const cfg_t *c, int page, int saved, const char *error,
                 " inside a private network that is reached through an OpenVPN tunnel; with the switch on and a profile"
                 " for that network stored (below), the box keeps the tunnel up. All four are off unless turned on. A"
                 " change takes effect when the lines are free.</p></section>\n");
+    }
+    if (ON(SETTINGS_SATURN)) {
+    sb_puts(&b, "<section><h2>Saturn</h2>\n<table>\n");
+    in_select(&b, "Matchmaking", F_SATMATCH, c->sat_match, n_v92, t_satmatch, 2);
+    sb_puts(&b, "</table>\n<p>");
+    if (page == SETTINGS_SATURN)
+        sb_puts(&b, c->service == CFG_SERVICE_SATURN ? "The service of this port is Saturn: this switch is in force. "
+                                                      : "The service of this port is not Saturn (Line tab): this switch does nothing until it is. ");
+    sb_puts(&b, "Direct play always works: the waiting player dials 0, the other dials #a*b*c*d# with"
+                " that player's address (the waiting box must be reachable on TCP 65432 and UDP 20001)."
+                " Matchmaking, off unless turned on, instead pairs two players who dial the same game"
+                " through the match server at saturn.dreampipe.net, and lets them find each other through"
+                " home routers (STUN). With it on, dial #0NN# to wait for game NN or #NN to be paired as"
+                " the caller. Turning it on makes this box a client of that server; no address of yours is"
+                " sent but your game choice and public address are. A change takes effect at the next call.</p></section>\n");
     }
     if (ON(SETTINGS_MODEM)) {
     sb_puts(&b, "<section><h2>Modem</h2>\n<table>\n");
@@ -579,6 +600,7 @@ static void set_field(form_t *f, int fi, const char *v, size_t len)
     case F_DCLAN:   set_enum(f, fi, &c->dc_lan, v, n_v92, 2, "on, off"); break;
     case F_DCUPNP:  set_enum(f, fi, &c->dc_upnp, v, n_v92, 2, "on, off"); break;
     case F_DCIWANGO: set_enum(f, fi, &c->dc_iwango, v, n_v92, 2, "on, off"); break;
+    case F_SATMATCH: set_enum(f, fi, &c->sat_match, v, n_v92, 2, "on, off"); break;
     case F_COMPRESSION: set_enum(f, fi, &c->compression, v, n_comp, 2, "on, off"); break;
     case F_ADDRESS: set_addr(f, fi, &c->lan_addr, v, 0); break;
     case F_NETMASK: set_addr(f, fi, &c->lan_netmask, v, 0); break;
