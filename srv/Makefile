@@ -21,7 +21,7 @@ SIM_SRC := $(addprefix ../sim/,g711.c noise.c filt.c channel.c v8call.c callpeer
            ../v90/test/v90_dec.c ../dce/test/caller.c ../ppp/test/pppc.c
 HDRS := $(wildcard *.h ../tel/*.h ../dce/*.h ../dce/test/*.h ../cfg/*.h ../modem/*.h ../v90/*.h ../v34/*.h ../v92/*.h ../v42/*.h ../ppp/*.h ../sim/*.h)
 
-DAEMON_SRC := main.c satlink.c tun.c nat.c ../cfg/httpd.c ../cfg/settings.c ../cfg/firmware.c ../cfg/vpn.c $(CORE_SRC)
+DAEMON_SRC := main.c satlink.c netsvc.c tun.c nat.c ../cfg/httpd.c ../cfg/settings.c ../cfg/firmware.c ../cfg/vpn.c $(CORE_SRC)
 # the firmware's version, shown on the pages: one place, fw/VERSION
 VERSION := $(shell cat ../fw/VERSION 2>/dev/null || echo dev)
 DAEMON_DEF := -DV90D_VERSION='"$(VERSION)"'

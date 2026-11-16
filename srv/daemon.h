@@ -12,6 +12,9 @@
 extern srv_t       S[PORTS];        /* the per-port server objects */
 extern int         n_ports;         /* how many are in use (1 or 2) */
 extern const char *lan_if;          /* the network interface name */
+extern int         tun_fd[PORTS];   /* each port's TUN device, or -1 */
+extern char        tun_name[PORTS][16];
+extern int         net_dirty;       /* set when addresses or NAT changed; netsvc_apply clears it */
 
 /* a line in the daemon's log (levels are CFG_LOG_* from config.h) */
 void        logf_(int level, const char *fmt, ...);
