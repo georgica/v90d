@@ -2383,3 +2383,29 @@ modem that calls as 212A and nothing else. The 5686 would have connected
 to the V.22 sequence as well, and none of the other kind has been on the
 line. The box was left on the image from these sources (4 s before the
 tone).
+
+ARM suite on these sources, after the commit: "ALL ARM CHECKS PASS"
+(answer: 54 checks, 0 failures).
+
+
+### 0.5.0
+
+The sources of the two sections above, `fw/VERSION` 0.5.0. Host and ARM
+suites passed on them before the version number was set (only `fw/VERSION`
+and this file changed after). `make -C fw release`, `make -C fw
+test-release`: exit 0 (32 tests OK with 1 skipped, twice; 18 tests OK;
+loader: 129 checks, 0 failures). The image (`v90d-ht802fw.bin`, SHA-256
+bdb07007...fe7a1de4) uploaded on the unit's Firmware page: back as 0.5.0,
+no telnet. On it, the 5686 with `AT&B1`:
+
+| call | the modem | the box's list |
+|---|---|---|
+| `&N1`, 227 835 3422 | `CONNECT`, Telehack's greeting | Bell 103, 300 / 300 |
+| `&N1S27=1`, the same | `CONNECT`, the greeting | V.21, 300 / 300 |
+| `&N2`, the same | `CONNECT 1200/ARQ`, the greeting | V.22, 1200 / 1200 |
+| as it comes, the internet number | `CONNECT 54666/ARQ` | V.92, 54666 / 40000 |
+
+Bell 212A was not called on this image: the 5686 answers the V.22 sequence
+before the 2225 Hz tone begins. Its calls were made on the test build
+described above. Not tried on this image: the 1998 U.S. Robotics, the
+Conexant.
