@@ -2,6 +2,9 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <netdb.h>
+#include <stdint.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #include <poll.h>
 #include <string.h>
 #include <unistd.h>
@@ -40,7 +43,7 @@ static int connect_within(int s, const struct sockaddr *a, socklen_t al, int ms)
     return fcntl(s, F_SETFL, fl);
 }
 
-int bbsdial_run(const char *host, const char *port, int fd, unsigned connect_s)
+int bbsdial_run(const char *host, const char *port, int fd, unsigned connect_s, int self_ok)
 {
     struct addrinfo hint, *res = NULL, *ai; int s = -1; char buf[2048];
     struct pollfd p[2];
@@ -53,6 +56,8 @@ int bbsdial_run(const char *host, const char *port, int fd, unsigned connect_s)
     if (getaddrinfo(host, port, &hint, &res) != 0) res = NULL;
     (void)alarm(0);
     for (ai = res; ai && s < 0; ai = ai->ai_next) {
+        uint32_t net = ntohl(((const struct sockaddr_in *)(const void *)ai->ai_addr)->sin_addr.s_addr) >> 24;
+        if (!self_ok && (net == 127 || net == 0)) continue;     /* the box itself, by whatever name */
         s = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
         if (s >= 0 && connect_within(s, ai->ai_addr, ai->ai_addrlen, (int)connect_s * 1000) < 0) { close(s); s = -1; }
     }

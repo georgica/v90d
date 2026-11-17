@@ -1230,7 +1230,7 @@ static void test_bbsdial(void)
     /* octets both ways, and a quiet time is no reason to end */
     CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
     pid = fork();
-    if (pid == 0) { close(sv[0]); close(ls); _exit(bbsdial_run("127.0.0.1", port, sv[1], 5)); }
+    if (pid == 0) { close(sv[0]); close(ls); _exit(bbsdial_run("127.0.0.1", port, sv[1], 5, 1)); }
     close(sv[1]);
     c = accept(ls, NULL, NULL);
     CHECK(c >= 0);
@@ -1249,7 +1249,7 @@ static void test_bbsdial(void)
     /* the daemon ends it: the board sees the end */
     CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
     pid = fork();
-    if (pid == 0) { close(sv[0]); close(ls); _exit(bbsdial_run("localhost", port, sv[1], 5)); }
+    if (pid == 0) { close(sv[0]); close(ls); _exit(bbsdial_run("localhost", port, sv[1], 5, 1)); }
     close(sv[1]);
     c = accept(ls, NULL, NULL);
     CHECK(c >= 0);
@@ -1257,11 +1257,19 @@ static void test_bbsdial(void)
     p.fd = c; p.events = POLLIN; p.revents = 0;
     CHECK(poll(&p, 1, 3000) > 0); CHECK_EQ_I((int)recv(c, b, sizeof b, 0), 0);
     CHECK_EQ_I(waitpid(pid, &st, 0), pid); CHECK(WIFEXITED(st) && WEXITSTATUS(st) == 0);
+    /* a name that turns out to be the box itself is not connected to: the
+     * listener is there and hears nothing */
+    CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
+    CHECK_EQ_I(bbsdial_run("localhost", port, sv[1], 5, 0), 1);
+    CHECK_EQ_I(bbsdial_run("127.0.0.1", port, sv[1], 5, 0), 1);
+    p.fd = ls; p.events = POLLIN; p.revents = 0;
+    CHECK_EQ_I(poll(&p, 1, 300), 0);
+    close(sv[0]); close(sv[1]);
     close(c); close(ls);
     /* nobody there, and a name that is none */
     CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
-    CHECK_EQ_I(bbsdial_run("127.0.0.1", port, sv[1], 5), 1);
-    CHECK_EQ_I(bbsdial_run("no-such-host.invalid", "23", sv[1], 5), 1);
+    CHECK_EQ_I(bbsdial_run("127.0.0.1", port, sv[1], 5, 1), 1);
+    CHECK_EQ_I(bbsdial_run("no-such-host.invalid", "23", sv[1], 5, 1), 1);
     close(sv[0]); close(sv[1]);
 }
 

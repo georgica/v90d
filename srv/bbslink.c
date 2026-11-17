@@ -211,7 +211,7 @@ static void bl_dial(int k)
         (void)fcntl(sv[1], F_SETFL, 0);
         child_setup(sv[1], sv[1]);
         if (dial_prog[0]) execl(dial_prog, dial_prog, l->to.host, port, (char *)NULL);
-        _exit(bbsdial_run(l->to.host, port, 0, 15));    /* child_setup made the pair our fd 0 */
+        _exit(bbsdial_run(l->to.host, port, 0, 15, 0));    /* child_setup made the pair our fd 0 */
     }
     close(sv[1]);
     if (l->pid < 0) { l->pid = 0; close(sv[0]); bl_bye(l, "The box cannot make the connection.\r\n"); return; }
