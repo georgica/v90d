@@ -2250,3 +2250,41 @@ telnet. On it, the 1998 U.S. Robotics on PHONE 2: V.90 54666 / 28800
 twice, once dialled as `16387825442`. The Conexant and the 5686 were not
 attached for this last check; they were tested on the same sources in the
 bench build (above).
+
+## libv90modem: the modem as a library of its own, Phase 1 (2026-11-16)
+
+The modem (`modem/`, `v32/`, `v34/`, `v90/`, `v92/`), V.42 (`v42/`), the line
+simulator (`sim/`), the modem tests, the recorders and benches moved into
+`libv90modem/` (`git mv`, the same relative paths), with a public API in one
+header, `include/v90modem.h` (0.1.0, not stable before 1.0). v90d builds
+against it (`libv90m.mk`): the daemon links `libv90modem.a`, in which only the
+`v90m_*` functions are visible; the tests link the library's dev archive
+(internals and simulator). Nothing was to change in what goes on the line.
+
+Proof, before (819d38e, a clean worktree) and after (this branch), same PC:
+
+| | before | after |
+|---|---|---|
+| `make check` | 107 programs, 2,835,154 checks, 0 failures, ALL HOST CHECKS PASS | the same 107 with the same counts, plus `api: 74 checks, 0 failures`; ALL HOST CHECKS PASS |
+| `make check-arm` | 106 programs, 0 failures, ALL ARM CHECKS PASS | the same 106 with the same counts, plus the API test; ALL ARM CHECKS PASS |
+| `make bench-v90` | transmit hash 8e3136e9 (host, qemu-arm) | 8e3136e9 by the internals (host, qemu-arm) and by the public API (static, shared, qemu-arm) |
+| replays: 106 recordings of `live/` x 8 configurations | 848 outputs, 394 V.92 per-sample trace checksums, 371 bit dumps | the same 1613 files, byte for byte |
+| `make -C fw test-release` | passes | passes; release image built against the library (`v90d-ht802fw.bin` 0.4.0, 2523144 octets, through the loader: 22 checks, 0 failures) |
+| ARM daemon, stripped | 573248 octets | 577344 octets |
+| ARM instructions per second of V.90 data mode (qemu) | 39,605,966 (`bench_v90`) | 40,170,131 through the API (`bench_api`): +1.4 %, about 70 per sample |
+
+New with the library (no "before"): the API test (`test/api/test_api.c`:
+configuration and its errors, memory of the caller's and full of rubbish,
+G.711, a V.22bis call through the API, two modems in one process, blocks of
+1, 7 and 160 samples giving the same samples on the line, V.42 alone), the
+public-API bench, the example `examples/answer_file.c` (the Conexant V.92
+call `cxa.raw` gives `CONNECT 50666/25333 V.92 at 24.805 s` on the host,
+static and shared, and cross-built under qemu-arm), the replay tool
+`v90m-replay` (modem and V.42 without telephony: the transmit matches the
+recording to the bit until data mode on cxa, cxc, v34a, v21a, usr6, usr7,
+x2r2, x2b), install / uninstall / pkg-config, a cross build with
+`CC=arm-linux-gcc`.
+
+Found on the way: the test of `dce_init` on a dce_t full of rubbish
+(test_call (l)) failed when the modem was allocated by the first call; the
+modem and V.42 memory are part of the dce_t again (`v90m_init` on it).
