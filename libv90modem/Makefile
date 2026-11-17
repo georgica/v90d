@@ -105,7 +105,12 @@ $(SHARED): $(PIC_OBJ)
 	$(CC) -shared -Wl,-soname,$(NAME).so.$(SOVER) -o $@ $(PIC_OBJ) $(LDLIBS)
 	ln -sf $(NAME).so.$(VERSION) $(BUILD)/$(NAME).so.$(SOVER)
 	ln -sf $(NAME).so.$(SOVER) $(BUILD)/$(NAME).so
-$(PCFILE): $(NAME).pc.in Makefile
+# the .pc file names the install paths: made again when they change
+PC_VARS := $(PREFIX)|$(LIBDIR)|$(INCDIR)|$(VERSION)
+.PHONY: .pc-force
+$(BUILD)/pc.vars: .pc-force
+	@mkdir -p $(BUILD); echo '$(PC_VARS)' | cmp -s - $@ || echo '$(PC_VARS)' > $@
+$(PCFILE): $(NAME).pc.in Makefile $(BUILD)/pc.vars
 	@mkdir -p $(BUILD)
 	sed -e 's|@PREFIX@|$(PREFIX)|' -e 's|@LIBDIR@|$(LIBDIR)|' -e 's|@INCDIR@|$(INCDIR)|' -e 's|@VERSION@|$(VERSION)|' $< > $@
 $(DEV): $(LIB_OBJ) $(SIM_OBJ)
