@@ -179,6 +179,11 @@ static void test_other_hardware(void)
     /* a longer name that only starts like ours is another board */
     fresh(); install(0, 50000, 7); memcpy(S.mem + LD_BOARD_OFF, "9610003725AB", 13); keep();
     ld_run(&E, &R); CHECK_EQ_I(R.why, LD_W_BOARD);
+    /* the one-port box (HT801), in the two revisions whose flash was read */
+    fresh(); install(0, 50000, 7); memcpy(S.mem + LD_BOARD_OFF, "9611003610A", 12); keep();
+    ld_run(&E, &R); CHECK_EQ_I(R.action, LD_BOOT); CHECK_EQ_I(R.size, 50000);
+    fresh(); install(0, 50000, 7); memcpy(S.mem + LD_BOARD_OFF, "9610003611C", 12); keep();
+    ld_run(&E, &R); CHECK_EQ_I(R.action, LD_BOOT); CHECK_EQ_I(R.size, 50000);
     /* a flash chip the driver does not know: it stays in single-line mode,
      * our header's sector is erased with plain commands, nothing else */
     fresh(); install(1, 50000, 7); E.fdt = fdt_b; S.id[0] = 0xC8; S.id[1] = 0x40; keep();

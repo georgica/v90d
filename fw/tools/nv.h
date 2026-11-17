@@ -93,6 +93,7 @@ typedef struct {
     int      scheme;
     int      set;               /* NV_LOADER: the set our loader is in, 0 = A, 1 = B; else -1 */
     int      board_ok;
+    int      board_tried;       /* a unit of this board has run this firmware */
     char     board[16];
     int      env_tries;         /* v90d_tries of a saved environment, -1 if there is none */
     int      old_bootable;      /* ... and an image of ours where its boot command looks */

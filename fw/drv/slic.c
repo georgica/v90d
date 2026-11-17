@@ -209,6 +209,21 @@ void slic_shutdown(const ps_bus *b)
     ps_ram_wr(b, R_PD_DCDC, DCDC_OFF);
 }
 
+int slic_present(const ps_bus *b)
+{
+    uint8_t id = ps_rd(b, PS_ID), was;
+    int ok;
+
+    if (id == 0xFF || !(id & 0x80) || ps_rd(b, PS_ID) != id) return 0;
+    /* an identity alone can be a floating bus: a part also keeps what is
+     * written to it */
+    was = ps_rd(b, PS_PCMRXLO);
+    ps_wr(b, PS_PCMRXLO, 0x5A); ok = ps_rd(b, PS_PCMRXLO) == 0x5A;
+    ps_wr(b, PS_PCMRXLO, 0xA5); ok = ok && ps_rd(b, PS_PCMRXLO) == 0xA5;
+    ps_wr(b, PS_PCMRXLO, was);
+    return ok;
+}
+
 int slic_init(const ps_bus *b, const slic_cfg *cfg, slic_info *info)
 {
     uint32_t w; int r;

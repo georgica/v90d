@@ -34,6 +34,10 @@ typedef struct {
     long    vbat_mv;            /* battery voltage when it returned */
 } slic_info;
 
+/* 1 if a ProSLIC answers on this chip select (out of reset 250 ms or more),
+ * 0 if nothing does: the second port of a one-port board. Changes nothing
+ * in the part. */
+int  slic_present(const ps_bus *b);
 int  slic_init(const ps_bus *b, const slic_cfg *cfg, slic_info *info);
 int  slic_offhook(const ps_bus *b);             /* 1 off hook, 0 on hook */
 long slic_vbat_mv(const ps_bus *b);

@@ -460,6 +460,25 @@ static int slic_up(struct v90port *p)
 	return 0;
 }
 
+/* Is there a part on this port's chip select? The one-port board (HT801)
+ * is this board without its second SLIC. Three tries, so that one spoiled
+ * access does not take a port away; the part is left in reset. */
+static bool port_there(struct v90port *p)
+{
+	int i, r = 0;
+
+	for (i = 0; i < 3 && !r; i++) {
+		gpiod_set_raw_value(p->l->rst[p->idx], 0);
+		msleep(10);
+		gpiod_set_raw_value(p->l->rst[p->idx], 1);
+		msleep(250);
+		p->spi_phase = 0;
+		r = slic_present(&p->bus);
+	}
+	gpiod_set_raw_value(p->l->rst[p->idx], 0);
+	return r;
+}
+
 static int line_thread(void *data)
 {
 	struct v90port *p = data;
@@ -785,6 +804,10 @@ static int line_probe(struct platform_device *pdev)
 	for (i = 0; i < PORTS; i++) {
 		struct v90port *p = &l->port[i];
 
+		if (i && !port_there(p)) {
+			dev_info(dev, "port %d: no SLIC answers, this is a one-port board\n", i + 1);
+			continue;
+		}
 		p->misc.minor = MISC_DYNAMIC_MINOR;
 		p->misc.name = i ? "v90line2" : "v90line";
 		p->misc.fops = &line_fops;
@@ -804,6 +827,8 @@ static int line_probe(struct platform_device *pdev)
 	return 0;
 undo:
 	while (i-- > 0) {
+		if (!l->port[i].thr)
+			continue;
 		kthread_stop(l->port[i].thr);
 		l->port[i].thr = NULL;
 		misc_deregister(&l->port[i].misc);

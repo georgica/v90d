@@ -247,6 +247,7 @@ class Where(unittest.TestCase):
             self.assertEqual(w['image_name'], 'v90d ht802 0.1.0')
             self.assertEqual(w['stock'], 'AB'[1 - s] + ' good')
             self.assertEqual(w['board'], '9610003725A known')
+            self.assertEqual(w['tried'], 'yes')
             self.assertEqual(w['unconfirmed'], '0')
             self.assertEqual(b.get(), loader_flash(s))  # looking writes nothing
 
@@ -505,6 +506,14 @@ class Upgrade(unittest.TestCase):
             self.assertEqual(b.nv('check', b.file('x', release(NEW_SYS)))[0], 0)
             self.assertEqual(b.get(), make())
 
+    def test_one_port_board_is_known_but_not_tried(self):
+        for pn in (b'9611003610A\0', b'9610003611C\0'):
+            f = bytearray(loader_flash(0))
+            f[0x4020:0x4020 + 12] = pn
+            w = Box(self, bytes(f)).where()
+            self.assertEqual(w['board'], pn[:-1].decode() + ' known')
+            self.assertEqual(w['tried'], 'no')
+
     def test_refused_on_another_board(self):
         f = bytearray(loader_flash(0))
         f[0x4020:0x4020 + 12] = b'9610003703A\0'
@@ -514,6 +523,7 @@ class Upgrade(unittest.TestCase):
         self.assertIn('board', out)
         self.assertEqual(b.get(), bytes(f))
         self.assertIn('not known', b.where()['board'])
+        self.assertEqual(b.where()['tried'], 'no')
 
     def test_refused_while_the_set_is_half_installed(self):
         # power was lost while the stock upgrade wrote our file: core is

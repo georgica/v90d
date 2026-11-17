@@ -90,7 +90,7 @@ int nv_locate(nvflash *f, nv_where *w, int deep)
     if (nf_read(f, LD_BOARD_OFF, b, sizeof b) != NV_OK) return NV_E_IO;
     for (i = 0; i < 15 && b[i] >= 0x21 && b[i] <= 0x7E; i++) w->board[i] = (char)b[i];
     for (k = 0; k < sizeof boards / sizeof boards[0]; k++)
-        if (b[i < 16 ? i : 15] == 0 && !strcmp(w->board, boards[k])) w->board_ok = 1;
+        if (b[i < 16 ? i : 15] == 0 && !strcmp(w->board, boards[k])) { w->board_ok = 1; w->board_tried = k < LD_BOARDS_TRIED; }
 
     tag[0] = has_loader(f, LD_CORE_A, &counter[0]);
     tag[1] = has_loader(f, LD_CORE_B, &counter[1]);
@@ -146,6 +146,7 @@ void nv_print_where(const nv_where *w, const char *version)
     if (version) printf("version=%s\n", version);
     printf("scheme=%s\nset=%s\n", scheme[w->scheme], w->set < 0 ? "-" : w->set ? "B" : "A");
     printf("board=%s %s\n", w->board[0] ? w->board : "?", w->board_ok ? "known" : "not known");
+    printf("tried=%s\n", w->board_tried ? "yes" : "no");
     if (w->scheme == NV_LOADER) {
         printf("core=0x%06lx\nstate=0x%06lx\nunconfirmed=%d\n", (unsigned long)w->core, (unsigned long)w->state, w->loader_tries);
         printf("installed=%s\n", w->set_whole ? "whole" : "half");

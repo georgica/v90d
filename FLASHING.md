@@ -54,12 +54,17 @@ are kept.
 - **The power went during the install or an upgrade.** The box starts the
   stock firmware (an incomplete copy is never started). Upload the file
   again.
-- **A different board revision, or an HT801.** The loader knows the board it
-  was tried on by its part number. On any other it does not start v90d and
-  gives the box back to the stock firmware, so trying is safe. The HT801 and
-  other HT802 revisions are expected to work but are not listed yet; see
-  [BOARDS.md](BOARDS.md). Please open an issue with the part number printed
-  on the label.
+- **An HT801.** Two HT801 revisions (part numbers 9611003610A and
+  9610003611C) are accepted, from what their flash contents say, but no
+  unit has run v90d yet. On such a board a start only counts as good once
+  the box has also received something on its network port. So plug the
+  network cable in before the power: if the network does not work under
+  v90d, or no cable is in for three starts in a row, the box goes back to
+  the stock firmware by itself. Please open an issue and say how it went.
+- **A different board revision.** The loader knows boards by their part
+  number. On any other it does not start v90d and gives the box back to the
+  stock firmware, so trying is safe. See [BOARDS.md](BOARDS.md), and please
+  open an issue with the part number printed on the label.
 
 No serial cable should be needed for any of this. The pulled-power cases
 have been tested against models of the box's boot loader, not yet by pulling

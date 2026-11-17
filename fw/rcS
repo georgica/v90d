@@ -52,6 +52,7 @@ CONF=/tmp/v90d.conf
 # the settings (confpack.sh) and lives next to them while the box runs
 VPN=/tmp/v90d.vpn
 . /etc/confpack.sh
+. /etc/startgood.sh
 if [ "$SCHEME" != none ] && v90nv conf-load $CONF; then
     conf_split
     say "settings from flash"
@@ -114,7 +115,8 @@ fi
 # port 1 and port 2
 LINE=${V90D_LINE:-dev:/dev/v90line}
 LINE2=${V90D_LINE2:-dev:/dev/v90line2}
-say "starting the daemon on $LINE and $LINE2"
+if [ -c "${LINE2#dev:}" ]; then say "starting the daemon on $LINE and $LINE2"
+else say "starting the daemon on $LINE (a one-port box)"; fi
 
 # bring-up: "v90d.nodaemon" on the kernel command line leaves the line alone
 grep -q v90d.nodaemon /proc/cmdline && { say "no daemon, as asked"; exit 0; }
@@ -131,7 +133,11 @@ if [ -z "$NOFLASH" ]; then
     # script, or our loader) and gives the box back to the stock firmware
     # after three that nobody confirmed. Up for a minute with the daemon
     # alive: this start was a good one.
+    # On a board no unit has run yet, the network must have been heard as
+    # well (startgood.sh): a box nobody can reach must not stay ours.
     ( sleep 60
+        start_good $WHERE $LAN || say "start not confirmed yet: nothing heard on $LAN, and this board is new to this firmware"
+        until start_good $WHERE $LAN; do sleep 5; done
         pidof v90d >/dev/null || exit 0
         v90nv confirm >/dev/null 2>&1 && say "start confirmed"
         where ) &

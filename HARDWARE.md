@@ -753,6 +753,26 @@ left alone.
   as its hardware check. The rest of `factory` holds per-unit data and is
   not described here on purpose.
 
+## The HT801 (from public flash dumps, no unit here)
+- Two HT801 dumps (crvallance/Grandstream-hax; a raw chip read has each
+  32-bit word byte-swapped against what the CPU sees): part numbers
+  9611003610A (V1.0A) and 9610003611C (V1.1C). Same partition map as above.
+- Device tree at flash 0x8000: both identical, and equal to this HT802's
+  except for the second SLIC (one entry in `current_cs_gpio` and `int-gpio`,
+  no second SPI slave with its reset line).
+- Factory records (from factory 0x56 on: tag, count of 16-bit words, value,
+  all little-endian):
+  tags 0x0BC9 to 0x0BD3 hold the SLIC description in the order of the
+  `hw_features` names. HT802: 1,0,2,0,1,2,1,0,0,0,3. HT801: the same with
+  0x0BCE (number of SLIC devices) 1 instead of 2 and 0x0BCF 2 instead of 1.
+  Converter type (0x0BCB = 2) and protection (0x0BCD = 1) are equal. Tag
+  0x03E8 is 9 on the HT802 and 6 on both HT801s; meaning not known.
+  No other record differs between this HT802 and the V1.1C HT801 besides
+  the model name, so nothing in the factory data sets the Ethernet apart.
+- Not readable from a dump: the SLIC's revision and which Ethernet PHY is
+  fitted (the device tree says RMII with a fixed link on all three; the
+  stock kernel reads the PHY's identity at run time).
+
 ## RECOVERY (tested)
 - **Full 16 MiB flash backup taken and verified**: all 15 partitions md5-match
   the box, in `~/v90d/recon/backup/` (`flash_all.bin` + `mtd_<name>.bin`,

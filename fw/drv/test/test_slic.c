@@ -116,6 +116,21 @@ static void test_wrong_part(void)
     CHECK(C.frames < 40);
 }
 
+/* an empty footprint: the bus floats and reads whatever it was left at */
+static void floats(chipsim *c, uint8_t reg, uint8_t v) { (void)v; c->reg[reg] = 0xB2; }
+static void test_present(void)
+{
+    fresh(); CHECK_EQ_I(slic_present(&B), 1);
+    CHECK_EQ_I(C.reg[14], 0);                       /* the register it tried is left as it was */
+    CHECK_EQ_I((long)C.ram[1538], 0x900000); CHECK_EQ_I(M.linefeed_at_start, -1); CHECK_EQ_I(C.bad, 0);
+    fresh(); C.reg[0] = 0xB1; CHECK_EQ_I(slic_present(&B), 1);    /* rev B is a part too */
+    fresh(); C.reg[0] = 0xFF; CHECK_EQ_I(slic_present(&B), 0);
+    fresh(); C.reg[0] = 0x00; CHECK_EQ_I(slic_present(&B), 0);
+    fresh(); C.reg[0] = 0x32; CHECK_EQ_I(slic_present(&B), 0);    /* not a ProSLIC */
+    /* something that reads like an identity but keeps nothing written to it */
+    fresh(); C.reg[14] = 0xB2; C.on_write = floats; CHECK_EQ_I(slic_present(&B), 0);
+}
+
 static void test_dead_ram(void)
 {
     slic_info i;
@@ -211,6 +226,7 @@ int main(void)
     test_healthy();
     test_companded_second_port();
     test_wrong_part();
+    test_present();
     test_dead_ram();
     test_short_circuit();
     test_battery_never_up();
