@@ -2250,3 +2250,55 @@ telnet. On it, the 1998 U.S. Robotics on PHONE 2: V.90 54666 / 28800
 twice, once dialled as `16387825442`. The Conexant and the 5686 were not
 attached for this last check; they were tested on the same sources in the
 bench build (above).
+
+## 2026-11-16: one copy of the echo delay measurement and of the tone watch
+
+No change in what the modem does; the aim was that a correction is made
+once.
+
+- `modem/ecdly.[ch]`: the history of what was sent and the echo delay
+  measurement, out of `modem/p34d.c`, `v92/v92_p34d.c` and `modem/v34dx.c`,
+  which each had a copy (the 5686's correction earlier that day went into
+  two of them by hand). `modem/tonedet.[ch]`: the retrain tone watch, out
+  of the same three.
+- Checked three ways. The engines' own tests as before (p34: 372 checks,
+  v34dx: 690, v34call: 296, v92call: 1054, answer_v92: 231, all 0
+  failures). A test of the two modules alone, `test_ecdly`: 1019 checks, 0
+  failures; with the search's index and the tone threshold spoiled on
+  purpose it gave 6 failures. And 13 recordings of real calls (Conexant,
+  5686 and the 1998 U.S. Robotics; V.34, V.90 and V.92), each replayed
+  with both port settings before and after: 26 outputs, all identical
+  octet for octet.
+- `test/test_p34.c`: the mid-call events (renegotiation, cleardown, the
+  line getting worse) are now timed from the moment data mode is reached,
+  not from the start of the run. With TRN2d made a second longer for a
+  trial (2600 data frames, data mode at 4.00 s instead of 2.95) the test
+  still gives 372 checks, 0 failures; the day before, 0.6 s more had
+  broken three of its checks. Two thresholds went down by under 2 % with
+  the run 50 ms shorter (270000 to 265000 and 300000 to 295000 bits).
+- Bulletin board calls: an entry or a name that leads to one of the box's
+  own addresses, to a link-local or a multicast address is not connected
+  to (`bbsdial_is_self`; the point the review of 0.4.0 raised). Test first:
+  6 failures (the three address classes, the own address, a listener on
+  the own address that was reached), then srv: 1144 checks, 0 failures.
+
+
+### 0.4.1
+
+Host and ARM suites on these sources: "ALL HOST CHECKS PASS", "ALL ARM
+CHECKS PASS" (run before the version number was set; only `fw/VERSION` and
+this file changed after). `make -C fw release`, `make -C fw test-release`
+as 0.4.1: 11 tests OK, loader: 129 checks, 0 failures. The image
+(`v90d-ht802fw.bin`, SHA-256 4d7371d3...41a6ca68) uploaded on the unit's
+Firmware page over 0.4.0: back after about 100 s as 0.4.1, starts not
+confirmed 0, no telnet. On it, the 1998 U.S. Robotics on PHONE 2:
+
+| call | result |
+|---|---|
+| as it comes | `CONNECT 54666/ARQ/V90`, the box's list: V.90, 56000 / 28800 |
+| `ATS32=66` (no V.90, no x2) | `CONNECT 31200/ARQ/V34/LAPM/V42`, the list: V.34, 31200 / 31200 |
+| 227 835 3422 | V.90, "Calling Telehack ...", Telehack's greeting and prompt |
+
+Not tried on this image: V.92 (neither the 5686 nor the Conexant was
+attached; the V.92 engine's part of the change is covered by its tests and
+by the replayed recordings above).

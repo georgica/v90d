@@ -185,7 +185,7 @@ int main(void)
     lc = base; lc.echo_a = 0.8; lc.io_delay = 96;
     ac.io_delay = -1;
     good_call("strong echo, own delay unknown", &lc, &ac, &pc, 5, 21600, 0);
-    CHECK(A.m.dx.echo_delay >= 80 && A.m.dx.echo_delay <= 97);
+    CHECK(A.m.dx.ecd.delay >= 80 && A.m.dx.ecd.delay <= 97);
     lc = base; lc.d_ca = 200; lc.d_ac = 240; lc.far_a = 0.1; lc.io_delay = 96;
     good_call("far echo 55 ms late, same", &lc, &ac, &pc, 5, 21600, 0);
     CHECK_EQ_I(A.m.dx.far_on, 1);

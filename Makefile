@@ -15,14 +15,14 @@ SIM_SRC := sim/g711.c sim/noise.c sim/filt.c sim/resamp.c sim/channel.c sim/v8ca
            sim/p2c.c sim/v34peer.c sim/v32call.c sim/v32line.c sim/v92chan.c sim/v92a.c sim/v92call.c
 MODEM_SRC := modem/v21.c modem/ansam.c modem/v8msg.c modem/async.c modem/v8rx.c modem/v8ans.c \
              modem/scramble.c modem/v22tx.c modem/v22rx.c modem/v22bis.c modem/v14.c modem/answer.c \
-             modem/info.c modem/dpsk.c modem/probe.c modem/p2d.c modem/qamrx.c modem/ec.c modem/v34train.c modem/p34d.c modem/pcmenc.c \
+             modem/info.c modem/dpsk.c modem/probe.c modem/p2d.c modem/qamrx.c modem/ec.c modem/ecdly.c modem/tonedet.c modem/v34train.c modem/p34d.c modem/pcmenc.c \
              modem/v34mp.c modem/p2ans.c modem/v34mod.c modem/v34dx.c modem/v34ans.c \
              $(wildcard v90/*.c) $(wildcard v34/*.c) $(wildcard v32/*.c) $(wildcard v92/*.c)
 RIG_SRC := rig/modemterm.c
 LIB_SRC := $(SIM_SRC) $(MODEM_SRC) $(RIG_SRC)
 HDRS    := $(wildcard modem/*.h sim/*.h rig/*.h test/*.h v90/*.h v34/*.h v92/*.h v90/test/v90_dec.h)
 TESTS   := test_g711 test_noise test_filt test_resamp test_channel test_v21 test_ansam test_v8msg test_v8rx test_v8ans \
-           test_v22tx test_v22rx test_v22bis test_v14 test_answer test_modemterm test_info test_dpsk test_probe test_p2 test_qamrx test_ec test_v34train test_sres test_answer_v90 test_p34 test_pcmenc \
+           test_v22tx test_v22rx test_v22bis test_v14 test_answer test_modemterm test_info test_dpsk test_probe test_p2 test_qamrx test_ec test_ecdly test_v34train test_sres test_answer_v90 test_p34 test_pcmenc \
            test_v34mp test_p2ans test_v34mod test_v34dx test_v34call test_answer_v34 test_answer_v32 test_answer_v90_v34 \
            test_p2_v92 test_v92call test_answer_v92 test_v92real test_answer_lin
 

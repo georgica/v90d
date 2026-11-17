@@ -237,6 +237,18 @@ tone-pair detector), and Tone A (the share of each 10 ms block's power at
 2400 Hz; the data signal leaves a few per cent there, Tone A with its guard
 tone 80 %).
 
+Two pieces are shared by the three engines that have a line echo to deal
+with (`p34d`, `v92/v92_p34d`, `v34dx`), each in one place:
+`modem/ecdly` keeps what was sent for the canceller's delayed reference and
+measures how late the echo comes back (on plain samples for V.34, on the
+change from sample to sample for V.90 and V.92, see above on the 5686), and
+`modem/tonedet` is the watch for the retrain tones (Tone A at 2400 Hz, Tone
+B at 1200 Hz). Each engine once had its own copy, and a correction had to
+be made three times. What the engines do with the result stays with
+them: the length of TRN2d, for one, differs on purpose (1200 data frames in
+V.90 for the 1998 U.S. Robotics, 400 in V.92, which that modem does not
+speak).
+
 - S starts a rate renegotiation: `sres` follows S to its S-bar with the
   carrier already locked (`sres_resume`), the 4-point sequence receiver takes
   the CP, the transmitter sends Rd (384 T from a data frame boundary), Rd-bar,
@@ -470,8 +482,13 @@ front. A port whose own number looks like one of them keeps its number.
   page.
 - What a list can name is checked: a host is letters, digits, `.` and `-`,
   never begins with `-`, and is not the box itself (`localhost`, numeric
-  addresses in 127/8 and 0/8), and a name that resolves there is not
-  connected to (`bbsdial.c`).
+  addresses in 127/8 and 0/8). What a name resolves to is checked again
+  before the connection (`bbsdial_is_self`): 127/8, 0/8, the address of any
+  of the box's own interfaces (found by asking the kernel which address it
+  would send from towards it; nothing goes out), link-local 169.254/16,
+  multicast and broadcast are not connected to. The rest of the local
+  network is: a board may stand beside the box, and a dial-up caller
+  reaches the local network anyway.
   The host is looked at once more before it becomes an argument, and the
   fetched file is created anew, never through a link.
 

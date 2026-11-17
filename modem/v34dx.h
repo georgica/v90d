@@ -25,6 +25,8 @@
 #include <stdint.h>
 #include "qamrx.h"
 #include "ec.h"
+#include "ecdly.h"
+#include "tonedet.h"
 #include "v34train.h"
 #include "v34mod.h"
 #include "v34mp.h"
@@ -95,9 +97,7 @@ enum {
 /* transmit signals, for tx_count[] / tx_first[] */
 enum { DXS_SIL, DXS_S, DXS_SBAR, DXS_PP, DXS_TRN, DXS_J, DXS_JP, DXS_TRN4, DXS_MP, DXS_E, DXS_DATA, DXS_N };
 
-#define DX_ECDL 4096        /* history of what we sent, a power of two */
-#define DX_EC_MAXLAG 1280   /* longest own-path delay the search covers: 160 ms */
-#define DX_EC_WIN 256
+#define DX_MAX_ECHO_DELAY 3839  /* the longest own-path delay that can be given */
 #define DX_FBUF 256
 
 typedef struct {
@@ -126,9 +126,7 @@ typedef struct {
     /* ---- echo ---- */
     ec_t        ec, fec;            /* near; far (round trip later), when far_on */
     int         ec_mu, far_on;
-    int16_t     ecdl[DX_ECDL]; int ecpos;
-    int         echo_delay;
-    int16_t     ecwin[DX_EC_WIN]; int ecw_n, ecs_pos, ecs_lag; int64_t ecs_best; int ecs_best_lag;
+    ecdly_t     ecd;                /* what we sent; ecd.delay is our own path's delay in use */
     int32_t     trn_t;              /* samples of Phase 3 TRN sent */
     int32_t     pw_in, pw_res;      /* smoothed power into and out of the cancellers */
     /* ---- receive ---- */
@@ -161,7 +159,7 @@ typedef struct {
                                        bit asked of getbit / given to putbit after each is
                                        the first bit of that stretch of data */
     /* the far modem's retrain tone, 10 ms blocks */
-    uint32_t    tn_ph, tn_dph; int64_t tn_re, tn_im, tn_pw; int tn_n, tn_blocks;
+    tonedet_t   tone;               /* the far modem's retrain tone */
     int32_t     mse_limit, q_bad, q_dead;
     int         rate_drops;
 } v34dx_t;

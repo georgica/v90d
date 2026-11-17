@@ -5,7 +5,6 @@
 #include <string.h>
 #include "p34d.h"
 #include "probe.h"
-#include "sintab.h"
 #include "../v90/v90_pcm.h"
 
 #define MS(ms) ((int32_t)(ms) * 8)
@@ -79,6 +78,7 @@ int p34d_init(p34d_t *p, const p34d_cfg *cfg)
     p->state = P34_WAIT_S;
     r = v90tx_init(&p->tx, cfg->alaw, cfg->uinfo);
     ec_init(&p->ec); p->ec_mu = -1;
+    tonedet_init(&p->tone_a, TONEDET_2400);
     sdet_init(&p->sdet, cfg->sym_rate, cfg->car_num, cfg->car_den);
     qamrx_init(&p->rx, cfg->sym_rate, cfg->car_num, cfg->car_den);
     v34trn_init(&p->ref, V34T_GPA);
@@ -97,8 +97,8 @@ int p34d_init(p34d_t *p, const p34d_cfg *cfg)
         if (cfg->max_up_rate && rate > (unsigned)cfg->max_up_rate) break;
         if (v34_map_params((unsigned)cfg->sym_rate, rate, 0, &m) == 0) p->mp.rates |= (uint16_t)(1u << k);
     }
-    if (cfg->echo_delay >= P34_ECDL - 128) p->cfg.echo_delay = P34_ECDL - 129;
-    p->echo_delay = p->cfg.echo_delay > 0 ? p->cfg.echo_delay : 0;
+    if (cfg->echo_delay > P34_MAX_ECHO_DELAY) p->cfg.echo_delay = P34_MAX_ECHO_DELAY;
+    ecdly_init(&p->ecd, p->cfg.echo_delay);
     if (r != 0) { fail(p, P34_ERR_UINFO); return -1; }
     if (!p->mp.rates || (cfg->sym_rate != 3000 && cfg->sym_rate != 3200)) { fail(p, P34_ERR_RATE); return -1; }
     return 0;
@@ -247,28 +247,6 @@ static void retrain(p34d_t *p, int ours)
     enter(p, P34_RETRAIN);
 }
 
-/* Tone A, 2400 Hz, for more than 50 ms (9.5.1.2). Each 10 ms block: the
- * share of the block's power that sits at 2400 Hz. The caller's data signal
- * leaves a few per cent there; Tone A with its guard tone about 80 %. */
-#define TA_BLOCK   80
-#define TA_BLOCKS  6
-static int tone_a(p34d_t *p, int16_t x)
-{
-    int32_t c = sintab[((p->ta_ph >> 22) + SIN_N / 4) & SIN_MASK], s = sintab[(p->ta_ph >> 22) & SIN_MASK];
-    p->ta_ph += 0x4CCCCCCDu;                    /* 2400 / 8000 of a turn */
-    p->ta_re += (x * c) >> 15; p->ta_im += (x * s) >> 15;
-    p->ta_pw += (int32_t)x * x;
-    if (++p->ta_n < TA_BLOCK) return 0;
-    {
-        /* a tone of power P gives |sum|^2 = N^2 P / 2 */
-        int64_t m = p->ta_re * p->ta_re + p->ta_im * p->ta_im;
-        int on = p->ta_pw > (int64_t)TA_BLOCK * 400 && m * 4 > p->ta_pw * TA_BLOCK;     /* more than half */
-        p->ta_blocks = on ? p->ta_blocks + 1 : 0;
-        p->ta_n = 0; p->ta_re = p->ta_im = p->ta_pw = 0;
-    }
-    return p->ta_blocks >= TA_BLOCKS;
-}
-
 /* ---- rate renegotiation ---- */
 
 /* Rd begins on the next data frame boundary; Rd-bar and TRN2d follow by themselves */
@@ -309,43 +287,6 @@ static void s_heard(p34d_t *p)
     sres_resume(&p->sres);
     p->rxmode = RX_SRES;
     if (p->state == P34_DATA) enter(p, P34_RENEG_S);
-}
-
-/* ---- echo delay ---- */
-
-/* How late is our echo? TRN1d is white and the caller is silent, so the
- * received samples of a short window, correlated with what we sent at every
- * candidate distance before them, peak where the echo path is strongest.
- * The window holds the change from each sample to the next: a modem's line
- * transformer can return the low frequencies of TRN1d as a tail tens of
- * milliseconds long, larger in sum than the start of the echo, and on plain
- * samples that tail put the peak anywhere (U.S. Robotics 5686: found 37 ms
- * for an echo at 34, the canceller then sat beside the echo). The difference
- * takes a flat tail away and leaves the start standing.
- * A few lags per sample keep the cost of any one sample small. ecpos has
- * moved on since the snapshot; the history still holds what is needed
- * (P34_EC_MAXLAG + P34_EC_WIN + the samples the search takes < P34_ECDL). */
-#define EC_SEARCH_STEP 4
-
-static void echo_search(p34d_t *p)
-{
-    int k, i;
-    for (k = 0; k < EC_SEARCH_STEP && p->ecs_lag <= P34_EC_MAXLAG; k++, p->ecs_lag++) {
-        int64_t acc = 0;
-        /* window sample i was received when ecpos was ecs_pos - P34_EC_WIN + 1 + i;
-         * what we sent `lag` samples before it sits lag + 1 behind that write position
-         * (the sample of the same tick is stored before the canceller runs) */
-        int base = p->ecs_pos - P34_EC_WIN - p->ecs_lag;
-        for (i = 0; i < P34_EC_WIN; i++)
-            acc += (int32_t)p->ecwin[i] * p->ecdl[(base + i) & (P34_ECDL - 1)];
-        if (acc < 0) acc = -acc;
-        if (acc > p->ecs_best) { p->ecs_best = acc; p->ecs_best_lag = p->ecs_lag; }
-    }
-    if (p->ecs_lag > P34_EC_MAXLAG) {
-        /* a little room before the peak for the start of the echo path */
-        p->echo_delay = p->ecs_best_lag > 8 ? p->ecs_best_lag - 8 : 0;
-        ec_init(&p->ec);
-    }
 }
 
 /* ---- one received symbol ---- */
@@ -452,9 +393,9 @@ uint8_t p34d_tick(p34d_t *p, int16_t rxs)
     octet = v90tx_tick(&p->tx);
     /* the echo of this octet begins cfg.echo_delay samples from now: the
      * canceller is given what we sent that long ago */
-    p->ecdl[p->ecpos] = (int16_t)v90_octet_linear(p->cfg.alaw, octet);
-    x = ec_tick(&p->ec, p->ecdl[(p->ecpos - p->echo_delay) & (P34_ECDL - 1)], rxs, p->ec_mu);
-    p->ecpos = (p->ecpos + 1) & (P34_ECDL - 1);
+    ecdly_put(&p->ecd, (int16_t)v90_octet_linear(p->cfg.alaw, octet));
+    x = ec_tick(&p->ec, ecdly_ref(&p->ecd, 0), rxs, p->ec_mu);
+    ecdly_next(&p->ecd);
 #ifdef P34D_TRACE
     p34d_trace(p, rxs, x);      /* live/replay.c: what the canceller left */
 #endif
@@ -502,8 +443,8 @@ uint8_t p34d_tick(p34d_t *p, int16_t rxs)
      * MP, and went unheard until T_PHASE4_MS). Not in Phase 3, where the
      * caller's own signals are not all known to stay clear of 2400 Hz. */
     if (p->state >= P34_RI && p->state <= P34_RT) {
-        if (tone_a(p, x)) { retrain(p, 0); return octet; }
-    } else if (p->in_reneg && tone_a(p, x)) {
+        if (tonedet_tick(&p->tone_a, x)) { retrain(p, 0); return octet; }
+    } else if (p->in_reneg && tonedet_tick(&p->tone_a, x)) {
         retrain(p, 0); return octet;
     }
 
@@ -520,19 +461,10 @@ uint8_t p34d_tick(p34d_t *p, int16_t rxs)
             int32_t len = TRN1D_SYMS;
             if (n == 1) p->t_trn1d = p->now;
             if (p->cfg.echo_delay < 0) {
-                /* first find out how late the echo is (see echo_search) */
-                int32_t snap = from + P34_EC_MAXLAG + P34_EC_WIN;
-                if ((int32_t)n == snap - P34_EC_WIN) p->ecw_last = rxs;
-                else if ((int32_t)n > snap - P34_EC_WIN && (int32_t)n <= snap) {
-                    /* the change from sample to sample, not the sample: see echo_search */
-                    int32_t dv = (int32_t)rxs - p->ecw_last;
-                    p->ecw_last = rxs;
-                    p->ecwin[p->ecw_n++] = (int16_t)(dv > 32767 ? 32767 : dv < -32768 ? -32768 : dv);
-                    if ((int32_t)n == snap) { p->ecs_pos = p->ecpos; p->ecs_lag = 0; p->ecs_best = -1; }
-                } else if ((int32_t)n > snap && p->ecs_lag <= P34_EC_MAXLAG) {
-                    echo_search(p);
-                }
-                from = snap + P34_EC_MAXLAG / EC_SEARCH_STEP + 2;
+                /* first find out how late the echo is (ecdly.h), on the change
+                 * from sample to sample */
+                if (ecdly_measure(&p->ecd, (int32_t)n - from, rxs, 1)) ec_init(&p->ec);
+                from += ECDLY_SAMPLES;
                 len += from;
             }
             /* the caller is silent now: learn the echo of TRN1d */

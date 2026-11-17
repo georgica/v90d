@@ -21,6 +21,8 @@
 #include <stdint.h>
 #include "qamrx.h"
 #include "ec.h"
+#include "ecdly.h"
+#include "tonedet.h"
 #include "v34train.h"
 #include "../v90/v90_tx.h"
 #include "../v34/v34.h"
@@ -36,9 +38,9 @@ typedef struct {
     int md_len;             /* INFO1a bits 18:24, units of 35 ms */
     int rtd;                /* round-trip delay from Phase 2, samples */
     int echo_delay;         /* samples from handing an octet to the line until its echo
-                               starts to come back (driver buffering), 0..P34_ECDL - 1;
+                               starts to come back (driver buffering), 0..P34_MAX_ECHO_DELAY;
                                the canceller covers the 12 ms after that. -1 = not
-                               known: measured during TRN1d, up to P34_EC_MAXLAG */
+                               known: measured during TRN1d (ecdly.h) */
     uint32_t down_rates;    /* Jd: downstream rates allowed, bit r = (r + 21) * 8000 / 6 bit/s; 0 = all */
     int max_up_rate;        /* upstream ceiling in bit/s; 0 = what the line gives */
     p34d_getbit_fn getbit;  /* data to send */
@@ -83,9 +85,7 @@ enum {
     P34_ERR_HANGUP      /* we cleared down (p34d_cleardown) */
 } ;
 
-#define P34_ECDL 2048       /* history of what we sent, a power of two */
-#define P34_EC_MAXLAG 1280  /* longest echo delay the search covers: 160 ms */
-#define P34_EC_WIN 256      /* received samples the search correlates */
+#define P34_MAX_ECHO_DELAY 1919  /* the longest echo delay that can be given */
 #define P34_FBUF 2720       /* longest sequence (DIL descriptor) plus a next frame sync */
 
 typedef struct {
@@ -101,13 +101,8 @@ typedef struct {
     /* receive */
     ec_t       ec;
     int        ec_mu;
-    int16_t    ecdl[P34_ECDL]; int ecpos;   /* what we sent, for the delayed echo reference */
-    int        echo_delay;          /* in use: cfg.echo_delay or the measured one */
-    int16_t    ecwin[P34_EC_WIN];   /* echo delay search: received samples (each less the one before), newest last */
-    int16_t    ecw_last;            /* the sample before, while the window fills */
-    int        ecw_n;               /* samples collected, P34_EC_WIN = snapshot taken */
-    int        ecs_pos, ecs_lag;    /* ecpos at the snapshot; next lag to try */
-    int64_t    ecs_best; int ecs_best_lag;
+    ecdly_t    ecd;                 /* what we sent, for the delayed echo reference; ecd.delay
+                                       is the echo delay in use, given or measured */
     sdet_t     sdet;
     qamrx_t    rx;
     int        rxmode;
@@ -137,8 +132,7 @@ typedef struct {
     int        down_rate, up_rate;  /* bit/s */
     int        in_reneg;            /* a rate renegotiation is under way */
     int        clearing;            /* ... of ours, to send MP with drn = 0 */
-    /* Tone A (2400 Hz) watch, 10 ms blocks */
-    uint32_t   ta_ph; int64_t ta_re, ta_im, ta_pw; int ta_n, ta_blocks;
+    tonedet_t  tone_a;              /* Tone A (2400 Hz) watch */
     int        retrain_ours;        /* P34_RETRAIN: we asked for it */
     /* is the line still good enough for the upstream rate? */
     int32_t    mse_limit;           /* receiver error above which it is not */

@@ -156,7 +156,7 @@ int main(void)
     CHECK_EQ_I(A.rx_bitrate, C.va.up_rate);
     CHECK_EQ_I(A.retrains, 0);
     /* the echo delay was measured (the line has 21 samples) */
-    CHECK(A.u.v92.echo_delay >= 21 - 12 && A.u.v92.echo_delay <= 21 + 2);
+    CHECK(A.u.v92.ecd.delay >= 21 - 12 && A.u.v92.ecd.delay <= 21 + 2);
     data_ok("V.92 caller", ANS_MOD_V92);
     CHECK(answer_snr_db10(&A) >= 250 && answer_snr_db10(&A) <= 600);
     CHECK(answer_rtd(&A) >= 0 && answer_rtd(&A) < 80);
@@ -205,7 +205,7 @@ int main(void)
     start(&s);
     CHECK_EQ_I(to_data(30000), 1); failed_why();
     CHECK_EQ_I(A.modulation, ANS_MOD_V92);
-    CHECK_EQ_I(A.u.v92.echo_delay, 21);
+    CHECK_EQ_I(A.u.v92.ecd.delay, 21);
     CHECK_EQ_I(A.bitrate, 50666); CHECK(A.rx_bitrate >= 24000 && A.rx_bitrate <= 48000);
     data_ok("V.92 caller, A-law, DIL, long line", ANS_MOD_V92);
     CHECK_EQ_I(A.u.v92.dec.bad_frames, 0);

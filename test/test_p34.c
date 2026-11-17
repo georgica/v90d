@@ -11,6 +11,7 @@
 #include "../v90/v90_pcm.h"
 
 #define MAXD 2048
+#define START_MAX_S 30    /* a start-up that never gets to data mode ends a run with mid-call events */
 
 typedef struct { uint32_t s; long n, bad; } prbs_t;
 static int prbs_next(prbs_t *p) { p->s = p->s * 1103515245u + 12345u; return (int)((p->s >> 16) & 1); }
@@ -23,13 +24,15 @@ typedef struct {
     double ppm, gain, snr_db, echo, rot;
     int d_down, d_up;
     int dil_n, scr_in_dil, scr_syms, sr_d, ld_d, alaw;
-    int seconds;
+    int seconds;            /* length of the run; with one of the mid-call events below: from the
+                               moment the digital modem first reaches data mode */
     int echo_auto;          /* let the modem measure the echo delay */
     int echo_bulk;          /* extra delay of the echo path, samples (a line driver's buffering) */
     int echo_spread;        /* the echo path is a weak, smeared one with a long tail instead of one tap and a
                                small second one */
     int nseed;              /* another noise sequence */
-    /* rate renegotiation and cleardown, ms into the run (0 = never) */
+    /* rate renegotiation and cleardown, ms after data mode was first reached (0 = never):
+     * how long the start-up takes is then no business of these scenarios */
     int snr2_ms; double snr2_db;                /* the line noise changes in mid-call */
     int a_reneg_sil;                            /* ... with a request for silence (CPs) */
     int a_reneg_ms, a_reneg_kd, a_reneg_scr;    /* the caller asks, optionally for a new K, with SCR before CP */
@@ -51,6 +54,7 @@ typedef struct {
     long up_bad_before;     /* upstream errors until 100 ms before it */
     long up_bits2, up_bad2; /* upstream after it */
     int d_data2_at;         /* sample at which the digital modem was back in data mode */
+    int ev_at;              /* sample at which the mid-call event came */
     int d_end_at;           /* sample at which it gave up */
     int silent_after_end;   /* it sent only silence from then on */
     int req_rc;
@@ -67,6 +71,7 @@ static void run(const scen_t *s, out_t *o)
     double nrms = s->snr_db > 0 ? s->gain / pow(10.0, s->snr_db / 20.0) : 0;
     uint8_t oct = v90_pcm_octet(s->alaw, 0, 1);
     int i, k, a_starts = 0, d_rx = 0, d_was = 0;
+    const int first = s->a_reneg_ms ? s->a_reneg_ms : s->a_clear_ms ? s->a_clear_ms : s->d_reneg_ms ? s->d_reneg_ms : s->d_clear_ms ? s->d_clear_ms : s->snr2_ms;
     long sink0_n = 0, sink0_bad = 0;
 
     memset(&dc, 0, sizeof dc); memset(&ac, 0, sizeof ac);
@@ -91,7 +96,8 @@ static void run(const scen_t *s, out_t *o)
 
     rng_seed(&rng, 99 + (uint32_t)s->nseed);
     memset(o, 0, sizeof *o); o->d_data_at = -1; o->a = &a; o->d = &d;
-    for (i = 0; i < s->seconds * 8000; i++) {
+    for (i = 0; ; i++) {
+        if (i >= (!first ? s->seconds * 8000 : o->d_data_at < 0 ? START_MAX_S * 8000 : o->d_data_at + s->seconds * 8000)) break;
         double rx;
         if (s->echo_spread) {
             /* as measured: a start that changes sign from sample to sample, then a long flat tail
@@ -105,7 +111,7 @@ static void run(const scen_t *s, out_t *o)
            + 0.3 * s->echo * dl_e[(i - 14 - s->echo_bulk + MAXD) % MAXD] + nrms * rng_gauss(&rng);
         if (rx > 32767) rx = 32767;
         if (rx < -32768) rx = -32768;
-        if (s->snr2_ms && i == s->snr2_ms * 8) nrms = s->gain / pow(10.0, s->snr2_db / 20.0);
+        if (s->snr2_ms && o->d_data_at >= 0 && i == o->d_data_at + s->snr2_ms * 8) nrms = s->gain / pow(10.0, s->snr2_db / 20.0);
         oct = p34d_tick(&d, (int16_t)floor(rx + 0.5));
         dl_o[i % MAXD] = oct; dl_e[i % MAXD] = (int16_t)v90_octet_linear(s->alaw, oct);
         dl_u[i % MAXD] = p34a_tick(&a, dl_o[(i - s->d_down + MAXD) % MAXD]);
@@ -124,8 +130,9 @@ static void run(const scen_t *s, out_t *o)
         if (o->d_data_at < 0 && d.state == P34_DATA) o->d_data_at = i;
         if (o->d_data_at >= 0 && i > o->d_data_at + 8000 && d.rx.mse > o->worst_mse) o->worst_mse = d.rx.mse;
         {
-            int ms = i / 8, ev = (i % 8) == 0;
-            int first = s->a_reneg_ms ? s->a_reneg_ms : s->a_clear_ms ? s->a_clear_ms : s->d_reneg_ms ? s->d_reneg_ms : s->d_clear_ms ? s->d_clear_ms : s->snr2_ms;
+            /* milliseconds of data mode, and the first sample of each */
+            int ms = o->d_data_at < 0 ? -1 : (i - o->d_data_at) / 8, ev = ms >= 0 && ((i - o->d_data_at) % 8) == 0;
+            if (ev && first && ms == first) o->ev_at = i;
             if (ev && s->a_reneg_ms && ms == s->a_reneg_ms) { a.reneg_scr = s->a_reneg_scr; a.reneg_silence = s->a_reneg_sil; o->req_rc = p34a_renegotiate(&a, s->a_reneg_kd, 0); }
             if (ev && s->a_clear_ms && ms == s->a_clear_ms) o->req_rc = p34a_renegotiate(&a, 0, 1);
             if (ev && s->d_reneg_ms && ms == s->d_reneg_ms) o->req_rc = p34d_renegotiate(&d);
@@ -149,7 +156,7 @@ static void run(const scen_t *s, out_t *o)
         }
     }
     o->up_bits2 = dio.sink.n - sink0_n; o->up_bad2 = dio.sink.bad - sink0_bad;
-    o->echo_delay = d.echo_delay;
+    o->echo_delay = d.ecd.delay;
     o->state = d.state; o->error = d.error; o->a_tx = a.tx_ready; o->a_rx = a.rx_ready;
     o->up_rate = d.up_rate; o->down_rate = d.down_rate; o->snr_db10 = d.snr_db10;
     o->up_bits = dio.sink.n; o->up_bad = dio.sink.bad; o->down_bits = aio.sink.n; o->down_bad = aio.sink.bad;
@@ -271,23 +278,23 @@ int main(void)
 
     /* ---- rate renegotiation (9.6) and cleardown (9.7) ---- */
     memset(&s, 0, sizeof s);
-    s.rate = 3200; s.cn = 3; s.cd = 5; s.gain = 2000; s.d_down = 20; s.d_up = 24; s.seconds = 9;
+    s.rate = 3200; s.cn = 3; s.cd = 5; s.gain = 2000; s.d_down = 20; s.d_up = 24; s.seconds = 6;
     s.snr_db = 45; s.echo = 0.1; s.ppm = 30; s.dil_n = 6;
 
     /* 8. the caller renegotiates and asks for a lower downstream rate */
-    s.a_reneg_ms = 4000; s.a_reneg_kd = 30;
+    s.a_reneg_ms = 1000; s.a_reneg_kd = 30;
     run(&s, &o); report("caller renegotiates, K 32 -> 30", &s, &o);
     printf("    back in data mode %.0f ms after the request; peer saw Rd %d + %d units (%d bad); up after: %ld bits, %ld bad\n",
-           (o.d_data2_at - 4000 * 8) / 8.0, o.a->rd_units, o.a->rdbar_units, o.a->rd_bad, o.up_bits2, o.up_bad2);
+           (o.d_data2_at - o.ev_at) / 8.0, o.a->rd_units, o.a->rdbar_units, o.a->rd_bad, o.up_bits2, o.up_bad2);
     CHECK_EQ_I(o.req_rc, 0);
     CHECK_EQ_I(o.state, P34_DATA); CHECK_EQ_I(o.error, 0);
     CHECK_EQ_I(o.a->renegs, 1);
     CHECK_EQ_I(o.a->rd_units, 64); CHECK_EQ_I(o.a->rdbar_units, 4); CHECK_EQ_I(o.a->rd_bad, 0);   /* 384 T and 24 T */
     CHECK_EQ_I(o.down_rate, (30 + 6) * 8000 / 6);
     CHECK_EQ_I(o.a->dec_bad, 0); CHECK_EQ_I(o.a->b1d_bad, 0);
-    CHECK(o.d_data2_at > 0 && o.d_data2_at < 4000 * 8 + 8000);
+    CHECK(o.ev_at > 0 && o.d_data2_at > o.ev_at && o.d_data2_at < o.ev_at + 8000);
     /* downstream: data frame alignment kept, no bit lost or invented across it */
-    CHECK(o.down_bits > 270000); CHECK_EQ_I(o.down_bad, 0);
+    CHECK(o.down_bits > 265000); CHECK_EQ_I(o.down_bad, 0);
     /* upstream: clean before, clean after */
     CHECK_EQ_I(o.up_bad_before, 0);
     CHECK(o.up_bits2 > 80000); CHECK_EQ_I(o.up_bad2, 0);
@@ -301,48 +308,48 @@ int main(void)
     s.a_reneg_ms = 0; s.a_reneg_scr = 0;
 
     /* 10. the caller clears down: CP with drn = 0 */
-    s.a_clear_ms = 4000;
+    s.a_clear_ms = 1000;
     run(&s, &o); report("caller clears down", &s, &o);
-    printf("    call ended %.0f ms after the request\n", (o.d_end_at - 4000 * 8) / 8.0);
+    printf("    call ended %.0f ms after the request\n", (o.d_end_at - o.ev_at) / 8.0);
     CHECK_EQ_I(o.state, P34_FAILED); CHECK_EQ_I(o.error, P34_ERR_CLEARDOWN);
-    CHECK(o.d_end_at > 4000 * 8 && o.d_end_at < 4000 * 8 + 4000);
+    CHECK(o.ev_at > 0 && o.d_end_at > o.ev_at && o.d_end_at < o.ev_at + 4000);
     CHECK_EQ_I(o.up_bad_before, 0); CHECK_EQ_I(o.down_bad, 0);
     CHECK(o.silent_after_end);
     s.a_clear_ms = 0;
 
     /* 11. we renegotiate (9.6.1.1) */
-    s.d_reneg_ms = 4000;
+    s.d_reneg_ms = 1000;
     run(&s, &o); report("we renegotiate", &s, &o);
-    printf("    back in data mode %.0f ms after the request\n", (o.d_data2_at - 4000 * 8) / 8.0);
+    printf("    back in data mode %.0f ms after the request\n", (o.d_data2_at - o.ev_at) / 8.0);
     CHECK_EQ_I(o.req_rc, 0);
     CHECK_EQ_I(o.state, P34_DATA); CHECK_EQ_I(o.error, 0);
     CHECK_EQ_I(o.a->renegs, 1);
     CHECK_EQ_I(o.a->rd_units, 64); CHECK_EQ_I(o.a->rdbar_units, 4); CHECK_EQ_I(o.a->rd_bad, 0);
-    CHECK(o.d_data2_at > 0 && o.d_data2_at < 4000 * 8 + 8000);
-    CHECK(o.down_bits > 300000); CHECK_EQ_I(o.down_bad, 0);
+    CHECK(o.ev_at > 0 && o.d_data2_at > o.ev_at && o.d_data2_at < o.ev_at + 8000);
+    CHECK(o.down_bits > 295000); CHECK_EQ_I(o.down_bad, 0);
     CHECK_EQ_I(o.up_bad_before, 0);
     CHECK(o.up_bits2 > 80000); CHECK_EQ_I(o.up_bad2, 0);
     s.d_reneg_ms = 0;
 
     /* 12. we clear down: MP with drn = 0, then silence */
-    s.d_clear_ms = 4000;
+    s.d_clear_ms = 1000;
     run(&s, &o); report("we clear down", &s, &o);
-    printf("    call ended %.0f ms after the request\n", (o.d_end_at - 4000 * 8) / 8.0);
+    printf("    call ended %.0f ms after the request\n", (o.d_end_at - o.ev_at) / 8.0);
     CHECK_EQ_I(o.req_rc, 0);
     CHECK_EQ_I(o.state, P34_FAILED); CHECK_EQ_I(o.error, P34_ERR_HANGUP);
     CHECK(o.a->clear_seen);
     CHECK_EQ_I(o.a->rd_units, 64); CHECK_EQ_I(o.a->rdbar_units, 4);
-    CHECK(o.d_end_at > 4000 * 8 && o.d_end_at < 4000 * 8 + 8000);
+    CHECK(o.ev_at > 0 && o.d_end_at > o.ev_at && o.d_end_at < o.ev_at + 8000);
     CHECK_EQ_I(o.down_bad, 0); CHECK_EQ_I(o.up_bad_before, 0);
     CHECK(o.silent_after_end);
     s.d_clear_ms = 0;
 
     /* 14. the caller asks for silence in the renegotiation, to work on its
      * echo canceller (CPs, 9.6.1.2.4 to 9.6.1.2.6, Figure 10) */
-    s.a_reneg_ms = 4000; s.a_reneg_sil = 1; s.a_reneg_kd = 31;
+    s.a_reneg_ms = 1000; s.a_reneg_sil = 1; s.a_reneg_kd = 31;
     run(&s, &o); report("caller renegotiates with silence", &s, &o);
     printf("    back in data mode %.0f ms after the request; silence %d octets (%d not silent), Rt %d + %d units\n",
-           (o.d_data2_at - 4000 * 8) / 8.0, o.a->sil_octets, o.a->sil_bad, o.a->rt_units, o.a->rtbar_units);
+           (o.d_data2_at - o.ev_at) / 8.0, o.a->sil_octets, o.a->sil_bad, o.a->rt_units, o.a->rtbar_units);
     CHECK_EQ_I(o.state, P34_DATA); CHECK_EQ_I(o.error, 0);
     CHECK_EQ_I(o.a->renegs, 1);
     CHECK(o.a->sil_octets >= 6 * 20); CHECK_EQ_I(o.a->sil_bad, 0);
@@ -358,7 +365,7 @@ int main(void)
     /* 15. the line gets worse in mid-call: the upstream rate we allowed no
      * longer fits. We renegotiate it down (MP with a lower drn) until the
      * receiver is clean again. */
-    s.snr2_ms = 4000; s.snr2_db = 28; s.seconds = 14;
+    s.snr2_ms = 1000; s.snr2_db = 28; s.seconds = 11;
     run(&s, &o); report("line drops to 28 dB in mid-call", &s, &o);
     printf("    rate lowered %d time(s); after the last: %ld bits, %ld bad\n", o.d->rate_drops, o.up_bits2, o.up_bad2);
     CHECK_EQ_I(o.state, P34_DATA); CHECK_EQ_I(o.error, 0);
@@ -368,16 +375,16 @@ int main(void)
     CHECK(o.up_bits2 > 40000); CHECK_EQ_I(o.up_bad2, 0);
     CHECK_EQ_I(o.down_bad, 0);
     CHECK_EQ_I(o.up_bad_before, 0);
-    s.snr2_ms = 0; s.seconds = 9;
+    s.snr2_ms = 0; s.seconds = 6;
 
     /* 16. and when it becomes unusable altogether: the renegotiation cannot
      * complete either, and that is a retrain */
-    s.snr2_ms = 4000; s.snr2_db = 3; s.seconds = 30;
+    s.snr2_ms = 1000; s.snr2_db = 3; s.seconds = 27;
     run(&s, &o); report("line drops to 3 dB in mid-call", &s, &o);
-    printf("    retrain asked for %.1f s after the line went bad\n", (o.d_end_at - 4000 * 8) / 8000.0);
+    printf("    retrain asked for %.1f s after the line went bad\n", (o.d_end_at - o.ev_at) / 8000.0);
     CHECK_EQ_I(o.state, P34_RETRAIN); CHECK(o.d->retrain_ours);
-    CHECK(o.d_end_at > 0 && o.d_end_at < (4000 + 15000) * 8);
-    s.snr2_ms = 0; s.seconds = 9;
+    CHECK(o.ev_at > 0 && o.d_end_at > o.ev_at && o.d_end_at < o.ev_at + 15000 * 8);
+    s.snr2_ms = 0; s.seconds = 6;
 
     /* 17. the caller gives the start-up up in Phase 4 and asks for a retrain
      * (as a U.S. Robotics 56K did, 0.7 s into our MP): we hear its Tone A
@@ -387,7 +394,7 @@ int main(void)
     printf("    retrain taken up %.0f ms after the tone began\n", (o.d_end_at - o.tone_at) / 8.0);
     CHECK_EQ_I(o.state, P34_RETRAIN); CHECK_EQ_I(o.error, 0); CHECK(!o.d->retrain_ours);
     CHECK(o.tone_at > 0 && o.d_end_at > o.tone_at + 50 * 8 && o.d_end_at < o.tone_at + 200 * 8);
-    s.a_tone_ms = 0; s.seconds = 9;
+    s.a_tone_ms = 0; s.seconds = 9;        /* no mid-call event here: the whole run */
 
     /* 18. a caller that needs 0.8 s of TRN2d before the MP (a U.S. Robotics
      * 56K of 1998 gave up with 0.3 s and connected with 0.9 s) */
@@ -399,11 +406,11 @@ int main(void)
 
     /* 13. a renegotiation that never gets anywhere (the caller sends S,
      * S-bar and then SCR for ever): 9.6.1 asks for a retrain */
-    s.a_reneg_ms = 3500; s.a_reneg_scr = 1000000; s.seconds = 10;
+    s.a_reneg_ms = 500; s.a_reneg_scr = 1000000; s.seconds = 7;
     run(&s, &o); report("renegotiation stalls", &s, &o);
     CHECK_EQ_I(o.state, P34_RETRAIN); CHECK_EQ_I(o.error, 0);
     CHECK(o.d->retrain_ours);
-    s.a_reneg_ms = 0; s.a_reneg_scr = 0; s.seconds = 9;
+    s.a_reneg_ms = 0; s.a_reneg_scr = 0; s.seconds = 6;
 
     /* not in data mode: both requests are refused */
     {

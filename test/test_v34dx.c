@@ -213,11 +213,11 @@ int main(void)
         mkcfg(&a, &c, 4, 1, 0, &lc); a.echo_delay = -1;
         pair_init(&a, &c, &lc);
         CHECK_EQ_I(pair_to_data(8000), 1);
-        CHECK(P.a.echo_delay >= 148 && P.a.echo_delay <= 161);
+        CHECK(P.a.ecd.delay >= 148 && P.a.ecd.delay <= 161);
         CHECK(P.a.tx_count[DXS_TRN] * 1000L / 3200 <= 2000);
         sinks_reset(); pair_run(8000L * 4);
         CHECK_EQ_I(P.ua.sink.errs, 0); CHECK_EQ_I(P.uc.sink.errs, 0); CHECK(P.a.rx_rate >= 28800);
-        printf("  echo delay found: %d samples (true 160);", P.a.echo_delay); report("");
+        printf("  echo delay found: %d samples (true 160);", P.a.ecd.delay); report("");
 
         lc = CLEAN; lc.d_ca = 300; lc.d_ac = 340; lc.far_a = 0.15; lc.echo_a_delay = 40;
         mkcfg(&a, &c, 4, 1, 0, &lc); a.rtd = 640 + 5;     /* Phase 2 is a few samples out */

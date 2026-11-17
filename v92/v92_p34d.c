@@ -1,7 +1,6 @@
 /* V.92 Phases 3 and 4 with PCM upstream, digital modem. See v92_p34d.h. */
 #include <string.h>
 #include "v92_p34d.h"
-#include "sintab.h"
 #include "v90_pcm.h"
 
 #define MS(ms) ((int32_t)(ms) * 8)
@@ -36,9 +35,6 @@
 #define CD_BLOCK       80       /* carrier watch: 10 ms */
 #define CD_BLOCKS      50       /* about half a second without signal in data mode */
 #define CD_SHIFT       6        /* "without": 18 dB under the power of B1u */
-
-#define TA_BLOCK       80
-#define TA_BLOCKS      6        /* Tone A for more than 50 ms (9.7.1.2) */
 
 static void fail(v92d_t *p, int err)
 {
@@ -79,64 +75,15 @@ int v92d_init(v92d_t *p, const v92d_cfg *cfg)
     p->state = V92D_WAIT_RU;
     r = v90tx_init(&p->tx, cfg->alaw, cfg->uinfo);
     ec_init(&p->ec); p->ec_mu = -1;
+    tonedet_init(&p->tone_a, TONEDET_2400);     /* Tone A for more than 50 ms (9.7.1.2) */
     v92_p6_init(&p->p6);
     /* Table 21: Jd as in V.90 with bits 47 and 48 zero */
     p->jd.rates = cfg->down_rates ? cfg->down_rates : ((1u << V90_NUM_RATES) - 1);
     p->jd.cp16_train = 0; p->jd.cp16_reneg = 0; p->jd.max_ld = 3;
     if (r != 0) { fail(p, V92D_ERR_UINFO); return -1; }
-    if (cfg->echo_delay > V92D_ECDL - 129) { fail(p, V92D_ERR_UINFO); return -1; }
-    p->echo_delay = cfg->echo_delay > 0 ? cfg->echo_delay : 0;
+    if (cfg->echo_delay > V92D_MAX_ECHO_DELAY) { fail(p, V92D_ERR_UINFO); return -1; }
+    ecdly_init(&p->ecd, cfg->echo_delay);
     return 0;
-}
-
-/* ---- echo delay ---- */
-
-/* How late is our echo? The method of ../modem/p34d: TRN1d is white and the
- * caller is silent (9.5.2.1.3: it stops Ja on our Sd-bar), so a short window
- * of received samples, correlated with what we sent at every candidate
- * distance before them, peaks where the echo path is strongest. A few lags
- * per sample keep the cost of any one sample small. ecpos has moved on since
- * the snapshot; the history still holds what is needed (V92D_EC_MAXLAG +
- * V92D_EC_WIN + the samples the search takes < V92D_ECDL). */
-#define EC_SEARCH_STEP 4
-
-static void echo_search(v92d_t *p)
-{
-    int k, i;
-    for (k = 0; k < EC_SEARCH_STEP && p->ecs_lag <= V92D_EC_MAXLAG; k++, p->ecs_lag++) {
-        int64_t acc = 0;
-        /* window sample i was received when ecpos was ecs_pos - V92D_EC_WIN + 1 + i;
-         * what we sent `lag` samples before it sits lag + 1 behind that write
-         * position (the sample of the same tick is stored before the canceller runs) */
-        int base = p->ecs_pos - V92D_EC_WIN - p->ecs_lag;
-        for (i = 0; i < V92D_EC_WIN; i++)
-            acc += (int32_t)p->ecwin[i] * p->ecdl[(base + i) & (V92D_ECDL - 1)];
-        if (acc < 0) acc = -acc;
-        if (acc > p->ecs_best) { p->ecs_best = acc; p->ecs_best_lag = p->ecs_lag; }
-    }
-    if (p->ecs_lag > V92D_EC_MAXLAG) {
-        /* a little room before the peak for the start of the echo path */
-        p->echo_delay = p->ecs_best_lag > 8 ? p->ecs_best_lag - 8 : 0;
-        ec_init(&p->ec);
-        p->et_g[0] = p->et_g[1] = 0;
-    }
-}
-
-/* Tone A, 2400 Hz, for more than 50 ms (9.7.1.2), as ../modem/p34d does */
-static int tone_a(v92d_t *p, int16_t x)
-{
-    int32_t c = sintab[((p->ta_ph >> 22) + SIN_N / 4) & SIN_MASK], s = sintab[(p->ta_ph >> 22) & SIN_MASK];
-    p->ta_ph += 0x4CCCCCCDu;                    /* 2400 / 8000 of a turn */
-    p->ta_re += (x * c) >> 15; p->ta_im += (x * s) >> 15;
-    p->ta_pw += (int32_t)x * x;
-    if (++p->ta_n < TA_BLOCK) return 0;
-    {
-        int64_t m = p->ta_re * p->ta_re + p->ta_im * p->ta_im;
-        int on = p->ta_pw > (int64_t)TA_BLOCK * 400 && m * 4 > p->ta_pw * TA_BLOCK;     /* more than half */
-        p->ta_blocks = on ? p->ta_blocks + 1 : 0;
-        p->ta_n = 0; p->ta_re = p->ta_im = p->ta_pw = 0;
-    }
-    return p->ta_blocks >= TA_BLOCKS;
 }
 
 /* ---- data mode receiver ---- */
@@ -482,9 +429,10 @@ uint8_t v92d_tick(v92d_t *p, int16_t rxs)
 
     p->now++; p->t++;
     octet = v90tx_tick(&p->tx);
-    p->ecdl[p->ecpos] = (int16_t)v90_octet_linear(p->cfg.alaw, octet);
 #ifdef P34D_TRACE
-    p->ecdl[p->ecpos] = v92d_trace_tx(p, p->ecdl[p->ecpos]);
+    ecdly_put(&p->ecd, v92d_trace_tx(p, (int16_t)v90_octet_linear(p->cfg.alaw, octet)));
+#else
+    ecdly_put(&p->ecd, (int16_t)v90_octet_linear(p->cfg.alaw, octet));
 #endif
     /* The echo: the canceller of ../modem/ec for the first 12 ms, and behind it
      * a model of a slow tail (reading 53): the transmitted signal, 12 ms on,
@@ -492,8 +440,8 @@ uint8_t v92d_tick(v92d_t *p, int16_t rxs)
      * each. All of it learns from what is left after both, while the caller
      * is silent. */
     {
-        int32_t e, est, u1, u2, tl = p->ecdl[(p->ecpos - p->echo_delay - EC_NTAP) & (V92D_ECDL - 1)];
-        e = ec_tick(&p->ec, p->ecdl[(p->ecpos - p->echo_delay) & (V92D_ECDL - 1)], rxs, -1);
+        int32_t e, est, u1, u2, tl = ecdly_ref(&p->ecd, EC_NTAP);
+        e = ec_tick(&p->ec, ecdly_ref(&p->ecd, 0), rxs, -1);
         p->et_s[0] += tl - (p->et_s[0] >> 7);
         p->et_s[1] += tl - (p->et_s[1] >> 8);
         u1 = p->et_s[0] >> 5; u2 = p->et_s[1] >> 6;
@@ -509,7 +457,7 @@ uint8_t v92d_tick(v92d_t *p, int16_t rxs)
         }
         x = (int16_t)(e > 32767 ? 32767 : e < -32767 ? -32767 : e);
     }
-    p->ecpos = (p->ecpos + 1) & (V92D_ECDL - 1);
+    ecdly_next(&p->ecd);
 #ifdef P34D_TRACE
     v92d_trace(p, rxs, x);      /* live/replay.c: what the canceller left */
 #endif
@@ -518,7 +466,7 @@ uint8_t v92d_tick(v92d_t *p, int16_t rxs)
     if (p->state >= V92D_RETRAIN) return octet;
 
     /* ---- receiver ---- */
-    if (p->state != V92D_WAIT_RU && p->state != V92D_MD && tone_a(p, x)) { retrain(p, 0); return octet; }
+    if (p->state != V92D_WAIT_RU && p->state != V92D_MD && tonedet_tick(&p->tone_a, x)) { retrain(p, 0); return octet; }
 
     if (p->trn_at && p->now == p->trn_at) {
         p->trn_at = 0;
@@ -620,20 +568,14 @@ uint8_t v92d_tick(v92d_t *p, int16_t rxs)
             int32_t n = (int32_t)v90tx_symbols(&p->tx), from = p->cfg.rtd + MS(EC_GUARD_MS), len;
             if (n == 1) p->t_trn1d = p->now;
             if (p->cfg.echo_delay < 0) {
-                /* first find out how late the echo is (see echo_search) */
-                int32_t snap = from + V92D_EC_MAXLAG + V92D_EC_WIN;
-                if (n == snap - V92D_EC_WIN) p->ecw_last = rxs;
-                else if (n > snap - V92D_EC_WIN && n <= snap) {
-                    /* the change from sample to sample, as in p34d.c (a long flat
-                     * tail of the echo otherwise puts the peak anywhere) */
-                    int32_t dv = (int32_t)rxs - p->ecw_last;
-                    p->ecw_last = rxs;
-                    if (p->ecw_n < V92D_EC_WIN) p->ecwin[p->ecw_n++] = (int16_t)(dv > 32767 ? 32767 : dv < -32768 ? -32768 : dv);
-                    if (n == snap) { p->ecs_pos = p->ecpos; p->ecs_lag = 0; p->ecs_best = -1; }
-                } else if (n > snap && p->ecs_lag <= V92D_EC_MAXLAG) {
-                    echo_search(p);
+                /* first find out how late the echo is (../modem/ecdly.h), on the
+                 * change from sample to sample: 9.5.2.1.3 has the caller stop
+                 * Ja on our Sd-bar, so it is silent */
+                if (ecdly_measure(&p->ecd, n - from, rxs, 1)) {
+                    ec_init(&p->ec);
+                    p->et_g[0] = p->et_g[1] = 0;
                 }
-                from = snap + V92D_EC_MAXLAG / EC_SEARCH_STEP + 2;
+                from += ECDLY_SAMPLES;
             }
             len = TRN1D_SYMS + from;
             /* the caller is silent now: learn the echo of TRN1d */

@@ -7,7 +7,6 @@ int16_t v34dx_trace_tx(int16_t y);
 #endif
 #include "v34dx.h"
 #include "probe.h"
-#include "sintab.h"
 #include "pcmenc.h"
 #include "../v90/v90_pcm.h"
 
@@ -18,7 +17,6 @@ int16_t v34dx_trace_tx(int16_t y);
 #define EC_SETTLE      80       /* samples of TRN before the canceller looks at it */
 #define EC_FAST        8800     /* samples at full NLMS step */
 #define EC_SLOW        800      /* ... and at a small one */
-#define EC_SEARCH_STEP 4
 #define TRN4_SYMS      1280     /* TRN of Phase 4: >= 512 T, <= 2000 ms (533 ms at 2400) */
 #define RENEG_TRN_MS   100      /* TRN of a rate renegotiation: optional, <= 2000 ms */
 #define FAR_MIN_RTD    56       /* a far echo later than this gets its own canceller */
@@ -93,18 +91,18 @@ int v34dx_init(v34dx_t *p, const v34dx_cfg *cfg)
         return -1;
     }
     ec_init(&p->ec); ec_init(&p->fec); p->ec_mu = -1;
-    if (cfg->echo_delay >= DX_ECDL - 256) p->cfg.echo_delay = DX_ECDL - 257;
-    p->echo_delay = p->cfg.echo_delay > 0 ? p->cfg.echo_delay : 0;
+    if (cfg->echo_delay > DX_MAX_ECHO_DELAY) p->cfg.echo_delay = DX_MAX_ECHO_DELAY;
+    ecdly_init(&p->ecd, p->cfg.echo_delay);
     sdet_init(&p->sdet, cfg->sym_rate, cfg->rx_car_num, cfg->rx_car_den);
     p->sdet.div = 16;               /* Phase 3: nothing but S can be there */
     qamrx_init(&p->rx, cfg->sym_rate, cfg->rx_car_num, cfg->rx_car_den);
     p->tx_pts = 4; p->tx_g = 16384;
     samples = EC_SETTLE + EC_FAST + EC_SLOW;
-    if (cfg->echo_delay < 0) samples += DX_EC_MAXLAG + DX_EC_WIN + DX_EC_MAXLAG / EC_SEARCH_STEP + 2;
+    if (cfg->echo_delay < 0) samples += ECDLY_SAMPLES;
     p->trn_syms = (int32_t)(((int64_t)samples * cfg->sym_rate) / 8000) + 1;
     if (p->trn_syms < 512) p->trn_syms = 512;
     p->trn4_syms = TRN4_SYMS;
-    p->tn_dph = cfg->answer ? 0x26666666u : 0x4CCCCCCDu;    /* Tone B 1200 Hz / Tone A 2400 Hz */
+    tonedet_init(&p->tone, cfg->answer ? TONEDET_1200 : TONEDET_2400);  /* the far modem's retrain tone: Tone B / Tone A */
     /* MP: what we ask and what we can do */
     p->mp.type = 0;
     for (k = 0; k < 3; k++) for (i = 0; i < 2; i++) {
@@ -433,67 +431,25 @@ static void s_heard(v34dx_t *p)
     if (p->state == DX_DATA) enter(p, DX_RN_S);
 }
 
-/* ---- the far modem's retrain tone: more than half of the power of a 10 ms
- * block at its frequency, six blocks running ---- */
-#define TN_BLOCK  80
-#define TN_BLOCKS 6
-static int tone(v34dx_t *p, int16_t x)
-{
-    int32_t c = sintab[((p->tn_ph >> 22) + SIN_N / 4) & SIN_MASK], s = sintab[(p->tn_ph >> 22) & SIN_MASK];
-    p->tn_ph += p->tn_dph;
-    p->tn_re += (x * c) >> 15; p->tn_im += (x * s) >> 15;
-    p->tn_pw += (int32_t)x * x;
-    if (++p->tn_n < TN_BLOCK) return 0;
-    {
-        int64_t m = p->tn_re * p->tn_re + p->tn_im * p->tn_im;
-        int on = p->tn_pw > (int64_t)TN_BLOCK * 400 && m * 4 > p->tn_pw * TN_BLOCK;
-        p->tn_blocks = on ? p->tn_blocks + 1 : 0;
-        p->tn_n = 0; p->tn_re = p->tn_im = p->tn_pw = 0;
-    }
-    return p->tn_blocks >= TN_BLOCKS;
-}
-
 /* ---- echo: delay search and training during the TRN of Phase 3 ---- */
-
-static void echo_search(v34dx_t *p)
-{
-    int k, i;
-    for (k = 0; k < EC_SEARCH_STEP && p->ecs_lag <= DX_EC_MAXLAG; k++, p->ecs_lag++) {
-        int64_t acc = 0;
-        int base = p->ecs_pos - DX_EC_WIN - p->ecs_lag;
-        for (i = 0; i < DX_EC_WIN; i++)
-            acc += (int32_t)p->ecwin[i] * p->ecdl[(base + i) & (DX_ECDL - 1)];
-        if (acc < 0) acc = -acc;
-        if (acc > p->ecs_best) { p->ecs_best = acc; p->ecs_best_lag = p->ecs_lag; }
-    }
-    if (p->ecs_lag > DX_EC_MAXLAG) {
-        p->echo_delay = p->ecs_best_lag > 8 ? p->ecs_best_lag - 8 : 0;
-        ec_init(&p->ec);
-    }
-}
 
 static void ec_schedule(v34dx_t *p, int16_t rxs)
 {
     int32_t n = ++p->trn_t, from = EC_SETTLE;
     if (p->cfg.echo_delay < 0) {
-        int32_t snap = EC_SETTLE + DX_EC_MAXLAG + DX_EC_WIN;
-        if (n > snap - DX_EC_WIN && n <= snap) {
-            if (p->ecw_n < DX_EC_WIN) p->ecwin[p->ecw_n++] = rxs;
-            if (n == snap) { p->ecs_pos = p->ecpos; p->ecs_lag = 0; p->ecs_best = -1; }
-        } else if (n > snap && p->ecs_lag <= DX_EC_MAXLAG) {
-            echo_search(p);
-        }
-        from = snap + DX_EC_MAXLAG / EC_SEARCH_STEP + 2;
+        /* how late is our echo (ecdly.h)? On the samples as they are */
+        if (ecdly_measure(&p->ecd, n - EC_SETTLE, rxs, 0)) ec_init(&p->ec);
+        from += ECDLY_SAMPLES;
     }
     if (n == from) {
         /* the far end's echo of our signal, a round trip later */
         int lag;
         if (p->cfg.rtd_has_io) {
             p->cfg.rtd_has_io = 0;
-            p->cfg.rtd = p->cfg.rtd > p->echo_delay + 8 ? p->cfg.rtd - p->echo_delay - 8 : 0;
+            p->cfg.rtd = p->cfg.rtd > p->ecd.delay + 8 ? p->cfg.rtd - p->ecd.delay - 8 : 0;
         }
-        lag = p->echo_delay + p->cfg.rtd - FAR_LEAD;
-        p->far_on = p->cfg.rtd > FAR_MIN_RTD && lag + EC_NTAP < DX_ECDL - 8;
+        lag = p->ecd.delay + p->cfg.rtd - FAR_LEAD;
+        p->far_on = p->cfg.rtd > FAR_MIN_RTD && lag + EC_NTAP < ECDLY_HIST - 8;
     }
     /* two cancellers on one error share the step: each at full step would
      * be one filter at twice the step NLMS can take */
@@ -630,19 +586,19 @@ int16_t v34dx_tick(v34dx_t *p, int16_t rxs)
     if (p->cfg.law) y = (int16_t)v90_octet_linear(p->cfg.law == 2, pcm_encode(p->cfg.law == 2, y));
 
 #ifdef P34D_TRACE
-    p->ecdl[p->ecpos] = v34dx_trace_tx(y);   /* live/replay.c: what the box really sent */
+    ecdly_put(&p->ecd, v34dx_trace_tx(y));  /* live/replay.c: what the box really sent */
 #else
-    p->ecdl[p->ecpos] = y;
+    ecdly_put(&p->ecd, y);
 #endif
     if (p->far_on) {
         /* both learn from what is left after both */
-        x = ec_tick(&p->ec, p->ecdl[(p->ecpos - p->echo_delay) & (DX_ECDL - 1)], rxs, -1);
-        x = ec_tick(&p->fec, p->ecdl[(p->ecpos - p->echo_delay - p->cfg.rtd + FAR_LEAD) & (DX_ECDL - 1)], x, p->ec_mu);
+        x = ec_tick(&p->ec, ecdly_ref(&p->ecd, 0), rxs, -1);
+        x = ec_tick(&p->fec, ecdly_ref(&p->ecd, p->cfg.rtd - FAR_LEAD), x, p->ec_mu);
         ec_adapt(&p->ec, x, p->ec_mu);
     } else {
-        x = ec_tick(&p->ec, p->ecdl[(p->ecpos - p->echo_delay) & (DX_ECDL - 1)], rxs, p->ec_mu);
+        x = ec_tick(&p->ec, ecdly_ref(&p->ecd, 0), rxs, p->ec_mu);
     }
-    p->ecpos = (p->ecpos + 1) & (DX_ECDL - 1);
+    ecdly_next(&p->ecd);
     p->pw_in += ((int32_t)rxs * rxs - p->pw_in) >> 8;
     p->pw_res += ((int32_t)x * x - p->pw_res) >> 8;
 
@@ -657,7 +613,7 @@ int16_t v34dx_tick(v34dx_t *p, int16_t rxs)
             if (p->sdet.present >= SDET_PRESENT) s_heard(p);
         }
     }
-    if (p->state >= DX_P4_TRN && tone(p, x)) { retrain(p, 0); return y; }
+    if (p->state >= DX_P4_TRN && tonedet_tick(&p->tone, x)) { retrain(p, 0); return y; }
 
     /* transmitter sequencing and time limits */
     switch (p->state) {

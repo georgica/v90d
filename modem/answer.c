@@ -146,7 +146,7 @@ static void start_v92(answer_t *a)
     c.sections = i->sections;
     c.ltot = 192 + 64 * i->ltot_code; c.lmax = 128 + 64 * i->lmax_code;     /* Table 18 bits 14:17 */
     /* the same figure p34d gets; like it, v92d measures when it is not known */
-    c.echo_delay = a->echo_delay > V92D_ECDL - 129 ? V92D_ECDL - 129 : a->echo_delay;
+    c.echo_delay = a->echo_delay > V92D_MAX_ECHO_DELAY ? V92D_MAX_ECHO_DELAY : a->echo_delay;
     c.max_up_rate = a->max_up;
     c.down_rates = jd_rates(a);
     /* INFO0d bits 33:37 bound the power of the caller's choice of downstream

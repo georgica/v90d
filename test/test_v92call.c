@@ -352,11 +352,11 @@ int main(int argc, char **argv)
         s.echo = 0.25; s.echo_delay = 60; s.echo_search = 1;
         run(&s, &o); report(&s, &o); check_good(&s, &o);
         /* a little room before the echo path, as p34d leaves */
-        CHECK(d.echo_delay >= 60 - 12 && d.echo_delay <= 60);
+        CHECK(d.ecd.delay >= 60 - 12 && d.ecd.delay <= 60);
         base(&s, "23 A-law, echo 400 late, not told", 1, 1, 3, 0);
         s.echo_delay = 400; s.echo_search = 1;
         run(&s, &o); report(&s, &o); check_good(&s, &o);
-        CHECK(d.echo_delay >= 400 - 12 && d.echo_delay <= 400);
+        CHECK(d.ecd.delay >= 400 - 12 && d.ecd.delay <= 400);
         base(&s, "24 the caller falls silent", 0, 0, 3, 0);
         s.mute_ms = 5500;
         run(&s, &o); report(&s, &o);
@@ -384,8 +384,8 @@ int main(int argc, char **argv)
         s.level = 2700; s.echo = 0.02; s.echo_tail = 4.0; s.echo_delay = 270; s.echo_search = 1;
         s.seconds = 11;
         run(&s, &o); report(&s, &o); check_good(&s, &o);
-        printf("    echo delay found: %d\n", d.echo_delay);
-        CHECK(d.echo_delay >= 270 - 12 && d.echo_delay <= 270 + 4);
+        printf("    echo delay found: %d\n", d.ecd.delay);
+        CHECK(d.ecd.delay >= 270 - 12 && d.ecd.delay <= 270 + 4);
 
         /* the same modem's patience: it gives up 3.8 s into TRN2u without
          * SUVd and 3.5 s after its SUVu without CPd, and does not send SUVu

@@ -30,6 +30,8 @@
 #define V90D_V92_P34D_H
 #include <stdint.h>
 #include "ec.h"
+#include "ecdly.h"
+#include "tonedet.h"
 #include "v90_tx.h"
 #include "v92_rx.h"
 #include "v92_design.h"
@@ -47,10 +49,9 @@ typedef struct {
     int ltot, lmax;         /* INFO1a: 192 + 64 * code, 128 + 64 * code */
     int rtd;                /* round-trip delay from Phase 2, samples */
     int echo_delay;         /* samples from handing an octet to the line until its echo
-                               starts to come back (driver buffering), 0..V92D_ECDL - 129;
+                               starts to come back (driver buffering), 0..V92D_MAX_ECHO_DELAY;
                                the canceller covers the 12 ms after that. -1 = not
-                               known: measured during TRN1d, up to V92D_EC_MAXLAG, as
-                               ../modem/p34d does */
+                               known: measured during TRN1d (../modem/ecdly.h) */
     uint32_t down_rates;    /* Jd: downstream rates allowed, as p34d_cfg; 0 = all */
     int max_up_rate;        /* upstream ceiling in bit/s; 0 = what the line gives */
     int down_rms;           /* the most our downstream data signal can have, linear RMS
@@ -99,9 +100,7 @@ enum {
     V92D_ERR_CARRIER    /* upstream signal lost in data mode */
 };
 
-#define V92D_ECDL  2048     /* history of what we sent, a power of two */
-#define V92D_EC_MAXLAG 1280 /* longest echo delay the search covers: 160 ms */
-#define V92D_EC_WIN 256     /* received samples the search correlates */
+#define V92D_MAX_ECHO_DELAY 1919 /* the longest echo delay that can be given */
 #define V92D_FBUF  2752     /* longest received sequence (Ja) plus a next frame sync */
 #define V92D_B1U_LEAD 2     /* data frames of Ki = 0 passed over before B1u at most (reading 57) */
 #define V92D_SBUF  (324 + 17 * (V92_DSN_LZ2 + V92_DSN_LP1 + V92_MAX_LC) + 72)  /* our CPd, bits */
@@ -124,14 +123,8 @@ typedef struct {
     int        ec_mu;
     int32_t    et_s[2], et_g[2];    /* slow echo tail: low-pass states, coefficients (Q16) */
     int64_t    et_pw;               /* ... and the smoothed power of its two inputs */
-    int16_t    ecdl[V92D_ECDL]; int ecpos;
-    int        echo_delay;          /* in use: cfg.echo_delay or the measured one */
-    int16_t    ecwin[V92D_EC_WIN];  /* echo delay search: received samples (each less the one before), newest last */
-    int16_t    ecw_last;            /* the sample before, while the window fills */
+    ecdly_t    ecd;                 /* what we sent; ecd.delay is the echo delay in use, given or measured */
     int32_t    base_q4;             /* data mode: the baseline under the caller's symbols, Q4 */
-    int        ecw_n;               /* samples collected */
-    int        ecs_pos, ecs_lag;    /* ecpos at the snapshot; next lag to try */
-    int64_t    ecs_best; int ecs_best_lag;
     int64_t    nz_acc, nq_acc, ne_acc; int32_t nz_n;    /* TRN1d: residual, quantiser, echo power */
     uint32_t   noise, q_quiet, echo_rms;
     uint32_t   q_trn;               /* smoothed quantiser variance while the caller trains */
@@ -173,8 +166,7 @@ typedef struct {
     int        in_reneg, reneg_ours, clearing;
     int        renegs;              /* renegotiations completed */
     int        retrain_ours;
-    /* Tone A (2400 Hz) watch, 10 ms blocks */
-    uint32_t   ta_ph; int64_t ta_re, ta_im, ta_pw; int ta_n, ta_blocks;
+    tonedet_t  tone_a;              /* Tone A (2400 Hz) watch */
     /* line quality in data mode */
     uint32_t   q_limit; int32_t q_bad; uint32_t bad_seen;
     int        rate_drops;
@@ -184,7 +176,7 @@ typedef struct {
 } v92d_t;
 
 /* Returns 0, or -1 if the configuration cannot work (state is V92D_FAILED):
- * a UINFO that Sd cannot carry, or an echo delay beyond V92D_ECDL - 129. */
+ * a UINFO that Sd cannot carry, or an echo delay beyond V92D_MAX_ECHO_DELAY. */
 int     v92d_init(v92d_t *p, const v92d_cfg *cfg);
 uint8_t v92d_tick(v92d_t *p, int16_t rx);
 /* From data mode: start a rate renegotiation (9.8.1.1). The state leaves

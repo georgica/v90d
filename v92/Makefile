@@ -17,9 +17,9 @@ LIB_HDR := v92.h v92_mod.h v92_enc.h v92_dec.h v92_seq.h v92_info.h v92_sig.h v9
 # CRC and the V.90 DIL descriptor types (v90_seq), Figure 9 / Table 13 and the
 # convolutional encoders of V.34 (v34_core, which needs v34_constel to link)
 EXT_SRC := ../v90/v90_scr.c ../v90/v90_seq.c ../v34/v34_core.c ../v34/v34_constel.c \
-           ../v90/v90_tx.c ../v90/v90_enc.c ../modem/ec.c
+           ../v90/v90_tx.c ../v90/v90_enc.c ../modem/ec.c ../modem/ecdly.c ../modem/tonedet.c
 EXT_HDR := ../v90/v90_scr.h ../v90/v90_seq.h ../v34/v34.h ../v34/v34_priv.h \
-           ../v90/v90_tx.h ../v90/v90_enc.h ../modem/ec.h ../modem/sintab.h
+           ../v90/v90_tx.h ../v90/v90_enc.h ../modem/ec.h ../modem/ecdly.h ../modem/tonedet.h ../modem/sintab.h
 # test-only support: Table 1/V.90 for realistic constellations
 SUP_SRC := ../v90/v90_pcm.c ../modem/pcmenc.c
 SUP_HDR := ../v90/v90_pcm.h ../modem/pcmenc.h ../test/test.h test/testutil.h

@@ -1273,6 +1273,52 @@ static void test_bbsdial(void)
     close(sv[0]); close(sv[1]);
 }
 
+/* which addresses are no board: the box itself and what is no host at all */
+static void test_bbsdial_self(void)
+{
+    struct sockaddr_in a; socklen_t al = sizeof a; int u, ls, sv[2], st; pid_t pid; uint32_t own = 0; char port[8], host[32];
+    struct pollfd p;
+    printf("bbs: addresses that are no board\n");
+    CHECK_EQ_I(bbsdial_is_self(0x7f000001u), 1);        /* 127.0.0.1 */
+    CHECK_EQ_I(bbsdial_is_self(0x7f123456u), 1);        /* all of 127/8 */
+    CHECK_EQ_I(bbsdial_is_self(0x00000000u), 1);        /* 0.0.0.0: "this host" */
+    CHECK_EQ_I(bbsdial_is_self(0x00010203u), 1);
+    CHECK_EQ_I(bbsdial_is_self(0xa9fe0101u), 1);        /* 169.254.1.1: link-local */
+    CHECK_EQ_I(bbsdial_is_self(0xe0000001u), 1);        /* 224.0.0.1: multicast */
+    CHECK_EQ_I(bbsdial_is_self(0xffffffffu), 1);        /* broadcast */
+    CHECK_EQ_I(bbsdial_is_self(0xc0000201u), 0);        /* 192.0.2.1: a host elsewhere */
+    CHECK_EQ_I(bbsdial_is_self(0xa9fd0101u), 0);        /* 169.253.1.1 */
+    CHECK_EQ_I(bbsdial_is_self(0xdfffffffu), 0);        /* 223.255.255.255 */
+    /* an address of one of our own interfaces. Which one this machine has:
+     * the source address it would use towards a host elsewhere (a datagram
+     * socket's connect sends nothing) */
+    u = socket(AF_INET, SOCK_DGRAM, 0);
+    memset(&a, 0, sizeof a); a.sin_family = AF_INET; a.sin_port = htons(9); a.sin_addr.s_addr = htonl(0xc0000201u);
+    if (u >= 0 && connect(u, (struct sockaddr *)&a, sizeof a) == 0 && getsockname(u, (struct sockaddr *)&a, &al) == 0)
+        own = ntohl(a.sin_addr.s_addr);
+    if (u >= 0) close(u);
+    if (own == 0 || (own >> 24) == 127) { printf("  (no network interface here: own address not tried)\n"); return; }
+    CHECK_EQ_I(bbsdial_is_self(own), 1);
+    /* ... and a listener on it hears nothing */
+    ls = socket(AF_INET, SOCK_STREAM, 0);
+    memset(&a, 0, sizeof a); a.sin_family = AF_INET; a.sin_addr.s_addr = htonl(own);
+    CHECK(ls >= 0 && bind(ls, (struct sockaddr *)&a, sizeof a) == 0 && listen(ls, 2) == 0);
+    al = sizeof a;
+    CHECK_EQ_I(getsockname(ls, (struct sockaddr *)&a, &al), 0);
+    snprintf(port, sizeof port, "%u", (unsigned)ntohs(a.sin_port));
+    snprintf(host, sizeof host, "%u.%u.%u.%u", (unsigned)(own >> 24), (unsigned)(own >> 16 & 255), (unsigned)(own >> 8 & 255), (unsigned)(own & 255));
+    CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
+    pid = fork();
+    if (pid == 0) { close(sv[0]); close(ls); _exit(bbsdial_run(host, port, sv[1], 5, 0)); }
+    close(sv[1]);
+    p.fd = ls; p.events = POLLIN; p.revents = 0;
+    CHECK_EQ_I(poll(&p, 1, 500), 0);
+    /* (a dial that did connect would stay until told to end) */
+    close(sv[0]);
+    CHECK_EQ_I(waitpid(pid, &st, 0), pid); CHECK(WIFEXITED(st) && WEXITSTATUS(st) == 1);
+    close(ls);
+}
+
 static void test_telnet(void)
 {
     telnet_t t; uint8_t out[64], rep[64]; size_t on, rn, k;
@@ -1458,7 +1504,7 @@ static void test_v92_call(void)
     CHECK(S.status.down_bps >= 40000); CHECK(S.status.up_bps > 33600 && S.status.up_bps <= 48000);
     CHECK_EQ_I(S.status.v42, ST_V42_LAPM);
     printf("    SNR %.1f dB, round trip %u ms, echo delay found %d samples\n", S.status.snr_x10 / 10.0,
-           (unsigned)S.status.rtd_ms, S.dce.modem.u.v92.echo_delay);
+           (unsigned)S.status.rtd_ms, S.dce.modem.u.v92.ecd.delay);
     CHECK(S.status.snr_x10 > 200 && S.status.snr_x10 < 700);
     exchange(20);
     hang_up();
@@ -1747,6 +1793,7 @@ int main(void)
     test_bbs_call();
     test_bbs_shipped_list();
     test_bbsdial();
+    test_bbsdial_self();
     test_v34_call();
     test_v32bis_call();
     /* the same server on a line with linear receive (srv_tick_lin): whole
