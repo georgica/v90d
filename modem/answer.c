@@ -2,6 +2,7 @@
 #include "answer.h"
 #include "pcmenc.h"
 #include "v21_bpf.h"
+#include "bell103_bpf.h"
 #include "../v90/v90_pcm.h"
 
 #define MS(ms) ((int32_t)(ms) * 8)
@@ -9,6 +10,9 @@
 
 #define V22_TOTAL_MS     30000   /* give up on V.22bis start-up */
 #define V22_LEGACY_MS     8000   /* pre-V.8 caller silent this long: try V.21 */
+#ifndef V22_BELL_MS
+#define V22_BELL_MS       4000   /* silent this long: the Bell answer tone from then on */
+#endif
 #define V21_WAIT_MS      20000
 #define V21_CD_ON_MS       100
 #define CD_LOSS_MS         400
@@ -29,35 +33,55 @@
 #define V90_MAX_TX_CODE ANS_MAX_TX_CODE
 #endif
 #define V21_CD_AMP         110   /* about -46 dBm0, as in v8ans */
+#define BELL103_MARK_BLOCKS 20   /* 200 ms of the caller's 1270 Hz and little else */
+#define BELL103_1270 ((uint32_t)(((uint64_t)BELL103_O_MARK << 32) / 8000))
+#if V21_BPF_N != BELL103_BPF_N
+#error "the two receive band-passes share one loop"
+#endif
+
+static void bpf_reset(answer_t *a, const int16_t *taps)
+{
+    for (a->bpos = 0; a->bpos < 128; a->bpos++) a->bpf[a->bpos] = 0;
+    a->bpos = 0; a->bpf_taps = taps;
+}
 
 static void start_v22(answer_t *a)
 {
     v22m_init(&a->v22, V22_ANSWERER, 1, a->cfg.level, a->cfg.getbit, a->cfg.putbit, a->cfg.user);
+    bpf_reset(a, bell103_bpf);
+    tonedet_init(&a->bell, BELL103_1270);
+    v21mod_init(&a->fmod, BELL103_A_MARK, BELL103_A_SPACE, 8000, 300, (int16_t)(a->cfg.level * 181 / 128));
+    a->via_bell = 0;
     a->phase = ANS_V22; a->t = 0;
 }
 
-static void start_v21(answer_t *a)
+/* 300 bit/s FSK: V.21 (we send the high channel) or, bell = 1, Bell 103
+ * (we send 2225 / 2025 Hz and listen on 1270 / 1070 Hz) */
+static void start_fsk(answer_t *a, int bell)
 {
     /* peak amplitude of a sine with the configured RMS */
-    v21mod_init(&a->fmod, V21H_MARK, V21H_SPACE, 8000, 300, (int16_t)(a->cfg.level * 181 / 128));
-    v21demod_init(&a->fdem, V21L_MARK, V21L_SPACE, 8000, 300);
+    v21mod_init(&a->fmod, bell ? BELL103_A_MARK : V21H_MARK, bell ? BELL103_A_SPACE : V21H_SPACE, 8000, 300, (int16_t)(a->cfg.level * 181 / 128));
+    v21demod_init(&a->fdem, bell ? BELL103_O_MARK : V21L_MARK, bell ? BELL103_O_SPACE : V21L_SPACE, 8000, 300);
     arx_init(&a->uart, 8000, 300);
     a->cd_thresh = v21demod_energy_of(&a->fdem, V21_CD_AMP);
-    a->fbit = 1; a->cd_run = 0;
-    for (a->bpos = 0; a->bpos < 128; a->bpos++) a->bpf[a->bpos] = 0;
-    a->bpos = 0;
+    a->fbit = 1; a->cd_run = 0; a->fsk_mod = bell ? ANS_MOD_BELL103 : ANS_MOD_V21;
+    bpf_reset(a, bell ? bell103_bpf : v21_bpf);
+    tonedet_init(&a->bell, BELL103_1270);
     a->phase = ANS_V21; a->t = 0;
 }
 
-/* Keep the echo of our own 1650 / 1850 Hz channel out of the low-channel
- * receiver: its correlators alone reject it by less than 20 dB, which an
- * ordinary hybrid (and nobody calling) turned into a carrier indication. */
+static void start_v21(answer_t *a) { start_fsk(a, 0); }
+
+/* Keep the echo of our own channel (1650 / 1850 Hz, or 2025 / 2225 Hz in
+ * Bell 103) out of the receiver: its correlators alone reject it by less
+ * than 20 dB, which an ordinary hybrid (and nobody calling) turned into a
+ * carrier indication. */
 static int16_t v21_bandpass(answer_t *a, int16_t x)
 {
     int32_t acc = 0;
     int k;
     a->bpf[a->bpos] = x;
-    for (k = 0; k < V21_BPF_N; k++) acc += (int32_t)a->bpf[(a->bpos - k) & 127] * v21_bpf[k] >> 4;
+    for (k = 0; k < V21_BPF_N; k++) acc += (int32_t)a->bpf[(a->bpos - k) & 127] * a->bpf_taps[k] >> 4;
     a->bpos = (a->bpos + 1) & 127;
     acc >>= 11;
     return (int16_t)(acc > 32767 ? 32767 : acc < -32768 ? -32768 : acc);
@@ -242,7 +266,14 @@ static int16_t tick_v21(answer_t *a, int16_t rx)
     int level, c, done, i;
     int16_t out;
 
-    level = v21demod_tick(&a->fdem, v21_bandpass(a, rx));
+    int16_t x = v21_bandpass(a, rx);
+
+    /* waiting for a caller without V.8 in V.21: one that sends 1270 Hz is a
+     * Bell 103 modem (a V.21 caller's mark is 980 Hz). Decided in 60 ms,
+     * before the V.21 receiver's 100 ms take the tone for its carrier. */
+    if (!a->connected && !a->used_v8 && a->fsk_mod == ANS_MOD_V21 && (a->cfg.modes & ANS_MODE_BELL103)
+        && tonedet_tick(&a->bell, x)) { start_fsk(a, 1); return 0; }
+    level = v21demod_tick(&a->fdem, x);
     if (a->fdem.energy < a->cd_thresh) {
         level = 1;
         if (a->cd_run > 0) a->cd_run = 0;
@@ -250,7 +281,7 @@ static int16_t tick_v21(answer_t *a, int16_t rx)
     } else {
         if (a->cd_run < 0) a->cd_run = 0;
         if (a->cd_run < MS(V21_CD_ON_MS)) a->cd_run++;
-        else if (!a->connected) { a->connected = 1; a->modulation = ANS_MOD_V21; a->bitrate = 300; }
+        else if (!a->connected) { a->connected = 1; a->modulation = a->fsk_mod; a->bitrate = 300; }
     }
     c = arx_tick(&a->uart, level);
     if (c >= 0 && a->connected) {            /* hand the character on as start-stop bits */
@@ -299,11 +330,35 @@ int16_t answer_tick(answer_t *a, int16_t rx)
         break;
 
     case ANS_V22:
-        tx = v22m_tick(&a->v22, rx);
+        /* A Bell 103 caller takes our unscrambled ones (2250 Hz is in them)
+         * or the answer tone before them for its carrier and replies with a
+         * steady 1270 Hz. Listened for behind the band-pass that keeps our
+         * own signal out: its echo may be the louder of the two. A V.22
+         * caller's scrambled signal is spread over the band and a V.22bis
+         * caller's S1 is 900 and 1500 Hz: neither is one tone at 1270 Hz. */
+        if (!a->connected && !a->used_v8 && (a->cfg.modes & ANS_MODE_BELL103) && a->v22.state == V22S_WAIT) {
+            (void)tonedet_tick(&a->bell, v21_bandpass(a, rx));
+            if (a->bell.blocks >= BELL103_MARK_BLOCKS) { start_fsk(a, 1); break; }
+        }
+        {
+            /* Nobody has answered our unscrambled ones: a Bell 212A (or a
+             * Bell 103) caller may be waiting for 2225 Hz and nothing else.
+             * It gets that in place of the ones while the V.22bis modem
+             * goes on listening; what a 212A caller then sends is what a
+             * V.22 caller sends, and the start-up continues from there. */
+            int tone = !a->connected && !a->used_v8 && (a->cfg.modes & ANS_MODE_BELL212A)
+                       && a->v22.state == V22S_WAIT && a->t > MS(V22_BELL_MS);
+            tx = v22m_tick(&a->v22, rx);
+            if (tone) {
+                int done;
+                if (a->v22.state == V22S_WAIT) tx = v21mod_tick(&a->fmod, 1, &done);
+                else a->via_bell = 1;
+            }
+        }
         if (!a->connected) {
             if (a->v22.tx_ready && a->v22.rx_ready) {
                 a->connected = 1; a->bitrate = a->v22.bitrate;
-                a->modulation = a->bitrate == 2400 ? ANS_MOD_V22BIS : ANS_MOD_V22;
+                a->modulation = a->bitrate == 2400 ? ANS_MOD_V22BIS : a->via_bell ? ANS_MOD_BELL212A : ANS_MOD_V22;
                 a->cd_run = 0;
             } else if (!a->used_v8 && (a->cfg.modes & V8_MOD_V21) && a->v22.state == V22S_WAIT
                        && !a->v22.rx.carrier && a->t > MS(V22_LEGACY_MS)) {

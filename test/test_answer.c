@@ -1,5 +1,6 @@
 /* End-to-end: the answering modem against a calling-modem peer through the
  * channel simulator; characters both ways once connected. */
+#include <math.h>
 #include <string.h>
 #include "test.h"
 #include "../modem/answer.h"
@@ -59,11 +60,152 @@ static void run(int use_v8, unsigned caller_modes, int caller2400, unsigned our_
     (void)msg_a; (void)msg_c;
 }
 
+/* A Bell 103 calling modem, as plain as the real ones: once it has heard
+ * something in its receive band (2025 / 2225 Hz) for 150 ms it sends its
+ * mark, 1270 Hz, and from then on start-stop characters at 300 bit/s. It
+ * knows nothing of V.8 and takes any answer tone near its band for carrier. */
+typedef struct { v21mod_t mod; v21demod_t dem; arx_t uart; v14_t dte; int fbit, cd, on; int64_t thr; } b103_t;
+
+static void b103_init(b103_t *b)
+{
+    memset(b, 0, sizeof *b);
+    v21mod_init(&b->mod, BELL103_O_MARK, BELL103_O_SPACE, 8000, 300, 4243);
+    v21demod_init(&b->dem, BELL103_A_MARK, BELL103_A_SPACE, 8000, 300);
+    arx_init(&b->uart, 8000, 300);
+    v14_init(&b->dte);
+    b->thr = v21demod_energy_of(&b->dem, 1200); b->fbit = 1;
+}
+
+static int16_t b103_tick(b103_t *b, int16_t rx)
+{
+    int level = v21demod_tick(&b->dem, rx), heard = b->dem.energy >= b->thr, c, i, done;
+    int16_t out;
+    b->cd = heard ? b->cd + 1 : 0;
+    if (b->cd > 150 * 8) b->on = 1;
+    if (!b->on) return 0;
+    c = arx_tick(&b->uart, heard ? level : 1);
+    if (c >= 0) {
+        v14_putbit(&b->dte, 0);
+        for (i = 0; i < 8; i++) v14_putbit(&b->dte, (c >> i) & 1);
+        v14_putbit(&b->dte, 1);
+    }
+    out = v21mod_tick(&b->mod, b->fbit, &done);
+    if (done) b->fbit = v14_getbit(&b->dte) & 1;
+    return out;
+}
+
+static void run_bell103(unsigned our_modes, int seconds, outcome *o)
+{
+    static const double one[1] = {1.0};
+    static const char *msg_c = "caller says hello, 0123456789", *msg_a = "answerer replies: ~{}[] OK";
+    channel_cfg cfg; channel_t ch;
+    static answer_t a; static b103_t c; static v14_t dte;
+    answer_cfg ac;
+    int16_t atx = 0, ctx = 0;
+    int n, sent = 0;
+
+    memset(&cfg, 0, sizeof cfg);
+    cfg.ds_noise_dbfs = -55.0; cfg.us_noise_dbfs = -55.0;
+    cfg.ds_taps = one; cfg.ds_ntaps = 1; cfg.us_taps = one; cfg.us_ntaps = 1;
+    cfg.echo_gain = 0.2; cfg.echo_delay = 21; cfg.full_scale = 32124.0; cfg.seed = 17;
+    channel_init(&ch, &cfg);
+    v14_init(&dte);
+    memset(&ac, 0, sizeof ac);
+    ac.level = 3000; ac.modes = our_modes; ac.getbit = v14_getbit; ac.putbit = v14_putbit; ac.user = &dte;
+    answer_init(&a, &ac);
+    b103_init(&c);
+    memset(o, 0, sizeof *o); o->connected_at = -1;
+    for (n = 0; n < seconds * FS; n++) {
+        double client_rx; uint8_t srv; int16_t t;
+        channel_tick(&ch, linear_to_ulaw(atx), (double)ctx, &client_rx, &srv);
+        t = answer_tick(&a, (int16_t)ulaw_to_linear(srv));
+        ctx = b103_tick(&c, (int16_t)lround(client_rx));
+        atx = t;
+        if (o->connected_at < 0 && a.connected) o->connected_at = n;
+        if (o->connected_at >= 0 && !sent && n > o->connected_at + FS / 2) {
+            v14_write(&c.dte, (const uint8_t *)msg_c, (int)strlen(msg_c));
+            v14_write(&dte, (const uint8_t *)msg_a, (int)strlen(msg_a));
+            sent = 1;
+        }
+        if (sent) {
+            o->na += v14_read(&dte, (uint8_t *)o->got_a + o->na, 63 - o->na);
+            o->nc += v14_read(&c.dte, (uint8_t *)o->got_c + o->nc, 63 - o->nc);
+        }
+    }
+    o->modulation = a.modulation; o->bitrate = a.bitrate; o->phase = a.phase;
+}
+
+/* A Bell 212A calling modem that is strict about it: nothing but 2225 Hz
+ * (three 100 ms blocks in a row with more than half of their power within
+ * some 10 Hz of it) is an answering modem to it. Neither the 2100 Hz answer
+ * tone nor the 2250 Hz of V.22's unscrambled ones passes. Then scrambled
+ * ones at 1200 bit/s on the low carrier, and data once the answering side
+ * sends the same on the high one. */
+typedef struct { v22bis_t m; v14_t dte; int on, run, n; double re, im, pw; } b212_t;
+
+static int16_t b212_tick(b212_t *b, int16_t rx)
+{
+    if (!b->on) {
+        double w = 2.0 * 3.14159265358979323846 * 2225.0 * b->n / 8000.0;
+        b->re += rx * cos(w); b->im += rx * sin(w); b->pw += (double)rx * rx;
+        if (++b->n < 800) return 0;
+        b->run = (b->pw > 800.0 * 400 * 400 && (b->re * b->re + b->im * b->im) * 4 > b->pw * 800) ? b->run + 1 : 0;
+        b->n = 0; b->re = b->im = b->pw = 0;
+        if (b->run < 3) return 0;
+        v22m_init(&b->m, V22_CALLER, 0, 3000, v14_getbit, v14_putbit, &b->dte);
+        v22tx_set_mode(&b->m.tx, V22_TX_SB1_1200);
+        b->m.state = V22S_TRAIN;
+        b->on = 1;
+    }
+    return v22m_tick(&b->m, rx);
+}
+
+static void run_bell212(unsigned our_modes, int seconds, outcome *o)
+{
+    static const double one[1] = {1.0};
+    static const char *msg_c = "caller says hello, 0123456789", *msg_a = "answerer replies: ~{}[] OK";
+    channel_cfg cfg; channel_t ch;
+    static answer_t a; static b212_t c; static v14_t dte;
+    answer_cfg ac;
+    int16_t atx = 0, ctx = 0;
+    int n, sent = 0;
+
+    memset(&cfg, 0, sizeof cfg);
+    cfg.ds_noise_dbfs = -55.0; cfg.us_noise_dbfs = -55.0;
+    cfg.ds_taps = one; cfg.ds_ntaps = 1; cfg.us_taps = one; cfg.us_ntaps = 1;
+    cfg.echo_gain = 0.2; cfg.echo_delay = 21; cfg.full_scale = 32124.0; cfg.seed = 17;
+    channel_init(&ch, &cfg);
+    v14_init(&dte);
+    memset(&ac, 0, sizeof ac);
+    ac.level = 3000; ac.modes = our_modes; ac.getbit = v14_getbit; ac.putbit = v14_putbit; ac.user = &dte;
+    answer_init(&a, &ac);
+    memset(&c, 0, sizeof c); v14_init(&c.dte);
+    memset(o, 0, sizeof *o); o->connected_at = -1;
+    for (n = 0; n < seconds * FS; n++) {
+        double client_rx; uint8_t srv; int16_t t;
+        channel_tick(&ch, linear_to_ulaw(atx), (double)ctx, &client_rx, &srv);
+        t = answer_tick(&a, (int16_t)ulaw_to_linear(srv));
+        ctx = b212_tick(&c, (int16_t)lround(client_rx));
+        atx = t;
+        if (o->connected_at < 0 && a.connected && c.on && c.m.tx_ready && c.m.rx_ready) o->connected_at = n;
+        if (o->connected_at >= 0 && !sent && n > o->connected_at + FS / 4) {
+            v14_write(&c.dte, (const uint8_t *)msg_c, (int)strlen(msg_c));
+            v14_write(&dte, (const uint8_t *)msg_a, (int)strlen(msg_a));
+            sent = 1;
+        }
+        if (sent) {
+            o->na += v14_read(&dte, (uint8_t *)o->got_a + o->na, 63 - o->na);
+            o->nc += v14_read(&c.dte, (uint8_t *)o->got_c + o->nc, 63 - o->nc);
+        }
+    }
+    o->modulation = a.modulation; o->bitrate = a.bitrate; o->phase = a.phase;
+}
+
 int main(void)
 {
     outcome o;
     const char *msg_c = "caller says hello, 0123456789", *msg_a = "answerer replies: ~{}[] OK";
-    unsigned ours = V8_MOD_V22 | V8_MOD_V21;
+    unsigned ours = V8_MOD_V22 | V8_MOD_V21 | ANS_MODE_BELL103 | ANS_MODE_BELL212A;
 
     /* 1. V.8 caller offering V.22bis: 2400 bit/s */
     run(1, V8_MOD_V22 | V8_MOD_V21, 1, ours, 14, &o);
@@ -96,6 +238,39 @@ int main(void)
     run(1, V8_MOD_V32, 0, ours, 14, &o);
     CHECK(o.connected_at < 0);
     CHECK_EQ_I(o.phase, ANS_FAILED);
+
+    /* 6. a Bell 103 caller: no V.8, and its mark is 1270 Hz where a V.21
+     * caller's is 980 Hz. We answer on 2225 / 2025 Hz, 300 bit/s. */
+    run_bell103(ours, 22, &o);
+    printf("  answer: Bell 103 connected at %.2f s, \"%s\" / \"%s\"\n", o.connected_at / 8000.0, o.got_a, o.got_c);
+    CHECK(o.connected_at > 0);
+    CHECK_EQ_I(o.modulation, ANS_MOD_BELL103); CHECK_EQ_I(o.bitrate, 300); CHECK_EQ_I(o.phase, ANS_V21);
+    CHECK(!strcmp(o.got_a, msg_c)); CHECK(!strcmp(o.got_c, msg_a));
+
+    /* the same on a port without V.22: the wait for the caller is V.21's */
+    run_bell103(V8_MOD_V21 | ANS_MODE_BELL103, 22, &o);
+    printf("  answer: Bell 103 without V.22 connected at %.2f s\n", o.connected_at / 8000.0);
+    CHECK(o.connected_at > 0);
+    CHECK_EQ_I(o.modulation, ANS_MOD_BELL103); CHECK_EQ_I(o.bitrate, 300);
+    CHECK(!strcmp(o.got_a, msg_c)); CHECK(!strcmp(o.got_c, msg_a));
+
+    /* 7. the same caller with Bell 103 not offered: never that modulation */
+    run_bell103(V8_MOD_V22 | V8_MOD_V21, 45, &o);
+    CHECK(o.modulation != ANS_MOD_BELL103);
+    CHECK(o.na == 0);
+
+    /* 8. a Bell 212A caller that wants 2225 Hz: it gets that after the V.22
+     * answer sequence has gone unanswered, and then 1200 bit/s as in V.22 */
+    run_bell212(ours, 20, &o);
+    printf("  answer: Bell 212A connected at %.2f s, \"%s\" / \"%s\"\n", o.connected_at / 8000.0, o.got_a, o.got_c);
+    CHECK(o.connected_at > 0);
+    CHECK_EQ_I(o.modulation, ANS_MOD_BELL212A); CHECK_EQ_I(o.bitrate, 1200); CHECK_EQ_I(o.phase, ANS_V22);
+    CHECK(!strcmp(o.got_a, msg_c)); CHECK(!strcmp(o.got_c, msg_a));
+
+    /* 9. not offered: that caller hears no 2225 Hz from us and stays silent */
+    run_bell212(V8_MOD_V22 | V8_MOD_V21 | ANS_MODE_BELL103, 45, &o);
+    CHECK(o.connected_at < 0);
+    CHECK_EQ_I(o.modulation, ANS_MOD_NONE);
 
     /* nobody there, but a hybrid that returns a fifth of our own signal: the
      * V.21 fall-back must not take the echo of its 1650 Hz channel for a

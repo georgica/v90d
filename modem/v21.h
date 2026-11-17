@@ -12,6 +12,12 @@
 #define V21L_SPACE 1180
 #define V21H_MARK  1650
 #define V21H_SPACE 1850
+/* Bell 103, the same modulation on other tones: the calling modem sends
+ * mark 1270 Hz / space 1070 Hz, the answering one mark 2225 Hz / space 2025 Hz. */
+#define BELL103_O_MARK  1270
+#define BELL103_O_SPACE 1070
+#define BELL103_A_MARK  2225
+#define BELL103_A_SPACE 2025
 
 typedef struct {
     uint32_t phase;      /* 32-bit phase accumulator */

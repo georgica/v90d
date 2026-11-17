@@ -272,7 +272,7 @@ static int on_save(void *ctx, const cfg_t *n)
 }
 
 static const char *const tel_name[] = { "answered", "busy", "wrong number", "abandoned", "line dropped", "session limit", "idle timeout" };
-static const char *const mod_name[] = { "no carrier", "V.90", "V.34", "V.32bis", "V.22bis", "V.22", "V.21", "V.92" };
+static const char *const mod_name[] = { "no carrier", "V.90", "V.34", "V.32bis", "V.22bis", "V.22", "V.21", "V.92", "Bell 103", "Bell 212A" };
 
 /* PPP compression (CCP) of the call that ended: one line, only if it was used */
 static void log_ppp_comp(const char *who, const ppp_t *ppp)
@@ -299,7 +299,7 @@ static void log_last_call(int port)
     if (n_ports > 1) snprintf(who, sizeof who, "port %d: ", port + 1);
     logf_(CFG_LOG_INFO, "%scall to \"%s\": %s; %s %u/%u bit/s, %u s",
           who, h->dialed, (unsigned)h->tel_result < 7 ? tel_name[h->tel_result] : "?",
-          (unsigned)h->modulation < 8 ? mod_name[h->modulation] : "?",
+          (unsigned)h->modulation < sizeof mod_name / sizeof mod_name[0] ? mod_name[h->modulation] : "?",
           (unsigned)h->down_bps, (unsigned)h->up_bps, (unsigned)h->duration_s);
     if (h->modulation) {
         /* the call object is left as it ended: what the link layer did */

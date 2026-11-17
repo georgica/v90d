@@ -19,7 +19,8 @@ the stock firmware stays in the box, one click away.
 ## What it does
 
 - Answers a modem on either phone port: V.92, V.90, V.34, V.32bis, V.22bis,
-  V.22 and V.21, with V.42 error correction and V.42bis / V.44 compression.
+  V.22, V.21, Bell 212A and Bell 103, with V.42 error correction and V.42bis / V.44
+  compression.
 - PPP server with users and passwords, MPPC compression for Windows
   callers, NAT to the network on the Ethernet port, DNS handed to the
   caller.

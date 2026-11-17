@@ -35,7 +35,8 @@ typedef enum {
 typedef enum {
     ST_MOD_NONE = 0, ST_MOD_V90, ST_MOD_V34, ST_MOD_V32BIS, ST_MOD_V22BIS,
     ST_MOD_V22, ST_MOD_V21,
-    ST_MOD_V92          /* appended: the values above stay as they were */
+    ST_MOD_V92,         /* appended: the values above stay as they were */
+    ST_MOD_BELL103, ST_MOD_BELL212A
 } st_mod_t;
 
 typedef enum {

@@ -182,8 +182,10 @@ static void call_start(srv_t *s)
     if ((c->modulations & CFG_MOD_V90) && c->v92 && c->v42 && (bbs || (!for_console(c) && !for_link(c)))) d.modes |= ANS_MODE_V92;
     if (c->modulations & CFG_MOD_V34) d.modes |= V8_MOD_V34;
     if (c->modulations & CFG_MOD_V32BIS) d.modes |= V8_MOD_V32;
-    if (c->modulations & (CFG_MOD_V22BIS | CFG_MOD_V22)) d.modes |= V8_MOD_V22;
-    if (c->modulations & CFG_MOD_V21) d.modes |= V8_MOD_V21;
+    /* 1200 bit/s: V.22 and, behind a 2225 Hz answer tone, Bell 212A */
+    if (c->modulations & (CFG_MOD_V22BIS | CFG_MOD_V22)) d.modes |= V8_MOD_V22 | ANS_MODE_BELL212A;
+    /* 300 bit/s: V.21 and, for a caller that turns out to be one, Bell 103 */
+    if (c->modulations & CFG_MOD_V21) d.modes |= V8_MOD_V21 | ANS_MODE_BELL103;
     d.alaw = c->law == CFG_LAW_ALAW;
     d.echo_delay = s->echo_delay;
     d.rx_linear = s->rx_linear; d.max_tx_code = s->max_tx_code;
@@ -233,6 +235,8 @@ static st_mod_t mod_of(int m)
     case ANS_MOD_V22BIS: return ST_MOD_V22BIS;
     case ANS_MOD_V22: return ST_MOD_V22;
     case ANS_MOD_V21: return ST_MOD_V21;
+    case ANS_MOD_BELL103: return ST_MOD_BELL103;
+    case ANS_MOD_BELL212A: return ST_MOD_BELL212A;
     default: return ST_MOD_NONE;
     }
 }

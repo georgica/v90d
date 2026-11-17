@@ -128,7 +128,7 @@ for them with the DIL; ours just sends what it asks for).
 
 | Directory | What | Shipped |
 |---|---|---|
-| `modem/` | answering modem: V.8, V.21, V.22bis/V.22, V.14, V.90 Phase 2 (`p2d`), Phases 3/4 and data (`p34d`), upstream receiver (`qamrx`, `ec`, `v34train`); V.34 answering (`p2ans`, `v34mp`, `v34mod`, `v34dx`, `v34ans`) | yes |
+| `modem/` | answering modem: V.8, V.21 and Bell 103, V.22bis/V.22 and Bell 212A, V.14, V.90 Phase 2 (`p2d`), Phases 3/4 and data (`p34d`), upstream receiver (`qamrx`, `ec`, `v34train`); V.34 answering (`p2ans`, `v34mp`, `v34mod`, `v34dx`, `v34ans`) | yes |
 | `v32/` | V.32bis / V.32 modem (4800 to 14400 bit/s), used on the answer side | yes |
 | `cfg/` | configuration file, status page, settings form, HTTP server | yes |
 | `v90/` | V.90 digital transmitter from Phase 3 on (PCM signals, Jd, DIL, MP, data encoder), CP codec | yes |
@@ -161,6 +161,28 @@ for them with the DIL; ours just sends what it asks for).
   the V.90 or V.34 way as before. V.8 is the same either way.
 - otherwise V.22bis / V.22 (`v22tx`, `v22rx`, `v22bis`) or V.21 (`v21`).
 - no V.8 at all: the V.22bis answer sequence after ANSam, V.21 after 8 s.
+- Bell 103 (300 bit/s, the V.21 modulator and demodulator on that system's
+  tones: we send 2225 / 2025 Hz and receive 1270 / 1070 Hz) for a caller
+  without V.8 that sends a steady 1270 Hz while we wait for it. Such a
+  modem takes the answer tone or the unscrambled ones of the V.22bis answer
+  sequence (2250 Hz is in them) for its carrier and replies with its mark.
+  The tone watch (`tonedet`) sits behind a receive band-pass
+  (`bell103_bpf.h`) that keeps our own signal out, and wants 200 ms of the
+  tone in the V.22bis wait, 60 ms in the V.21 wait (before that receiver's
+  100 ms would take the tone for a V.21 carrier). A port that has V.21 on
+  has Bell 103 on: there is no setting of its own. No error control, as in
+  V.21.
+- Bell 212A (1200 bit/s; modulation and scrambler are V.22's, the answer
+  tone is not). A caller without V.8 that has not answered 4 s of the
+  V.22bis answer sequence gets 2225 Hz, the Bell answer tone, in place of
+  the unscrambled ones for the next 4 s, while the V.22bis modem goes on
+  listening: single-chip modems of that kind detect 2225 Hz within 10 Hz
+  and take neither 2100 Hz nor 2250 Hz for it. What the caller then sends
+  is what a V.22 caller sends, and the start-up goes on as V.22's. A call
+  that began during the tone is shown as "Bell 212A". The same tone serves
+  a Bell 103 caller that is as strict. On with V.22 or V.22bis on the
+  port. Simulated only: no modem that is known to call as 212A and nothing
+  else has been on the line.
 
 ### 4.2 V.90, digital side
 Downstream (us to caller) is PCM at 8000 symbols/s; upstream is V.34 at 3200 or

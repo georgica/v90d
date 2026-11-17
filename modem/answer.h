@@ -22,6 +22,7 @@
 #include "v8ans.h"
 #include "v22bis.h"
 #include "v21.h"
+#include "tonedet.h"
 #include "async.h"
 #include "p2d.h"
 #include "p34d.h"
@@ -50,6 +51,13 @@ typedef enum {
 /* with ANS_MODE_V90: indicate V.92 in Phase 2 and offer PCM upstream to a
  * caller that indicates it too (use answer_tick_pcm, as for V.90) */
 #define ANS_MODE_V92 0x20000u
+/* answer a caller without V.8 that sends the Bell 103 mark (1270 Hz) in
+ * Bell 103: 300 bit/s FSK like V.21, on that system's tones */
+#define ANS_MODE_BELL103 0x40000u
+/* with V8_MOD_V22: when the V.22bis answer sequence has gone unanswered by
+ * a caller without V.8, send the Bell answer tone (2225 Hz) for a while:
+ * a Bell 212A caller replies with 1200 bit/s as a V.22 caller would */
+#define ANS_MODE_BELL212A 0x80000u
 
 #define ANS_MOD_NONE   0
 #define ANS_MOD_V21    1
@@ -59,6 +67,8 @@ typedef enum {
 #define ANS_MOD_V34    5
 #define ANS_MOD_V32BIS 6     /* V.32bis or V.32: 4800 to 14400 bit/s */
 #define ANS_MOD_V92    7     /* PCM both ways: 24000 to 48000 bit/s upstream */
+#define ANS_MOD_BELL103 8    /* 300 bit/s, in ANS_V21 */
+#define ANS_MOD_BELL212A 9   /* 1200 bit/s, in ANS_V22: V.22 begun after our 2225 Hz */
 
 typedef struct {
     int           level;     /* transmit RMS, 16-bit sample units */
@@ -98,8 +108,10 @@ typedef struct {
     v32_aadet_t aadet;       /* 1800 Hz from the caller while the answer tone runs */
     uint8_t    pcm;          /* the codeword of this sample while V.90 runs */
     v21mod_t   fmod; v21demod_t fdem; arx_t uart;
-    int        fbit; int32_t cd_run; int64_t cd_thresh;
-    int16_t    bpf[128]; int bpos;   /* V.21 receive band-pass history */
+    int        fbit, fsk_mod, via_bell; int32_t cd_run; int64_t cd_thresh;
+    int16_t    bpf[128]; int bpos;   /* V.21 / Bell 103 receive band-pass history */
+    const int16_t *bpf_taps;         /* v21_bpf or bell103_bpf */
+    tonedet_t  bell;                 /* the Bell 103 caller's mark while we wait in ANS_V22 */
     int        connected, modulation, bitrate;
     int        rx_bitrate;   /* receive direction, where it differs (V.90 upstream) */
     int        cleared;      /* the call ended by a V.90 cleardown: 1 the caller's, 2 ours */
