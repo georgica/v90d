@@ -2238,3 +2238,15 @@ with the long distance 1 as well (`tel/tel.c`; Windows dials it so unless
 told otherwise, and the call list showed `16387825442` as a wrong number
 three times that day). `test_trunk_one`: red before (1 failure), tel: 396
 checks, 0 failures after.
+
+### 0.4.0
+
+Host and ARM suites on the tree of the release: "ALL HOST CHECKS PASS",
+"ALL ARM CHECKS PASS". `make -C fw release`, `make -C fw test-release`:
+11 tests OK, loader: 129 checks, 0 failures. The image
+(`v90d-ht802fw.bin`, SHA-256 922729a3...b022ce9c) uploaded on the unit's
+Firmware page: back after about 100 s as 0.4.0, start confirmed, no
+telnet. On it, the 1998 U.S. Robotics on PHONE 2: V.90 54666 / 28800
+twice, once dialled as `16387825442`. The Conexant and the 5686 were not
+attached for this last check; they were tested on the same sources in the
+bench build (above).
