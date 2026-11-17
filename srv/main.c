@@ -333,7 +333,7 @@ static void usage(void)
 {
     fprintf(stderr, "usage: v90d [-c FILE] -l LINE [-l LINE2] [-d N] [-i LAN-IF] [-t TUN] [-A GATEWAY] [-D FETCH-COMMAND] [-G REPORT-PROGRAM] [-E LEASE-COMMAND] [-v]\n       v90d [-c FILE] -p\n"
                     "bench: [-R l|c per port, e.g. lc] [-P 1..31: maximum downstream power code] [-w|-W FILE: record port 1|2]\n"
-                    "       [-o: the box calls a modem that goes off hook (told ATA): V.21, V.22, V.22bis]\n");
+                    "       [-o: the box calls a modem that goes off hook (told ATA): V.34, V.32bis, V.22bis, V.22, V.21]\n");
     exit(2);
 }
 

@@ -218,7 +218,7 @@ static void call_start(srv_t *s)
     if (s->originate) {
         /* what the calling side can do so far */
         d.originate = 1;
-        d.modulations &= V90M_MOD_V22 | V90M_MOD_V21;
+        d.modulations &= V90M_MOD_V34 | V90M_MOD_V32BIS | V90M_MOD_V22 | V90M_MOD_V21;
     }
     if (!c->v42) { d.v42.detect = 1; d.v42.fallback = 1; d.v42.t400_ms = 1; }  /* straight to start-stop */
     if (!c->v42bis) {

@@ -111,7 +111,7 @@ typedef struct {
      * terminal program calling a bulletin board, srv/bbs.h); 0 = none */
     int      raw_ec;
     /* bench: the box calls (the modem on the port was told ATA): the
-     * modem in the calling role (V.21 and V.22 / V.22bis so far) and V.42
+     * modem in the calling role (V.34, V.32bis, V.22bis, V.22, V.21 so far) and V.42
      * as the originator */
     int      originate;
     /* closing sequence limits, ms; 0 = the defaults in brackets */
