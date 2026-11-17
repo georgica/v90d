@@ -2299,6 +2299,7 @@ confirmed 0, no telnet. On it, the 1998 U.S. Robotics on PHONE 2:
 | `ATS32=66` (no V.90, no x2) | `CONNECT 31200/ARQ/V34/LAPM/V42`, the list: V.34, 31200 / 31200 |
 | 227 835 3422 | V.90, "Calling Telehack ...", Telehack's greeting and prompt |
 
-Not tried on this image: V.92 (neither the 5686 nor the Conexant was
-attached; the V.92 engine's part of the change is covered by its tests and
-by the replayed recordings above).
+After the release was published the 5686 (flash 5.4.62) went back on the
+bridge, the same image on the box: V.92, 3 calls of 3, `CONNECT 54666`, the
+box's list 54666 / 40000, 38666 and 38666. The Conexant was not tried on
+this image.
