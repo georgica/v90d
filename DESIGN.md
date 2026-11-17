@@ -128,7 +128,7 @@ for them with the DIL; ours just sends what it asks for).
 
 | Directory | What | Shipped |
 |---|---|---|
-| `libv90modem/` | the modem: V.8 to V.92 and V.42 (its own README and DESIGN); the line simulator and the modem tests live there | yes (the library) |
+| `../libv90modem` | the modem, a repository of its own: V.8 to V.92 and V.42 (its own README and DESIGN); the line simulator and the modem tests live there | yes (the library) |
 | `cfg/` | configuration file, status page, settings form, HTTP server | yes |
 | `arch/` | Archive mode gateway `v90arch`: catch-all DNS, HTTP rewrite to the Protoweb proxy, FTP server over the same proxy (a separate process, started by the daemon) | yes |
 | `ppp/` | PPP server: HDLC framing, LCP, PAP/CHAP, IPCP, CCP with Deflate and MPPC (`ppp_deflate`, `ppp_mppc`) | yes |
@@ -142,7 +142,7 @@ for them with the DIL; ours just sends what it asks for).
 
 ## 4. The modem
 
-The modem is libv90modem (`libv90modem/`, its own `DESIGN.md` has what was
+The modem is libv90modem (its own repository, `../libv90modem`; its `DESIGN.md` has what was
 section 4 here: start-up, V.90 and V.92 digital side, why not x2 and
 K56flex, fixed-point conventions). v90d uses its public API
 (`include/v90modem.h`): `dce/` runs one modem and one V.42 endpoint per

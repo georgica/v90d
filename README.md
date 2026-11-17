@@ -111,8 +111,9 @@ The one other outside part is OpenVPN (with mbed TLS), built unchanged from
 source for the optional IWANGO tunnel. There is no Grandstream code or
 binary in the image and no closed blob.
 
-The modem is libv90modem (`libv90modem/`, GPL-2.0-only), a library of its
-own that v90d builds against; `libv90m.mk` says where it is.
+The modem is libv90modem (GPL-2.0-only), a library in a repository of its
+own that v90d builds against: check it out next to this tree
+(`../libv90modem`) or say where it is with `LIBV90M=` (`libv90m.mk`).
 
 `DESIGN.md` says how it is built and why, `HARDWARE.md` what was learned
 about the box, `PROGRESS.md` what was measured and when, with the test
@@ -176,6 +177,7 @@ A Linux PC with the usual build tools (gcc, make, python3, curl, bc, flex,
 bison) is enough.
 
 ```
+git clone <libv90modem> ../libv90modem   # the modem, next to this tree
 sh fw/setup.sh          # fetches the cross toolchain, Linux, busybox, OpenVPN and mbed TLS (checked by SHA-256) and builds them
 make -C fw release      # fw/build/release/v90d-ht802fw.bin
 ```
@@ -192,7 +194,6 @@ make -C fw test-release # the firmware file, the flash tools and the loader agai
 
 | directory | what |
 |---|---|
-| `libv90modem/` | the modem as a library of its own: V.8 to V.92, V.42, V.42bis, V.44, the line simulator and the modem's tests (see its README) |
 | `ppp/` | the PPP server |
 | `tel/` | tones, dialling, the call's life |
 | `dce/` | modem, link layer and PPP tied into one call |

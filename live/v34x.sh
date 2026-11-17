@@ -3,7 +3,6 @@
 cd "$(dirname "$0")/.." || exit 1
 N=$1; NAME=$2
 F="-std=c99 -O2 -Wall -Wextra -Werror -D_POSIX_C_SOURCE=200809L -DV34X=$N"
-touch libv90modem/modem/v34ans.c   # (each set of -D options gets its own library build anyway)
 make -s -C srv v90d-arm CFLAGS="$F" || exit 1
 (cd srv && make -s -f ../live/replay.mk ../live/replay CFLAGS="$F") || exit 1
 ./live/push.sh | tail -1
