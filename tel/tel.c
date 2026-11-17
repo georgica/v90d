@@ -1,7 +1,7 @@
 /* Telephony layer: see tel.h. */
 #include <string.h>
 #include "tel.h"
-#include "../modem/sintab.h"
+#include "sintab.h"   /* a copy of libv90modem's modem/sintab.h: the same table, the same tones */
 
 #define MS(x) ((int32_t)(x) * (TEL_FS / 1000))
 

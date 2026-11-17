@@ -57,7 +57,7 @@ static void one_call(int v90, const char *user, const char *pass)
     channel_init(&CH, &cc);
     memset(prev_tx, 0xFF, sizeof prev_tx); fn = 0; c_tx = 0; got_n = 0; logbuf[0] = 0;
     memset(&pc, 0, sizeof pc);
-    pc.level = 3000; pc.modes = V8_MOD_V22 | V8_MOD_V21 | (v90 ? ANS_MODE_V90 : 0); pc.user = user; pc.pass = pass; pc.log = on_log;
+    pc.level = 3000; pc.modulations = V90M_MOD_V22 | V90M_MOD_V21 | (v90 ? V90M_MOD_V90 : 0); pc.user = user; pc.pass = pass; pc.log = on_log;
     pppcall_init(&P, &pc);
     caller_cfg_default(&kc);
     kc.v90 = v90; kc.ip_rx = cli_rx;

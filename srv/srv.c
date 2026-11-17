@@ -1,13 +1,32 @@
 /* The dial-up server without its operating system: see srv.h. */
 #include <string.h>
 #include "srv.h"
-#include "pcmenc.h"
-#include "v90_pcm.h"
-#include "probe.h"
 
 /* RMS of a tone of 0 dBm0 in 16-bit sample units (mu-law: a sine of
  * +3.17 dBm0 just reaches the top codeword, 32124) */
 #define RMS_0DBM0 15770
+
+/* 10 log10(num / den) in 0.1 dB, integer only: for the line level shown on
+ * the status page (the same arithmetic as the modem's own probe_db10) */
+static int32_t log2q8(int64_t v)
+{
+    static const uint16_t tab[17] = { 0, 22, 44, 63, 82, 100, 118, 134, 150, 165, 179, 193,
+                                      207, 220, 232, 244, 256 };
+    int n = 0, i, f;
+    int64_t t = v;
+    if (v <= 0) return -(64 << 8);
+    while (t > 1) { t >>= 1; n++; }
+    /* 8 mantissa bits below the leading one */
+    t = n >= 8 ? (v >> (n - 8)) & 0xff : (v << (8 - n)) & 0xff;
+    i = (int)(t >> 4); f = (int)(t & 15);
+    return (n << 8) + tab[i] + (((tab[i + 1] - tab[i]) * f) >> 4);
+}
+
+static int db10(int64_t num, int64_t den)
+{
+    /* 10 log10(2) = 3.0103 dB per octave -> 30.103 tenths; / 256 for Q8 */
+    return (int)(((int64_t)(log2q8(num) - log2q8(den)) * 30103) / 256000);
+}
 
 int srv_level_rms(int dbm0)
 {
@@ -18,7 +37,7 @@ int srv_level_rms(int dbm0)
     return (int)v;
 }
 
-static uint8_t silence(const srv_t *s) { return pcm_encode(s->cfg.law == CFG_LAW_ALAW, 0); }
+static uint8_t silence(const srv_t *s) { return v90m_g711_encode(s->cfg.law == CFG_LAW_ALAW, 0); }
 
 /* the port is set up for a game console: config.h, console.h */
 static int for_console(const cfg_t *c) { return c->service == CFG_SERVICE_DREAMCAST; }
@@ -174,16 +193,16 @@ static void call_start(srv_t *s)
     }
     dce_cfg_default(&d);
     d.tx_level = srv_level_rms(c->tx_level);
-    d.modes = 0;
-    if (c->modulations & CFG_MOD_V90) d.modes |= ANS_MODE_V90;
+    d.modulations = 0;
+    if (c->modulations & CFG_MOD_V90) d.modulations |= V90M_MOD_V90;
     /* V.92 rides on the V.90 offer. Only with error control: a V.92 caller
      * that saw LAPM in our JM skips ODP / ADP (V.92 9.3.1) and would wait
      * for a LAPM that v42 = off never starts */
-    if ((c->modulations & CFG_MOD_V90) && c->v92 && c->v42 && (bbs || (!for_console(c) && !for_link(c)))) d.modes |= ANS_MODE_V92;
-    if (c->modulations & CFG_MOD_V34) d.modes |= V8_MOD_V34;
-    if (c->modulations & CFG_MOD_V32BIS) d.modes |= V8_MOD_V32;
-    if (c->modulations & (CFG_MOD_V22BIS | CFG_MOD_V22)) d.modes |= V8_MOD_V22;
-    if (c->modulations & CFG_MOD_V21) d.modes |= V8_MOD_V21;
+    if ((c->modulations & CFG_MOD_V90) && c->v92 && c->v42 && (bbs || (!for_console(c) && !for_link(c)))) d.modulations |= V90M_MOD_V92;
+    if (c->modulations & CFG_MOD_V34) d.modulations |= V90M_MOD_V34;
+    if (c->modulations & CFG_MOD_V32BIS) d.modulations |= V90M_MOD_V32BIS;
+    if (c->modulations & (CFG_MOD_V22BIS | CFG_MOD_V22)) d.modulations |= V90M_MOD_V22;
+    if (c->modulations & CFG_MOD_V21) d.modulations |= V90M_MOD_V21;
     d.alaw = c->law == CFG_LAW_ALAW;
     d.echo_delay = s->echo_delay;
     d.rx_linear = s->rx_linear; d.max_tx_code = s->max_tx_code;
@@ -191,7 +210,7 @@ static void call_start(srv_t *s)
     if (!c->v42) { d.v42.detect = 1; d.v42.fallback = 1; d.v42.t400_ms = 1; }  /* straight to start-stop */
     if (!c->v42bis) {
         /* the switch is for data compression as a whole: V.42 bis and V.44 */
-        d.v42.lapm.comp_tx = 0; d.v42.lapm.comp_rx = 0;
+        d.v42.lapm.v42bis_tx = 0; d.v42.lapm.v42bis_rx = 0;
         d.v42.lapm.v44_tx = 0; d.v42.lapm.v44_rx = 0;
     }
     d.ppp.auth = c->auth == CFG_AUTH_CHAP ? PPP_AUTH_CHAP : c->auth == CFG_AUTH_PAP ? PPP_AUTH_PAP : PPP_AUTH_NONE;
@@ -226,13 +245,13 @@ static void call_start(srv_t *s)
 static st_mod_t mod_of(int m)
 {
     switch (m) {
-    case ANS_MOD_V90: return ST_MOD_V90;
-    case ANS_MOD_V92: return ST_MOD_V92;
-    case ANS_MOD_V34: return ST_MOD_V34;
-    case ANS_MOD_V32BIS: return ST_MOD_V32BIS;
-    case ANS_MOD_V22BIS: return ST_MOD_V22BIS;
-    case ANS_MOD_V22: return ST_MOD_V22;
-    case ANS_MOD_V21: return ST_MOD_V21;
+    case V90M_CONN_V90: return ST_MOD_V90;
+    case V90M_CONN_V92: return ST_MOD_V92;
+    case V90M_CONN_V34: return ST_MOD_V34;
+    case V90M_CONN_V32BIS: return ST_MOD_V32BIS;
+    case V90M_CONN_V22BIS: return ST_MOD_V22BIS;
+    case V90M_CONN_V22: return ST_MOD_V22;
+    case V90M_CONN_V21: return ST_MOD_V21;
     default: return ST_MOD_NONE;
     }
 }
@@ -265,10 +284,10 @@ static void refresh(srv_t *s)
     /* what came off the line in the last whole second, the echo of our own
      * signal included, against the 0 dBm0 sine */
     st->rx_level_x10 = d->modem_connected && s->rx_pow_last > 0 ?
-        probe_db10(s->rx_pow_last, (int64_t)RMS_0DBM0 * RMS_0DBM0) : 0;
+        db10(s->rx_pow_last, (int64_t)RMS_0DBM0 * RMS_0DBM0) : 0;
     st->v42 = !d->modem_connected ? ST_V42_OFF :
               d->error_control ? ST_V42_LAPM :
-              d->v42_state == V42EC_ASYNC ? ST_V42_ASYNC : ST_V42_DETECT;
+              d->v42_state == V90M_EC_ASYNC ? ST_V42_ASYNC : ST_V42_DETECT;
     st->compression = d->comp_tx || d->comp_rx;
     switch (d->ppp_phase) {
     case PPP_PHASE_ESTABLISH: st->ppp = ST_PPP_ESTABLISH; break;
@@ -327,7 +346,7 @@ static void episode_end(srv_t *s)
 
 uint8_t srv_tick(srv_t *s, int offhook, uint8_t rx)
 {
-    return srv_tick_lin(s, offhook, (int16_t)v90_octet_linear(s->cfg.law == CFG_LAW_ALAW, rx));
+    return srv_tick_lin(s, offhook, v90m_g711_decode(s->cfg.law == CFG_LAW_ALAW, rx));
 }
 
 uint8_t srv_tick_lin(srv_t *s, int offhook, int16_t lin)
@@ -364,7 +383,7 @@ uint8_t srv_tick_lin(srv_t *s, int offhook, int16_t lin)
             refresh(s);
         }
     } else {
-        out = tone ? pcm_encode(alaw, tone) : silence(s);
+        out = tone ? v90m_g711_encode(alaw, tone) : silence(s);
     }
 
     s->rx_pow += (int32_t)lin * lin;

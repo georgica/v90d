@@ -7,14 +7,16 @@ ARM_CC  ?= $(wildcard $(CURDIR)/../../toolchain/*/bin/arm-linux-gcc)
 QEMU    ?= qemu-arm-static
 BUILD   := build
 TESTS   := test_pump test_proslic test_slic test_qspi
-SRC     := pump.c proslic.c slic.c qspi.c test/chipsim.c test/qspisim.c ../../v90/v90_pcm.c
+SRC     := pump.c proslic.c slic.c qspi.c test/chipsim.c test/qspisim.c
+# test_pump compares the pump's tables with the modem's G.711 (libv90modem)
+include ../../libv90m.mk
 .PHONY: test test-arm clean
 $(BUILD):
 	@mkdir -p $(BUILD)
-$(BUILD)/%: test/%.c $(SRC) $(wildcard *.h test/*.h) | $(BUILD)
-	$(CC) $(CFLAGS) -I../../test -I../../v90 -I. -o $@ $< $(SRC) -lm
-$(BUILD)/arm_%: test/%.c $(SRC) $(wildcard *.h test/*.h) | $(BUILD)
-	$(ARM_CC) $(CFLAGS) -static -I../../test -I../../v90 -I. -o $@ $< $(SRC) -lm
+$(BUILD)/%: test/%.c $(SRC) $(wildcard *.h test/*.h) $(LIBV90M_A) | $(BUILD)
+	$(CC) $(CFLAGS) -I../../test $(LIBV90M_INC) -I. -o $@ $< $(SRC) $(LIBV90M_A) -lm
+$(BUILD)/arm_%: test/%.c $(SRC) $(wildcard *.h test/*.h) $(LIBV90M_A_ARM) | $(BUILD)
+	$(ARM_CC) $(CFLAGS) -static -I../../test $(LIBV90M_INC) -I. -o $@ $< $(SRC) $(LIBV90M_A_ARM) -lm
 test: $(addprefix $(BUILD)/,$(TESTS))
 	@for t in $(TESTS); do ./$(BUILD)/$$t || exit 1; done
 test-arm: $(addprefix $(BUILD)/arm_,$(TESTS))

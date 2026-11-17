@@ -111,6 +111,9 @@ The one other outside part is OpenVPN (with mbed TLS), built unchanged from
 source for the optional IWANGO tunnel. There is no Grandstream code or
 binary in the image and no closed blob.
 
+The modem is libv90modem (`libv90modem/`, GPL-2.0-only), a library of its
+own that v90d builds against; `libv90m.mk` says where it is.
+
 `DESIGN.md` says how it is built and why, `HARDWARE.md` what was learned
 about the box, `PROGRESS.md` what was measured and when, with the test
 output.
@@ -130,7 +133,7 @@ Tested with three modems:
 
 | modem | what connects |
 |---|---|
-| Conexant CX93010 (USB) | every modulation in the list; V.90 about 50666 down / 28800 up; V.92 about 50666 / 25333 (`AT+PIG=0`) |
+| Conexant CX93001 (USB) | every modulation in the list; V.90 about 50666 down / 28800 up; V.92 about 50666 / 25333 (`AT+PIG=0`) |
 | U.S. Robotics 5686 (external, V.92) | V.90 54666 / 26400; V.92 54666 / 40000 (it asks for PCM upstream by itself) |
 | U.S. Robotics 56K of 1998 (x2 with the V.90 upgrade) | V.90 54666 to 56000 / 28800 |
 
@@ -147,7 +150,7 @@ The two 56k schemes from before V.90, x2 and K56flex, are not spoken; a
 modem that has nothing newer is left with V.34 (the 1998 modem above
 connected at V.34, 28800, when its V.90 start-up did not go through; no
 modem without V.90 has been tried). Neither scheme was ever published; see
-DESIGN.md, 4.2b.
+libv90modem/DESIGN.md, 4.2b.
 
 The bulletin board calls were made with the Conexant: a board's own
 number from Linux (227 835 3422 reached Telehack), and 1 800 BBS DIAL from
@@ -180,7 +183,7 @@ make -C fw release      # fw/build/release/v90d-ht802fw.bin
 Tests (no box needed):
 
 ```
-make check              # everything on the PC
+make check              # everything on the PC (libv90modem's suite first)
 make check-arm          # the same code built for the box, under qemu-arm (needs qemu-user-static)
 make -C fw test-release # the firmware file, the flash tools and the loader against models of the box
 ```
@@ -189,8 +192,7 @@ make -C fw test-release # the firmware file, the flash tools and the loader agai
 
 | directory | what |
 |---|---|
-| `modem/`, `v32/`, `v34/`, `v90/`, `v92/` | the answering modem |
-| `v42/` | V.42, V.42bis, V.44 |
+| `libv90modem/` | the modem as a library of its own: V.8 to V.92, V.42, V.42bis, V.44, the line simulator and the modem's tests (see its README) |
 | `ppp/` | the PPP server |
 | `tel/` | tones, dialling, the call's life |
 | `dce/` | modem, link layer and PPP tied into one call |
@@ -199,7 +201,7 @@ make -C fw test-release # the firmware file, the flash tools and the loader agai
 | `cfg/` | settings, status and the web interface |
 | `arch/` | the Archive service's helpers |
 | `fw/` | the firmware: kernel board support and drivers, loader, flash tools, image and release build |
-| `sim/`, `test/`, `rig/` | line simulator, tests, real-modem test rigs for a PC |
+| `test/`, `rig/` | the test harness, real-modem test rigs for a PC |
 | `live/` | the bench scripts used for the measurements in `PROGRESS.md` |
 | `refs/` | notes on the hardware, as facts |
 

@@ -5,7 +5,7 @@ ARM_CC  ?= $(wildcard $(CURDIR)/../toolchain/*/bin/arm-linux-gcc)
 QEMU    ?= qemu-arm-static
 BUILD   := build
 SRC     := tel.c
-HDRS    := tel.h ../modem/sintab.h ../test/test.h
+HDRS    := tel.h sintab.h ../test/test.h
 
 .PHONY: test test-arm clean
 test: $(BUILD)/test_tel

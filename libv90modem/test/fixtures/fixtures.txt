@@ -1,0 +1,15 @@
+# Recordings of calls with real modems (format: tools/README.md), and what
+# v90m-replay must make of each. Columns: file, v90m-replay options (the
+# settings the call was made with), the expected "modulation ..." line of
+# the replay up to the SNR, the modem, the date of the call.
+#
+# The transmit matches the recording up to data mode, where the recording
+# modem's data begin (its PPP session); the line that counts differences
+# shows where that is.
+cxa.raw.xz   -9 -u 33600   modulation 7, 50666 bit/s down, 25333 up   Conexant CX93001 (USB), AT+PIG=0          2026-11-16
+v34a.raw.xz                modulation 5, 31200 bit/s down, 28800 up   Conexant CX93001 (USB), V.34 forced       2026-11-15
+v21a.raw.xz                modulation 1, 300 bit/s down, 300 up       Conexant CX93001 (USB), V.21 forced       2026-11-15
+usr7.raw.xz  -9            modulation 7, 54666 bit/s down, 40000 up   U.S. Robotics 5686, firmware 5.4.62       2026-11-16
+usr6.raw.xz  -9 -u 32000   modulation 7, 54666 bit/s down, 32000 up   U.S. Robotics 5686, firmware 5.4.62       2026-11-16
+x2r2.raw.xz  -9 -u 33600   modulation 4, 54666 bit/s down, 28800 up   U.S. Robotics 56K of 1998, flash 5.1.4    2026-11-16
+x2b.raw.xz   -9 -u 33600   modulation 5, 28800 bit/s down, 28800 up   U.S. Robotics 56K of 1998, flash 5.1.4    2026-11-16

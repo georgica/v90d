@@ -33,7 +33,6 @@
 #include <unistd.h>
 #include "modemterm.h"
 #include "pppcall.h"
-#include "../modem/v8msg.h"
 
 #define BUFSZ 4096
 #define HDRSZ 2048
@@ -42,7 +41,7 @@ enum { MODE_ECHO, MODE_SILENCE, MODE_FILE, MODE_MODEM, MODE_PPP };
 
 static mterm_t mt;
 static int mt_level = 3000;
-static unsigned mt_modes = V8_MOD_V22 | V8_MOD_V21;
+static unsigned mt_modes = V90M_MOD_V22 | V90M_MOD_V21;
 static pppcall_t pc;
 static const char *ppp_user, *ppp_pass;
 
@@ -219,7 +218,7 @@ static void on_rtp(void)
         if (mode == MODE_PPP) {
             pppcall_cfg c;
             memset(&c, 0, sizeof c);
-            c.level = mt_level; c.modes = mt_modes; c.user = ppp_user; c.pass = ppp_pass; c.log = mt_log;
+            c.level = mt_level; c.modulations = mt_modes; c.user = ppp_user; c.pass = ppp_pass; c.log = mt_log;
             pppcall_init(&pc, &c);
         }
     }
@@ -396,9 +395,9 @@ int main(int argc, char **argv)
             break;
         }
         case 'g': mt_level = atoi(optarg); break;             /* modem transmit RMS */
-        case 'M': mt_modes = !strcmp(optarg, "v21") ? V8_MOD_V21 : !strcmp(optarg, "v22") ? V8_MOD_V22
-                           : !strcmp(optarg, "v90") ? (ANS_MODE_V90 | V8_MOD_V22 | V8_MOD_V21)
-                           : (V8_MOD_V22 | V8_MOD_V21); break;
+        case 'M': mt_modes = !strcmp(optarg, "v21") ? V90M_MOD_V21 : !strcmp(optarg, "v22") ? V90M_MOD_V22
+                           : !strcmp(optarg, "v90") ? (V90M_MOD_V90 | V90M_MOD_V22 | V90M_MOD_V21)
+                           : (V90M_MOD_V22 | V90M_MOD_V21); break;
         case 'f': txf = optarg; mode = MODE_FILE; break;
         case 'w': rxf = optarg; break;
         case 'l': log_ms = atoi(optarg); break;

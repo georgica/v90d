@@ -2,7 +2,7 @@
 #include <string.h>
 #include "test.h"
 #include "../pump.h"
-#include "v90_pcm.h"
+#include "v90modem.h"
 
 static pump_t P;
 
@@ -157,14 +157,14 @@ static void test_write_full(void)
 }
 
 /* the transmit table of linear mode: the exact G.711 value of every
- * codeword of both laws, as the modem's own tables have it (v90/v90_pcm.c) */
+ * codeword of both laws, as the modem's own tables have it (libv90modem's v90m_g711_decode) */
 static void test_lin16_table(void)
 {
     int16_t t[256]; int alaw, i, bad = 0, distinct = 0;
     for (alaw = 0; alaw < 2; alaw++) {
         pump_lin16_table(alaw, t);
         for (i = 0; i < 256; i++) {
-            bad += t[i] != (int16_t)v90_octet_linear(alaw, (uint8_t)i);
+            bad += t[i] != v90m_g711_decode(alaw, (uint8_t)i);
             bad += t[i] != pump_lin16(alaw, (uint8_t)i);
             if (i && i != 128) distinct += t[i] != t[i - 1];
         }

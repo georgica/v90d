@@ -11,7 +11,7 @@ typedef void (*pppcall_log_fn)(const char *line);
 
 typedef struct {
     int      level;             /* transmit RMS */
-    unsigned modes;             /* V8_MOD_V22 | V8_MOD_V21 | ANS_MODE_V90 */
+    unsigned modulations;       /* V90M_MOD_V22 | V90M_MOD_V21 | V90M_MOD_V90 */
     int      alaw;
     const char *user, *pass;    /* NULL user = no authentication */
     pppcall_log_fn log;

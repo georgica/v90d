@@ -2,8 +2,8 @@
 #include <string.h>
 #include "test.h"
 #include "../rig/modemterm.h"
-#include "../sim/callpeer.h"
-#include "../sim/g711.h"
+#include "callpeer.h"
+#include "g711.h"
 
 static char logbuf[4096];
 static void logger(const char *l) { if (strlen(logbuf) + strlen(l) + 2 < sizeof logbuf) { strcat(logbuf, l); strcat(logbuf, "\n"); } }
@@ -15,7 +15,7 @@ int main(void)
     char got[256]; int ng = 0, f, i, sent = 0;
 
     memset(out, 0xFF, sizeof out);
-    mterm_init(&m, 3000, V8_MOD_V22 | V8_MOD_V21, logger);
+    mterm_init(&m, 3000, V90M_MOD_V22 | V90M_MOD_V21, logger);
     callpeer_init(&c, 1, V8_MOD_V22 | V8_MOD_V21, 1, 3000);
     for (f = 0; f < 50 * 12; f++) {                    /* 12 s */
         /* the caller hears our previous frame (20 ms round-trip skew, as with RTP) */

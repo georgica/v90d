@@ -10,16 +10,23 @@ BUILD   := build
 ARM_CC  ?= $(wildcard $(CURDIR)/../toolchain/*/bin/arm-linux-gcc)
 QEMU    ?= qemu-arm-static
 
-INC := -I. -I../tel -I../dce -I../dce/test -I../cfg -I../test -I../modem -I../v90 -I../v92 -I../v34 -I../sim -I../v42 -I../ppp -I../ppp/test
-MODEM_SRC := $(wildcard ../modem/*.c) $(wildcard ../v90/*.c) $(wildcard ../v34/*.c) $(wildcard ../v32/*.c) $(wildcard ../v92/*.c)
-V42_SRC := $(addprefix ../v42/,v42_hdlc.c v42_detect.c v42_comp.c v44_comp.c v42_lapm.c v42.c)
+# -D options in CFLAGS (the bench experiments of live/*.sh) reach the modem too
+LIBV90M_DEFS ?= $(filter-out -D_POSIX_C_SOURCE%,$(filter -D%,$(CFLAGS)))
+include ../libv90m.mk
+
+# the daemon sees the library's public header only; the tests see its internals
+DAEMON_INC := -I. -I../tel -I../dce -I../cfg -I../ppp $(LIBV90M_INC)
+INC := -I. -I../tel -I../dce -I../dce/test -I../cfg -I../test -I../ppp -I../ppp/test $(LIBV90M_DEV_INC)
 PPP_SRC := $(addprefix ../ppp/,ppp_md5.c ppp_hdlc.c ppp_fsm.c ppp_deflate.c ppp_mppc.c ppp.c)
 CFG_SRC := ../cfg/config.c ../cfg/status.c
 # everything portable that goes into the daemon
-CORE_SRC := srv.c console.c dclist.c dcnow.c upnp.c saturn.c stun.c bbs.c telnet.c bbsdial.c line.c ../tel/tel.c ../dce/dce.c $(MODEM_SRC) $(V42_SRC) $(PPP_SRC) $(CFG_SRC)
-SIM_SRC := $(addprefix ../sim/,g711.c noise.c filt.c channel.c v8call.c callpeer.c p2a.c qammod.c p34a.c p2c.c v34peer.c v32call.c v32line.c resamp.c v92a.c v92chan.c v92call.c) \
-           ../v90/test/v90_dec.c ../dce/test/caller.c ../ppp/test/pppc.c
-HDRS := $(wildcard *.h ../tel/*.h ../dce/*.h ../dce/test/*.h ../cfg/*.h ../modem/*.h ../v90/*.h ../v34/*.h ../v92/*.h ../v42/*.h ../ppp/*.h ../sim/*.h)
+# (the modem and V.42: libv90modem)
+CORE_SRC := srv.c console.c dclist.c dcnow.c upnp.c saturn.c stun.c bbs.c telnet.c bbsdial.c line.c ../tel/tel.c ../dce/dce.c $(PPP_SRC) $(CFG_SRC)
+# test side: the calling DCE and PPP client; the simulated line and caller
+# are in the library's dev archive (linked last, after the sources)
+SIM_SRC := ../dce/test/caller.c ../ppp/test/pppc.c $(LIBV90M_DEV)
+SIM_SRC_ARM := ../dce/test/caller.c ../ppp/test/pppc.c $(LIBV90M_DEV_ARM)
+HDRS := $(wildcard *.h ../tel/*.h ../dce/*.h ../dce/test/*.h ../cfg/*.h ../ppp/*.h) $(LIBV90M)/include/v90modem.h
 
 DAEMON_SRC := main.c satlink.c bbslink.c netsvc.c tun.c nat.c ../cfg/httpd.c ../cfg/settings.c ../cfg/firmware.c ../cfg/vpn.c $(CORE_SRC)
 # the firmware's version, shown on the pages: one place, fw/VERSION
@@ -28,22 +35,23 @@ DAEMON_DEF := -DV90D_VERSION='"$(VERSION)"'
 NS_SRC := test/ns_call.c tun.c $(filter-out srv.c ../tel/tel.c ../dce/dce.c,$(CORE_SRC)) $(SIM_SRC)
 
 RIG_SRC := ../rig/pppcall.c $(filter-out srv.c ../tel/tel.c $(CFG_SRC),$(CORE_SRC)) $(SIM_SRC)
+RIG_SRC_ARM := ../rig/pppcall.c $(filter-out srv.c ../tel/tel.c $(CFG_SRC),$(CORE_SRC)) $(SIM_SRC_ARM)
 $(BUILD)/test_rig: test/test_rig.c $(RIG_SRC) $(HDRS) ../rig/pppcall.h
 	@mkdir -p $(BUILD)
 	$(CC) $(CFLAGS) $(INC) -I../rig -o $@ test/test_rig.c $(RIG_SRC) $(LDLIBS)
-$(BUILD)/arm_test_rig: test/test_rig.c $(RIG_SRC) $(HDRS) ../rig/pppcall.h
+$(BUILD)/arm_test_rig: test/test_rig.c $(RIG_SRC_ARM) $(HDRS) ../rig/pppcall.h
 	@mkdir -p $(BUILD)
-	$(ARM_CC) $(CFLAGS) $(INC) -I../rig -static -o $@ test/test_rig.c $(RIG_SRC) $(LDLIBS)
+	$(ARM_CC) $(CFLAGS) $(INC) -I../rig -static -o $@ test/test_rig.c $(RIG_SRC_ARM) $(LDLIBS)
 
 .PHONY: test test-arm test-ns test-ns-nat test-ns-upnp test-ns-pppd v90d v90d-arm clean
 v90d: $(BUILD)/v90d
 v90d-arm: $(BUILD)/v90d-arm
-$(BUILD)/v90d: $(DAEMON_SRC) $(HDRS) ../fw/VERSION
+$(BUILD)/v90d: $(DAEMON_SRC) $(HDRS) ../fw/VERSION $(LIBV90M_A)
 	@mkdir -p $(BUILD)
-	$(CC) $(CFLAGS) $(DAEMON_DEF) $(INC) -o $@ $(DAEMON_SRC) $(LDLIBS)
-$(BUILD)/v90d-arm: $(DAEMON_SRC) $(HDRS) ../fw/VERSION
+	$(CC) $(CFLAGS) $(DAEMON_DEF) $(DAEMON_INC) -o $@ $(DAEMON_SRC) $(LIBV90M_A) $(LDLIBS)
+$(BUILD)/v90d-arm: $(DAEMON_SRC) $(HDRS) ../fw/VERSION $(LIBV90M_A_ARM)
 	@mkdir -p $(BUILD)
-	$(ARM_CC) $(CFLAGS) $(DAEMON_DEF) $(INC) -static -Os -o $@ $(DAEMON_SRC) $(LDLIBS)
+	$(ARM_CC) $(CFLAGS) $(DAEMON_DEF) $(DAEMON_INC) -static -Os -o $@ $(DAEMON_SRC) $(LIBV90M_A_ARM) $(LDLIBS)
 	$(dir $(ARM_CC))arm-linux-strip $@
 # The real daemon in a private network namespace (needs unprivileged user
 # namespaces): TUN device, NAT rule, HTTP listener, a whole call.
@@ -97,8 +105,8 @@ test-arm: $(BUILD)/arm_test_srv $(BUILD)/arm_test_rig
 $(BUILD)/test_srv: test/test_srv.c $(CORE_SRC) $(SIM_SRC) $(HDRS)
 	@mkdir -p $(BUILD)
 	$(CC) $(CFLAGS) $(INC) -o $@ test/test_srv.c $(CORE_SRC) $(SIM_SRC) $(LDLIBS)
-$(BUILD)/arm_test_srv: test/test_srv.c $(CORE_SRC) $(SIM_SRC) $(HDRS)
+$(BUILD)/arm_test_srv: test/test_srv.c $(CORE_SRC) $(SIM_SRC_ARM) $(HDRS)
 	@mkdir -p $(BUILD)
-	$(ARM_CC) $(CFLAGS) $(INC) -static -o $@ test/test_srv.c $(CORE_SRC) $(SIM_SRC) $(LDLIBS)
+	$(ARM_CC) $(CFLAGS) $(INC) -static -o $@ test/test_srv.c $(CORE_SRC) $(SIM_SRC_ARM) $(LDLIBS)
 clean:
 	rm -rf $(BUILD)

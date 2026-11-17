@@ -40,7 +40,7 @@ void pppcall_init(pppcall_t *c, const pppcall_cfg *cfg)
     memset(c, 0, sizeof *c);
     c->cfg = *cfg;
     dce_cfg_default(&d);
-    d.tx_level = cfg->level; d.modes = cfg->modes; d.alaw = cfg->alaw;
+    d.tx_level = cfg->level; d.modulations = cfg->modulations; d.alaw = cfg->alaw;
     d.echo_delay = -1;                          /* the RTP path is long: let the modem measure */
     if (cfg->user) {
         c->users[0].name = cfg->user; c->users[0].secret = cfg->pass ? cfg->pass : "";
@@ -72,8 +72,8 @@ static void report(pppcall_t *c)
     if (s->state != o->state || s->ppp_phase != o->ppp_phase || s->error_control != o->error_control ||
         s->ip_up != o->ip_up || s->v42_state != o->v42_state) {
         snprintf(line, sizeof line, "%s: V.42 %s%s, PPP %s%s%s%s", state_name[s->state],
-                 s->error_control ? "LAPM" : s->v42_state == V42EC_ASYNC ? "none (start-stop)" : "detecting",
-                 !(s->comp_tx || s->comp_rx) ? "" : s->comp_alg == V42EC_COMP_V44 ? " + V.44" : " + V.42bis",
+                 s->error_control ? "LAPM" : s->v42_state == V90M_EC_ASYNC ? "none (start-stop)" : "detecting",
+                 !(s->comp_tx || s->comp_rx) ? "" : s->comp_alg == V90M_EC_COMP_V44 ? " + V.44" : " + V.42bis",
                  (unsigned)s->ppp_phase < 5 ? phase_name[s->ppp_phase] : "?",
                  s->ip_up ? ", IP up" : "", s->peer_name[0] ? ", user " : "", s->peer_name);
         c->cfg.log(line);

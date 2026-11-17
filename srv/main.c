@@ -303,11 +303,11 @@ static void log_last_call(int port)
           (unsigned)h->down_bps, (unsigned)h->up_bps, (unsigned)h->duration_s);
     if (h->modulation) {
         /* the call object is left as it ended: what the link layer did */
-        v42ec_status_t v;
+        v90m_ec_status v;
         char comp[96];
-        v42ec_get_status(&S[port].dce.v42, &v);
+        v90m_ec_get_status(S[port].dce.v42, &v);
         /* send/receive direction; V.44 has its values per direction */
-        if (v.comp_alg == V42EC_COMP_V44)
+        if (v.comp_alg == V90M_EC_COMP_V44)
             snprintf(comp, sizeof comp, "V.44 %s/%s %d/%d codewords, string %d/%d, history %d/%d",
                      v.comp_tx ? "on" : "off", v.comp_rx ? "on" : "off", v.v44_n2_tx, v.v44_n2_rx,
                      v.v44_n7_tx, v.v44_n7_rx, v.v44_n8_tx, v.v44_n8_rx);

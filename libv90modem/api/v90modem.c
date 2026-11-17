@@ -1,0 +1,388 @@
+/* libv90modem: the public API (include/v90modem.h) over the modem, V.14 and
+ * V.42 code. A thin layer: it maps the configuration, runs the modem one
+ * sample at a time exactly as the code underneath expects, and reads its
+ * state after every sample to report changes. Nothing here touches the
+ * signal path. */
+#include <stdlib.h>
+#include <stddef.h>
+#include <string.h>
+#pragma GCC visibility push(default)
+#include "../include/v90modem.h"
+#pragma GCC visibility pop
+#include "v90modem_priv.h"
+#include "../modem/pcmenc.h"
+#include "../modem/v14.h"
+#include "../v90/v90_pcm.h"
+
+/* the public numbers are the internal ones (checked at compile time) */
+#define SAME(a, b) ((int)(a) == (int)(b))
+typedef char v90m_check_conn[(SAME(V90M_CONN_V21, ANS_MOD_V21) && SAME(V90M_CONN_V22, ANS_MOD_V22) && SAME(V90M_CONN_V22BIS, ANS_MOD_V22BIS)
+                              && SAME(V90M_CONN_V90, ANS_MOD_V90) && SAME(V90M_CONN_V34, ANS_MOD_V34) && SAME(V90M_CONN_V32BIS, ANS_MOD_V32BIS)
+                              && SAME(V90M_CONN_V92, ANS_MOD_V92)) ? 1 : -1];
+typedef char v90m_check_ec[(SAME(V90M_EC_DETECT, V42EC_DETECT) && SAME(V90M_EC_ESTABLISH, V42EC_ESTABLISH) && SAME(V90M_EC_CONNECTED, V42EC_CONNECTED)
+                            && SAME(V90M_EC_ASYNC, V42EC_ASYNC) && SAME(V90M_EC_RELEASING, V42EC_RELEASING) && SAME(V90M_EC_DISCONNECTED, V42EC_DISCONNECTED)
+                            && SAME(V90M_EC_R_LOCAL, V42LAPM_R_LOCAL) && SAME(V90M_EC_R_NEGOTIATION, V42LAPM_R_NEGOTIATION)
+                            && SAME(V90M_EC_R_NO_EC, V42EC_R_NO_EC) && SAME(V90M_EC_R_NO_SABME, V42EC_R_NO_SABME)
+                            && SAME(V90M_EC_COMP_V42BIS, V42EC_COMP_V42BIS) && SAME(V90M_EC_COMP_V44, V42EC_COMP_V44)
+                            && SAME(V90M_COMP_AUTO, V42COMP_AUTO) && SAME(V90M_COMP_ALWAYS, V42COMP_ALWAYS) && SAME(V90M_COMP_NEVER, V42COMP_NEVER)
+                            && SAME(V90M_BRK_DESTRUCTIVE_EXPEDITED, V42_BRK_DESTRUCTIVE_EXPEDITED)
+                            && SAME(V90M_BRK_NONDESTRUCTIVE_EXPEDITED, V42_BRK_NONDESTRUCTIVE_EXPEDITED)) ? 1 : -1];
+
+/* the strictest alignment any member can need */
+#define V90M_ALIGN offsetof(struct { char c; v90m_align u; }, u)
+static int aligned(const void *p) { return ((uintptr_t)p % V90M_ALIGN) == 0; }
+static void seterr(int *err, int e) { if (err) *err = e; }
+
+const char *v90m_version(void) { return "0.1.0"; }
+
+uint8_t v90m_g711_encode(int alaw, int16_t linear) { return pcm_encode(alaw != 0, linear); }
+int16_t v90m_g711_decode(int alaw, uint8_t codeword) { return (int16_t)v90_octet_linear(alaw != 0, codeword); }
+
+/* ------------------------------------------------------------------ modem */
+struct v90m {
+    v90m_cfg cfg;
+    int      owned;             /* from v90m_create: v90m_destroy frees it */
+    /* what the last sample left, to report changes */
+    int      was_connected, was_moving, was_ended, was_mod, was_tx, was_rx;
+    unsigned renegotiations;
+    answer_t a;
+};
+
+#define V90M_MOD_ALL (V90M_MOD_V21 | V90M_MOD_V22 | V90M_MOD_V32BIS | V90M_MOD_V34 | V90M_MOD_V90 | V90M_MOD_V92)
+
+void v90m_cfg_default(v90m_cfg *cfg)
+{
+    memset(cfg, 0, sizeof *cfg);
+    cfg->role = V90M_ROLE_ANSWER;
+    cfg->modulations = V90M_MOD_ALL & ~V90M_MOD_V92;
+    cfg->tx_level = 3000;
+    cfg->echo_delay = -1;
+}
+
+static int check_cfg(const v90m_cfg *c)
+{
+    if (c->role == V90M_ROLE_ORIGINATE) return V90M_ENOTSUP;
+    if (c->role != V90M_ROLE_ANSWER) return V90M_EINVAL;
+    if (c->modulations & ~V90M_MOD_ALL) return V90M_EINVAL;
+    if (c->max_tx_code < 0 || c->max_tx_code > 31 || c->tx_level < 0 || c->max_down_bps < 0 || c->max_up_bps < 0 || c->echo_delay < -1)
+        return V90M_EINVAL;
+    return V90M_OK;
+}
+
+static unsigned modes_of(unsigned mods)
+{
+    unsigned m = 0;
+    if (mods & V90M_MOD_V21) m |= V8_MOD_V21;
+    if (mods & V90M_MOD_V22) m |= V8_MOD_V22;
+    if (mods & V90M_MOD_V32BIS) m |= V8_MOD_V32;
+    if (mods & V90M_MOD_V34) m |= V8_MOD_V34;
+    if (mods & V90M_MOD_V90) m |= ANS_MODE_V90;
+    if (mods & V90M_MOD_V92) m |= ANS_MODE_V92;
+    return m;
+}
+
+int v90m_reset(v90m_t *m, const v90m_cfg *cfg)
+{
+    answer_cfg ac;
+    int r = check_cfg(cfg), owned;
+    if (r != V90M_OK) return r;
+    owned = m->owned;
+    /* the code underneath expects zeroed memory before answer_init */
+    memset(m, 0, sizeof *m);
+    m->owned = owned;
+    m->cfg = *cfg;
+    memset(&ac, 0, sizeof ac);
+    ac.level = cfg->tx_level;
+    ac.modes = modes_of(cfg->modulations);
+    ac.getbit = cfg->getbit;
+    ac.putbit = cfg->putbit;
+    ac.user = cfg->user;
+    ac.rx_linear = cfg->codec_linear_rx != 0;
+    ac.max_tx_code = cfg->max_tx_code;
+    answer_init(&m->a, &ac);
+    if (cfg->alaw) {
+        /* the Phase 2 defaults with the law changed */
+        p2d_cfg pc = m->a.p2cfg;
+        pc.alaw = 1;
+        answer_v90_cfg(&m->a, &pc);
+    }
+    answer_v90_line(&m->a, cfg->echo_delay, cfg->max_down_bps, cfg->max_up_bps);
+    return V90M_OK;
+}
+
+size_t v90m_mem_size(void) { return sizeof(struct v90m); }
+
+v90m_t *v90m_init(void *mem, size_t len, const v90m_cfg *cfg, int *err)
+{
+    v90m_t *m = mem;
+    int r;
+    if (!mem || !cfg || !aligned(mem)) { seterr(err, V90M_EINVAL); return NULL; }
+    if (len < sizeof *m) { seterr(err, V90M_ENOMEM); return NULL; }
+    m->owned = 0;
+    if ((r = v90m_reset(m, cfg)) != V90M_OK) { seterr(err, r); return NULL; }
+    seterr(err, V90M_OK);
+    return m;
+}
+
+v90m_t *v90m_create(const v90m_cfg *cfg, int *err)
+{
+    v90m_t *m;
+    int r;
+    if (!cfg) { seterr(err, V90M_EINVAL); return NULL; }
+    if ((r = check_cfg(cfg)) != V90M_OK) { seterr(err, r); return NULL; }
+    if (!(m = malloc(sizeof *m))) { seterr(err, V90M_ENOMEM); return NULL; }
+    m->owned = 1;
+    v90m_reset(m, cfg);
+    seterr(err, V90M_OK);
+    return m;
+}
+
+void v90m_destroy(v90m_t *m) { if (m && m->owned) free(m); }
+
+static v90m_end end_of(const answer_t *a)
+{
+    if (a->phase != ANS_FAILED) return V90M_END_NONE;
+    if (a->cleared == 1) return V90M_END_CLEARDOWN_FAR;
+    if (a->cleared == 2) return V90M_END_CLEARDOWN_OURS;
+    return a->connected ? V90M_END_LOST : V90M_END_FAILED;
+}
+
+static void event(v90m_t *m, v90m_event ev) { if (m->cfg.on_event) m->cfg.on_event(m->cfg.user, ev); }
+
+/* after each sample: only reads the modem */
+static void after(v90m_t *m)
+{
+    const answer_t *a = &m->a;
+    int moving, rx;
+    if (!a->connected && !m->was_connected && a->phase != ANS_FAILED) return;   /* start-up: nothing to report */
+    moving = answer_moving(a);
+    rx = a->rx_bitrate > 0 ? a->rx_bitrate : a->bitrate;
+    if (a->connected && !m->was_connected) {
+        m->was_connected = 1;
+        m->was_mod = a->modulation; m->was_tx = a->bitrate; m->was_rx = rx;
+        event(m, V90M_EV_CONNECTED);
+    } else if (m->was_connected && (a->modulation != m->was_mod || a->bitrate != m->was_tx || rx != m->was_rx)) {
+        m->was_mod = a->modulation; m->was_tx = a->bitrate; m->was_rx = rx;
+        event(m, V90M_EV_RATES);
+    }
+    if (moving != m->was_moving) {
+        /* a stop that is neither a retrain nor the end: a rate renegotiation */
+        if (!moving && a->connected && !a->retraining && a->phase != ANS_FAILED) m->renegotiations++;
+        m->was_moving = moving;
+        event(m, moving ? V90M_EV_DATA_MOVING : V90M_EV_DATA_STOPPED);
+    }
+    if (a->phase == ANS_FAILED && !m->was_ended) {
+        m->was_ended = 1;
+        event(m, V90M_EV_ENDED);
+    }
+}
+
+int v90m_process_g711(v90m_t *m, const uint8_t *rx, uint8_t *tx, size_t n)
+{
+    size_t i;
+    if (!m || (n && (!rx || !tx))) return V90M_EINVAL;
+    for (i = 0; i < n; i++) { tx[i] = answer_tick_pcm(&m->a, rx[i]); after(m); }
+    return V90M_OK;
+}
+
+int v90m_process_lin_rx(v90m_t *m, const int16_t *rx, uint8_t *tx, size_t n)
+{
+    size_t i;
+    if (!m || (n && (!rx || !tx))) return V90M_EINVAL;
+    for (i = 0; i < n; i++) { tx[i] = answer_tick_lin(&m->a, rx[i]); after(m); }
+    return V90M_OK;
+}
+
+int v90m_process_linear(v90m_t *m, const int16_t *rx, int16_t *tx, size_t n)
+{
+    size_t i;
+    if (!m || (n && (!rx || !tx))) return V90M_EINVAL;
+    for (i = 0; i < n; i++) { tx[i] = answer_tick(&m->a, rx[i]); after(m); }
+    return V90M_OK;
+}
+
+int v90m_retrain(v90m_t *m) { return answer_retrain(&m->a) == 0 ? V90M_OK : V90M_ESTATE; }
+int v90m_cleardown(v90m_t *m) { return answer_cleardown(&m->a) == 0 ? V90M_OK : V90M_ESTATE; }
+
+void v90m_get_state(const v90m_t *m, v90m_state *st)
+{
+    const answer_t *a = &m->a;
+    st->connected = a->connected;
+    st->moving = answer_moving(a);
+    st->retraining = a->retraining;
+    st->modulation = (v90m_conn)a->modulation;
+    st->tx_bps = a->bitrate;
+    st->rx_bps = a->rx_bitrate > 0 ? a->rx_bitrate : a->bitrate;
+    st->used_v8 = a->used_v8;
+    st->odp_bypass = answer_odp_bypass(a);
+    st->end = end_of(a);
+}
+
+void v90m_get_stats(const v90m_t *m, v90m_stats *st)
+{
+    const answer_t *a = &m->a;
+    st->modulation = (v90m_conn)a->modulation;
+    st->tx_bps = a->bitrate;
+    st->rx_bps = a->rx_bitrate > 0 ? a->rx_bitrate : a->bitrate;
+    st->snr_db10 = a->connected ? answer_snr_db10(a) : -1;
+    st->rtd = a->connected ? answer_rtd(a) : -1;
+    if (a->modulation == ANS_MOD_V92 || a->phase == ANS_P3X || a->phase == ANS_V92) st->echo_delay = a->u.v92.echo_delay;
+    else if (a->modulation == ANS_MOD_V90 || a->phase == ANS_P3 || a->phase == ANS_V90) st->echo_delay = a->p34.echo_delay;
+    else st->echo_delay = -1;
+    st->retrains = (unsigned)a->retrains;
+    st->renegotiations = m->renegotiations;
+}
+
+answer_t *v90m__answer(v90m_t *m) { return &m->a; }
+
+/* ------------------------------------------------------------ start-stop */
+struct v90m_async { int owned; v14_t v; };
+
+size_t v90m_async_mem_size(void) { return sizeof(struct v90m_async); }
+void v90m_async_reset(v90m_async_t *a) { int o = a->owned; memset(a, 0, sizeof *a); a->owned = o; v14_init(&a->v); }
+v90m_async_t *v90m_async_init(void *mem, size_t len, int *err)
+{
+    v90m_async_t *a = mem;
+    if (!mem || !aligned(mem)) { seterr(err, V90M_EINVAL); return NULL; }
+    if (len < sizeof *a) { seterr(err, V90M_ENOMEM); return NULL; }
+    a->owned = 0; v90m_async_reset(a); seterr(err, V90M_OK);
+    return a;
+}
+v90m_async_t *v90m_async_create(int *err)
+{
+    v90m_async_t *a = malloc(sizeof *a);
+    if (!a) { seterr(err, V90M_ENOMEM); return NULL; }
+    a->owned = 1; v90m_async_reset(a); seterr(err, V90M_OK);
+    return a;
+}
+void v90m_async_destroy(v90m_async_t *a) { if (a && a->owned) free(a); }
+int  v90m_async_getbit(void *a) { return v14_getbit(&((v90m_async_t *)a)->v); }
+void v90m_async_putbit(void *a, int bit) { v14_putbit(&((v90m_async_t *)a)->v, bit); }
+size_t v90m_async_write(v90m_async_t *a, const uint8_t *buf, size_t n)
+{
+    return (size_t)v14_write(&a->v, buf, n > 0x7FFFFFFF ? 0x7FFFFFFF : (int)n);
+}
+size_t v90m_async_read(v90m_async_t *a, uint8_t *buf, size_t max)
+{
+    return (size_t)v14_read(&a->v, buf, max > 0x7FFFFFFF ? 0x7FFFFFFF : (int)max);
+}
+size_t v90m_async_tx_pending(const v90m_async_t *a) { return (size_t)v14_tx_pending(&a->v); }
+unsigned long v90m_async_frame_errors(const v90m_async_t *a) { return (unsigned long)a->v.rx_frame_errs; }
+
+/* ------------------------------------------------------------------ V.42 */
+struct v90m_ec { int owned; v42ec_t e; };
+
+static void cfg_in(v42ec_cfg_t *o, const v90m_ec_cfg *c)
+{
+    memset(o, 0, sizeof *o);
+    o->originator = c->originator; o->detect = c->detect; o->fallback = c->fallback;
+    o->t400_ms = c->t400_ms; o->establish_ms = c->establish_ms; o->comp_policy = c->comp_policy;
+    o->lapm.use_xid = c->lapm.use_xid;
+    o->lapm.k_tx = c->lapm.k_tx; o->lapm.k_rx = c->lapm.k_rx;
+    o->lapm.n401_tx = c->lapm.n401_tx; o->lapm.n401_rx = c->lapm.n401_rx;
+    o->lapm.fcs32 = c->lapm.fcs32;
+    o->lapm.comp_tx = c->lapm.v42bis_tx; o->lapm.comp_rx = c->lapm.v42bis_rx;
+    o->lapm.comp_p1 = c->lapm.v42bis_p1; o->lapm.comp_p2 = c->lapm.v42bis_p2;
+    o->lapm.v44_tx = c->lapm.v44_tx; o->lapm.v44_rx = c->lapm.v44_rx;
+    o->lapm.v44_p1_tx = c->lapm.v44_p1_tx; o->lapm.v44_p1_rx = c->lapm.v44_p1_rx;
+    o->lapm.v44_p2_tx = c->lapm.v44_p2_tx; o->lapm.v44_p2_rx = c->lapm.v44_p2_rx;
+    o->lapm.v44_p3_tx = c->lapm.v44_p3_tx; o->lapm.v44_p3_rx = c->lapm.v44_p3_rx;
+    o->lapm.t401_ms = c->lapm.t401_ms; o->lapm.t403_ms = c->lapm.t403_ms; o->lapm.n400 = c->lapm.n400;
+}
+
+void v90m_ec_cfg_default(v90m_ec_cfg *c, int originator)
+{
+    v42ec_cfg_t i;
+    v42ec_cfg_default(&i, originator);
+    memset(c, 0, sizeof *c);
+    c->originator = i.originator; c->detect = i.detect; c->fallback = i.fallback;
+    c->t400_ms = i.t400_ms; c->establish_ms = i.establish_ms; c->comp_policy = i.comp_policy;
+    c->lapm.use_xid = i.lapm.use_xid;
+    c->lapm.k_tx = i.lapm.k_tx; c->lapm.k_rx = i.lapm.k_rx;
+    c->lapm.n401_tx = i.lapm.n401_tx; c->lapm.n401_rx = i.lapm.n401_rx;
+    c->lapm.fcs32 = i.lapm.fcs32;
+    c->lapm.v42bis_tx = i.lapm.comp_tx; c->lapm.v42bis_rx = i.lapm.comp_rx;
+    c->lapm.v42bis_p1 = i.lapm.comp_p1; c->lapm.v42bis_p2 = i.lapm.comp_p2;
+    c->lapm.v44_tx = i.lapm.v44_tx; c->lapm.v44_rx = i.lapm.v44_rx;
+    c->lapm.v44_p1_tx = i.lapm.v44_p1_tx; c->lapm.v44_p1_rx = i.lapm.v44_p1_rx;
+    c->lapm.v44_p2_tx = i.lapm.v44_p2_tx; c->lapm.v44_p2_rx = i.lapm.v44_p2_rx;
+    c->lapm.v44_p3_tx = i.lapm.v44_p3_tx; c->lapm.v44_p3_rx = i.lapm.v44_p3_rx;
+    c->lapm.t401_ms = i.lapm.t401_ms; c->lapm.t403_ms = i.lapm.t403_ms; c->lapm.n400 = i.lapm.n400;
+}
+
+int v90m_ec_reset(v90m_ec_t *e, const v90m_ec_cfg *cfg)
+{
+    v42ec_cfg_t c;
+    int o = e->owned;
+    if (!cfg) return V90M_EINVAL;
+    cfg_in(&c, cfg);
+    memset(e, 0, sizeof *e);
+    e->owned = o;
+    v42ec_init(&e->e, &c);
+    return V90M_OK;
+}
+
+size_t v90m_ec_mem_size(void) { return sizeof(struct v90m_ec); }
+
+v90m_ec_t *v90m_ec_init(void *mem, size_t len, const v90m_ec_cfg *cfg, int *err)
+{
+    v90m_ec_t *e = mem;
+    if (!mem || !cfg || !aligned(mem)) { seterr(err, V90M_EINVAL); return NULL; }
+    if (len < sizeof *e) { seterr(err, V90M_ENOMEM); return NULL; }
+    e->owned = 0; v90m_ec_reset(e, cfg); seterr(err, V90M_OK);
+    return e;
+}
+
+v90m_ec_t *v90m_ec_create(const v90m_ec_cfg *cfg, int *err)
+{
+    v90m_ec_t *e;
+    if (!cfg) { seterr(err, V90M_EINVAL); return NULL; }
+    if (!(e = malloc(sizeof *e))) { seterr(err, V90M_ENOMEM); return NULL; }
+    e->owned = 1; v90m_ec_reset(e, cfg); seterr(err, V90M_OK);
+    return e;
+}
+
+void   v90m_ec_destroy(v90m_ec_t *e) { if (e && e->owned) free(e); }
+int    v90m_ec_tx_bit(v90m_ec_t *e) { return v42ec_tx_bit(&e->e); }
+void   v90m_ec_rx_bit(v90m_ec_t *e, int bit) { v42ec_rx_bit(&e->e, bit); }
+void   v90m_ec_tick(v90m_ec_t *e, unsigned ms) { v42ec_tick(&e->e, ms); }
+void   v90m_ec_line_restored(v90m_ec_t *e) { v42ec_line_restored(&e->e); }
+size_t v90m_ec_write(v90m_ec_t *e, const uint8_t *d, size_t n) { return v42ec_write(&e->e, d, n); }
+size_t v90m_ec_write_space(const v90m_ec_t *e) { return v42ec_write_space(&e->e); }
+size_t v90m_ec_read(v90m_ec_t *e, uint8_t *d, size_t max) { return v42ec_read(&e->e, d, max); }
+size_t v90m_ec_read_avail(const v90m_ec_t *e) { return v42ec_read_avail(&e->e); }
+int    v90m_ec_tx_idle(const v90m_ec_t *e) { return v42ec_tx_idle(&e->e); }
+int    v90m_ec_tx_busy(const v90m_ec_t *e) { return e->e.hdlc_tx_on && v42hdlc_tx_busy(&e->e.htx); }
+void   v90m_ec_release(v90m_ec_t *e) { v42ec_release(&e->e); }
+void   v90m_ec_abort(v90m_ec_t *e) { v42lapm_abort(&e->e.lapm, V42LAPM_R_LOCAL); }
+int    v90m_ec_send_break(v90m_ec_t *e, int opt, int len10ms) { return v42ec_send_break(&e->e, opt, len10ms); }
+int    v90m_ec_get_break(v90m_ec_t *e, int *opt, int *len10ms) { return v42ec_get_break(&e->e, opt, len10ms); }
+int    v90m_ec_state(const v90m_ec_t *e) { return v42ec_state(&e->e); }
+
+void v90m_ec_get_status(const v90m_ec_t *e, v90m_ec_status *st)
+{
+    v42ec_status_t s;
+    v42ec_get_status(&e->e, &s);
+    memset(st, 0, sizeof *st);
+    st->state = s.state; st->reason = s.reason;
+    st->k_tx = s.k_tx; st->k_rx = s.k_rx; st->n401_tx = s.n401_tx; st->n401_rx = s.n401_rx;
+    st->comp_alg = s.comp_alg; st->comp_tx = s.comp_tx; st->comp_rx = s.comp_rx;
+    st->enc_on = e->e.comp_tx; st->dec_on = e->e.comp_rx; st->alg_on = e->e.comp_alg;
+    st->comp_n2 = s.comp_n2; st->comp_n7 = s.comp_n7;
+    st->v44_n2_tx = s.v44_n2_tx; st->v44_n7_tx = s.v44_n7_tx; st->v44_n8_tx = s.v44_n8_tx;
+    st->v44_n2_rx = s.v44_n2_rx; st->v44_n7_rx = s.v44_n7_rx; st->v44_n8_rx = s.v44_n8_rx;
+    st->fcs32 = s.fcs32;
+    st->tx_queued = s.tx_queued; st->rx_avail = s.rx_avail; st->unacked = s.unacked;
+    st->rx_frames = s.rx_frames; st->rx_frames_bad = s.rx_frames_bad;
+    st->tx_i = s.tx_i; st->tx_i_retx = s.tx_i_retx; st->rx_i = s.rx_i; st->rx_i_dropped = s.rx_i_dropped;
+    st->tx_rej = s.tx_rej; st->rx_rej = s.rx_rej; st->t401_expiries = s.t401_expiries; st->violations = s.violations;
+    st->comp_in = s.comp_in; st->comp_out = s.comp_out; st->decomp_in = s.decomp_in; st->decomp_out = s.decomp_out;
+    st->async_overruns = s.async_overruns; st->async_framing = s.async_framing;
+}
+
+v42ec_t *v90m__ec(v90m_ec_t *e) { return &e->e; }
+
+/* the bounds in the header hold on this platform */
+typedef char v90m_check_mem[sizeof(struct v90m) <= V90M_MEM_SIZE ? 1 : -1];
+typedef char v90m_check_ec_mem[sizeof(struct v90m_ec) <= V90M_EC_MEM_SIZE ? 1 : -1];
+typedef char v90m_check_async_mem[sizeof(struct v90m_async) <= V90M_ASYNC_MEM_SIZE ? 1 : -1];

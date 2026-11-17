@@ -106,24 +106,24 @@ static void finding_burst(void)
     call_begin(&sc, &cc, &bursty);
     CHECK(run_until(p_ip_up, 30000) > 0);
     printf("    before: receiver error (4096 = one constellation unit squared) server %d, caller %d\n",
-           (int)D.modem.v22.rx.mse, (int)C.modem.v22.rx.mse);
+           (int)v90m__answer(D.modem)->v22.rx.mse, (int)C.modem.v22.rx.mse);
     for (round = 1; round <= 60 && !hit; round++) {
         bursts_on = 1;
         traffic(RANDOM, 4, 4, 7000, r);
         bursts_on = 0;
         run_ms(3000);
-        hit = D.modem.v22.rx.mse > 1000 || C.modem.v22.rx.mse > 1000;
+        hit = v90m__answer(D.modem)->v22.rx.mse > 1000 || C.modem.v22.rx.mse > 1000;
     }
     if (!hit) {
         printf("    no receiver was knocked out by %ld bursts\n", n_bursts);
         return;
     }
     printf("    3 s after burst %ld: receiver error server %d, caller %d\n", n_bursts,
-           (int)D.modem.v22.rx.mse, (int)C.modem.v22.rx.mse);
+           (int)v90m__answer(D.modem)->v22.rx.mse, (int)C.modem.v22.rx.mse);
     run_ms(10000);
     printf("    10 s of clean line later: server %d (carrier %d), caller %d (carrier %d)\n",
-           (int)D.modem.v22.rx.mse, D.modem.v22.rx.carrier, (int)C.modem.v22.rx.mse, C.modem.v22.rx.carrier);
-    CHECK(D.modem.v22.rx.mse < 400);
+           (int)v90m__answer(D.modem)->v22.rx.mse, v90m__answer(D.modem)->v22.rx.carrier, (int)C.modem.v22.rx.mse, C.modem.v22.rx.carrier);
+    CHECK(v90m__answer(D.modem)->v22.rx.mse < 400);
     CHECK(C.modem.v22.rx.mse < 400);
     ok = traffic(TEXT, 5, 5, 60000, r);
     s = status();
@@ -150,8 +150,8 @@ static void finding_noise_startup(void)
     t = run_until(p_ip_up, 60000);
     s = status();
     printf("    IP up after %d ms (-1 = never); end: %s; answer phase %d (V.8 result %d, selected %d, V.22 state %d); caller connected %d\n",
-           t, dce_end_name(s->end_reason), (int)D.modem.phase, (int)D.modem.v8.result, (int)D.modem.v8.selected,
-           (int)D.modem.v22.state, C.modem.connected);
+           t, dce_end_name(s->end_reason), (int)v90m__answer(D.modem)->phase, (int)v90m__answer(D.modem)->v8.result, (int)v90m__answer(D.modem)->v8.selected,
+           (int)v90m__answer(D.modem)->v22.state, C.modem.connected);
     CHECK(t > 0);
 }
 
@@ -179,7 +179,7 @@ static void finding_v90_upstream(void)
 
     printf("6. modem: V.90 upstream bit errors on a clean line\n");
     server_cfg(&sc); client_cfg(&cc);
-    sc.modes |= ANS_MODE_V90; cc.v90 = 1;
+    sc.modulations |= V90M_MOD_V90; cc.v90 = 1;
     call_begin(&sc, &cc, &line_clean);
     CHECK(run_until(p_ip_up, 60000) > 0);
     CHECK(traffic(RANDOM, 0, 500, 200000, r));
