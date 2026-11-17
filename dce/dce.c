@@ -139,13 +139,14 @@ void dce_init(dce_t *d, const dce_cfg_t *cfg)
 
     memset(d, 0, sizeof *d);
     d->cfg = *cfg;
-    d->cfg.v42.originator = 0;
+    d->cfg.v42.originator = cfg->originate != 0;     /* V.42: the calling DCE is the originator */
     d->cfg.alaw = cfg->alaw != 0;
     if (!d->cfg.flush_ms) d->cfg.flush_ms = FLUSH_MS;
     if (!d->cfg.release_ms) d->cfg.release_ms = RELEASE_MS;
     d->state = DCE_TRAINING;
 
     v90m_cfg_default(&mc);
+    if (cfg->originate) mc.role = V90M_ROLE_ORIGINATE;
     mc.tx_level = cfg->tx_level;
     mc.modulations = cfg->modulations;
     mc.alaw = d->cfg.alaw;
@@ -350,7 +351,7 @@ static void v42_start(dce_t *d, int odp_bypass)
     long txr = d->bitrate > 0 ? d->bitrate : 300, rxr = d->rx_bitrate > 0 ? d->rx_bitrate : 300;
     long t401 = frame_bits * 1000 / txr + 2 * frame_bits * 1000 / rxr + 300;
 
-    vc.originator = 0;
+    vc.originator = d->cfg.originate != 0;
     if (!d->cfg.fixed_timers && vc.lapm.t401_ms < t401) vc.lapm.t401_ms = (int)t401;
     if (d->cfg.raw_rx && !d->cfg.raw_ec) {
         /* octets as they are: straight to start-stop, as below */

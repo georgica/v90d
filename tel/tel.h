@@ -23,6 +23,7 @@
 #define TEL_FS          8000
 #define TEL_NUMBER_MAX  20
 #define TEL_ALSO        4
+#define TEL_ORIG_MS     300
 
 enum { TEL_TONES_US = 0, TEL_TONES_EU = 1 };
 
@@ -36,6 +37,9 @@ typedef struct {
     int      session_limit_min; /* longest call in minutes, 0 = no limit */
     int      idle_timeout_min;  /* minutes without tel_activity() before we end the call, 0 = never */
     int      tone_level;        /* peak of one tone component, 16-bit units; 0 = 2000 */
+    int      originate;         /* bench: the box calls. Off hook (the modem on the port was told
+                                   ATA) is answered at once: no dial tone, TEL_ANSWERED after
+                                   TEL_ORIG_MS of silence, and the owner runs a calling modem */
     uint32_t seed;              /* random generator seed (0 is replaced) */
 } tel_cfg;
 

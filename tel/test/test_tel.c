@@ -127,6 +127,23 @@ static void test_dialtone(void)
     CHECK(tone_amp(R.cap, R.ncap, 350) < 300);
 }
 
+/* bench: the box calls (tel_cfg.originate). The modem on the port was told
+ * ATA and has gone off hook: no dial tone, the call is ours after 300 ms. */
+static void test_originate(void)
+{
+    tel_cfg c = base_cfg();
+    c.originate = 1;
+    rig_init(&R, &c);
+    R.hook = 1; run(&R, 120);                   /* debounce */
+    CHECK(R.t.state == TEL_DIALTONE || R.t.state == TEL_ANSWERED);
+    cap_reset(&R); run(&R, 400);
+    CHECK_EQ_I(R.t.state, TEL_ANSWERED);
+    CHECK(rms(R.cap, R.ncap) == 0);             /* no dial tone, no ringing */
+    CHECK_EQ_I(R.t.answered, 1);
+    R.hook = 0; run(&R, 400);                   /* the modem hangs up */
+    CHECK_EQ_I(R.t.state, TEL_ONHOOK);
+}
+
 static void test_dtmf_call(void)
 {
     tel_cfg c = base_cfg();
@@ -555,6 +572,7 @@ int main(void)
     test_pulse();
     test_busy();
     test_call_end();
+    test_originate();
     test_limits();
     test_reconfigure();
     T_REPORT("tel");

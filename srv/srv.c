@@ -110,6 +110,7 @@ static void tel_settings(const srv_t *s, tel_cfg *t)
     t->idle_timeout_min = c->idle_timeout_min;
     t->tone_level = srv_level_rms(-13) * 181 / 128;     /* each component -13 dBm0, as a peak */
     t->seed = s->seed;
+    t->originate = s->originate;
 }
 
 static void adopt(srv_t *s, const cfg_t *cfg)
@@ -149,6 +150,13 @@ void srv_reconfigure(srv_t *s, const cfg_t *cfg)
 
 void srv_set_echo_delay(srv_t *s, int samples) { s->echo_delay = samples; }
 void srv_set_rx_linear(srv_t *s, int on) { s->rx_linear = on != 0; }
+void srv_set_originate(srv_t *s, int on)
+{
+    tel_cfg t;
+    s->originate = on != 0;
+    tel_settings(s, &t);
+    tel_reconfigure(&s->tel, &t);
+}
 void srv_set_max_tx_code(srv_t *s, int code) { s->max_tx_code = code >= 1 && code <= 31 ? code : 0; }
 
 void srv_set_clock(srv_t *s, uint32_t utc_seconds) { s->clock = utc_seconds; }
@@ -207,6 +215,11 @@ static void call_start(srv_t *s)
     d.echo_delay = s->echo_delay;
     d.rx_linear = s->rx_linear; d.max_tx_code = s->max_tx_code;
     d.max_down = c->max_down; d.max_up = c->max_up;
+    if (s->originate) {
+        /* what the calling side can do so far */
+        d.originate = 1;
+        d.modulations &= V90M_MOD_V22 | V90M_MOD_V21;
+    }
     if (!c->v42) { d.v42.detect = 1; d.v42.fallback = 1; d.v42.t400_ms = 1; }  /* straight to start-stop */
     if (!c->v42bis) {
         /* the switch is for data compression as a whole: V.42 bis and V.44 */

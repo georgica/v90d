@@ -95,12 +95,20 @@ test-ns: $(BUILD)/v90d $(BUILD)/ns_call test-ns-nat test-ns-upnp
 	@rm -f $(BUILD)/ns_flash.bin
 	@$(MAKE) -s test-ns-pppd
 
-test: $(BUILD)/test_srv $(BUILD)/test_rig
+test: $(BUILD)/test_srv $(BUILD)/test_rig $(BUILD)/test_orig
 	./$(BUILD)/test_srv
 	./$(BUILD)/test_rig
-test-arm: $(BUILD)/arm_test_srv $(BUILD)/arm_test_rig
+	./$(BUILD)/test_orig
+test-arm: $(BUILD)/arm_test_srv $(BUILD)/arm_test_rig $(BUILD)/arm_test_orig
 	$(QEMU) ./$(BUILD)/arm_test_srv
 	$(QEMU) ./$(BUILD)/arm_test_rig
+	$(QEMU) ./$(BUILD)/arm_test_orig
+$(BUILD)/test_orig: test/test_orig.c $(CORE_SRC) $(SIM_SRC) $(HDRS)
+	@mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) $(INC) -o $@ test/test_orig.c $(CORE_SRC) $(SIM_SRC) $(LDLIBS)
+$(BUILD)/arm_test_orig: test/test_orig.c $(CORE_SRC) $(SIM_SRC_ARM) $(HDRS)
+	@mkdir -p $(BUILD)
+	$(ARM_CC) $(CFLAGS) $(INC) -static -o $@ test/test_orig.c $(CORE_SRC) $(SIM_SRC_ARM) $(LDLIBS)
 
 $(BUILD)/test_srv: test/test_srv.c $(CORE_SRC) $(SIM_SRC) $(HDRS)
 	@mkdir -p $(BUILD)

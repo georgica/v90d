@@ -30,7 +30,7 @@ LIB_SRC := dce.c $(PPP_SRC)
 # calling modem are in libv90modem's dev archive
 SUP_SRC := test/harness.c test/caller.c ../ppp/test/pppc.c
 HDRS    := dce.h test/harness.h test/caller.h ../test/test.h ../ppp/test/pppc.h $(wildcard ../ppp/*.h) $(LIBV90M)/include/v90modem.h
-TESTS   := test_call
+TESTS   := test_call test_orig
 
 .PHONY: all test test-arm test-findings clean
 all: test

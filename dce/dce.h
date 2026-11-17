@@ -110,6 +110,10 @@ typedef struct {
     /* with raw_rx: 1 = error control and compression stay as v42 says (a
      * terminal program calling a bulletin board, srv/bbs.h); 0 = none */
     int      raw_ec;
+    /* bench: the box calls (the modem on the port was told ATA): the
+     * modem in the calling role (V.21 and V.22 / V.22bis so far) and V.42
+     * as the originator */
+    int      originate;
     /* closing sequence limits, ms; 0 = the defaults in brackets */
     uint32_t flush_ms;         /* wait for PPP's last frames to go out [5000] */
     uint32_t release_ms;       /* wait for the answer to DISC [3000] */
