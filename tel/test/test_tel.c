@@ -190,6 +190,36 @@ static void test_rings_zero_and_eu(void)
     CHECK_NEAR(tone_amp(R.cap + a + 80, MS(900), 425), 2000, 150);
 }
 
+/* Windows dials a ten-digit number as long distance, with a 1 in front,
+ * unless told otherwise: the port's own number takes it, as the bulletin
+ * board numbers do. Not a shorter number, and not any other digit. */
+static void test_trunk_one(void)
+{
+    tel_cfg c = base_cfg();
+    strcpy(c.number, "6387825442");
+    rig_init(&R, &c);
+    R.hook = 1; run(&R, 300);
+    dial(&R, "16387825442");
+    CHECK_EQ_I(R.t.state, TEL_CONNECTING);
+    CHECK(strcmp(R.t.dialed, "16387825442") == 0);
+    R.hook = 0; run(&R, 600);
+    R.hook = 1; run(&R, 300);
+    dial(&R, "6387825442");
+    CHECK_EQ_I(R.t.state, TEL_CONNECTING);
+    R.hook = 0; run(&R, 600);
+    R.hook = 1; run(&R, 300);
+    dial(&R, "26387825442");
+    CHECK(wait_state(&R, TEL_INTERCEPT, 4000) >= 0);
+    R.hook = 0; run(&R, 600);
+    /* a seven-digit number has no long distance form */
+    c = base_cfg();
+    rig_init(&R, &c);
+    R.hook = 1; run(&R, 300);
+    dial(&R, "15551234");
+    CHECK(wait_state(&R, TEL_INTERCEPT, 4000) >= 0);
+    R.hook = 0; run(&R, 600);
+}
+
 static void test_wrong_number(void)
 {
     tel_cfg c = base_cfg();
@@ -519,6 +549,7 @@ int main(void)
     test_dtmf_call();
     test_rings_zero_and_eu();
     test_wrong_number();
+    test_trunk_one();
     test_also();
     test_any_number();
     test_pulse();

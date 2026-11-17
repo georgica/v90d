@@ -22,6 +22,54 @@ static double tr_in, tr_out; static long tr_n, tr_t; static int tr_on;
 void p34d_trace(const p34d_t *p, int16_t rxs, int16_t x)
 {
     if (!tr_on) return;
+    {
+        static int had_dil, had_cpt; int i, c, k;
+        if (p->state < P34_SD) had_dil = had_cpt = 0;
+        if (!had_dil && p->state >= P34_SD) {
+            const v90_dil_t *d = &p->dil; had_dil = 1;
+            printf("      Ja: DIL N %d, Lsp %d, Ltp %d, H", d->n, d->lsp, d->ltp);
+            for (i = 0; i < 8; i++) printf(" %d", d->h[i]);
+            printf(", REF");
+            for (i = 0; i < 8; i++) printf(" %d", d->ref[i]);
+            printf("\n          SP");
+            for (i = 0; i < d->lsp; i++) printf("%d", (d->sp[i >> 3] >> (i & 7)) & 1);
+            printf(" TP");
+            for (i = 0; i < d->ltp; i++) printf("%d", (d->tp[i >> 3] >> (i & 7)) & 1);
+            printf("\n          training Ucodes");
+            for (i = 0; i < d->n; i++) printf(" %d", d->train[i]);
+            printf("\n");
+        }
+        if (!had_cpt && p->got_cpt) {
+            const v90_cp_t *q = &p->cp; had_cpt = 1;
+            printf("      CPt: is_cp %d drn %d silence %d Sr %d ack %d alaw %d rates 0x%04x ld %d rms_ratio %u a1 %d a2 %d b1 %d b2 %d idx %d %d %d %d %d %d codec_differs %d; upstream SNR %.1f dB\n",
+                   q->is_cp, q->drn, q->silence, q->sr, q->ack, q->alaw, q->rates, q->ld, q->rms_ratio, q->a1, q->a2, q->b1, q->b2,
+                   q->idx[0], q->idx[1], q->idx[2], q->idx[3], q->idx[4], q->idx[5], q->codec_differs, p->snr_db10 / 10.0);
+            for (c = 0; c < 6; c++) {
+                int n = 0; for (k = 0; k < 128; k++) n += (q->mask[c][k >> 3] >> (k & 7)) & 1;
+                if (!n) continue;
+                printf("          constellation %d: %d points:", c, n);
+                for (k = 0; k < 128; k++) if ((q->mask[c][k >> 3] >> (k & 7)) & 1) printf(" %d", k);
+                printf("\n");
+                if (q->codec_differs) {
+                    printf("          codec constellation %d:", c);
+                    for (k = 0; k < 128; k++) if ((q->codec_mask[c][k >> 3] >> (k & 7)) & 1) printf(" %d", k);
+                    printf("\n");
+                }
+            }
+        }
+    }
+    {
+        static int last_drn = -1, last_ack = -1, last_rate = -1;
+        if (p->state < P34_RI) last_drn = last_ack = last_rate = -1;
+        if (p->cp.is_cp && (p->cp.drn != last_drn || p->cp.ack != last_ack || p->down_rate != last_rate)) {
+            int c, k, n = 0;
+            last_drn = p->cp.drn; last_ack = p->cp.ack; last_rate = p->down_rate;
+            for (k = 0; k < 128; k++) n += (p->cp.mask[0][k >> 3] >> (k & 7)) & 1;
+            printf("      CP at %.3f s: drn %d (%d bit/s) ack %d Sr %d ld %d, constellation 0 has %d points; engine's down rate %d, state %d\n", tr_t / 8000.0, p->cp.drn,
+                   (p->cp.drn + 20) * 4000 / 3, p->cp.ack, p->cp.sr, p->cp.ld, n, p->down_rate, (int)p->state);
+            (void)c;
+        }
+    }
     tr_in += (double)rxs * rxs; tr_out += (double)x * x; tr_n++; tr_t++;
     if (tr_n == 1600) {
         printf("      p34 %6.2f s state %2d  line %7.0f rms -> after the canceller %7.0f rms (%.1f dB), delay %d, mu %d, sres_in_s %d\n", tr_t / 8000.0, (int)p->state,
@@ -131,16 +179,19 @@ int main(int argc, char **argv)
     printf("recording: %s receive, %ld samples\n", rec_lin ? "16-bit linear" : "companded", len);
     rec_ans = ansam_in_recording(d, len);
     for (pass = 0; pass < 2; pass++) {
-        long src = 0;
+        long src = 0; int skipped = 0;
         srv_init(&S, &c, 0, ip, NULL);
         srv_set_rx_linear(&S, rec_lin);
+        if (getenv("V90D_ECHO_DELAY")) srv_set_echo_delay(&S, atoi(getenv("V90D_ECHO_DELAY")));   /* the daemon's -d */
         if (getenv("V90D_MAX_TX_CODE")) srv_set_max_tx_code(&S, atoi(getenv("V90D_MAX_TX_CODE")));
         for (i = 0; i < 8000; i++) (void)srv_tick(&S, 0, 0xFF);
         last_ph = last_tel = last_v8 = last_p2 = -1;
         for (n = 0; src < len; n++) {
             uint8_t rx = 0xFF, want = 0xFF, tx; int16_t rxl = 0; answer_t *a = &S.dce.modem;
-            /* the shift is taken up at 2.5 s, while the ringing tone plays */
-            if (n == 20000 && shift > 0) src += shift;
+            /* the shift is taken up at 2.5 s, while the ringing tone plays;
+             * for a caller still dialling then (a slow dialler, a late
+             * start), when the number is in */
+            if (shift > 0 && !skipped && n >= 20000 && S.tel.state >= TEL_CONNECTING) { src += shift; skipped = 1; }
             if (n >= 20000 && n < 20000 - shift) ; else { if (rec_lin) rxl = rec_heard_lin(d, src); else rx = rec_heard(d, src); want = rec_sent(d, src); src++; }
             rec_tx = (int16_t)v90_octet_linear(0, want); rec_tx_on = pass == 1 && S.tel.state == TEL_ANSWERED && S.dce.modem.phase == ANS_V34 && S.dce.modem.connected;
             if (rec_tx92 && pass == 1) {
@@ -202,6 +253,14 @@ int main(int argc, char **argv)
                 was = is;
             }
             if (a->phase == ANS_P3X || a->phase == ANS_V92) {
+                /* when each of the caller's Phase 4 signals was taken as received */
+                static int lg = -1; const v92d_t *m = &a->u.v92;
+                int g = m->got_ja | m->got_cpt << 1 | m->got_e1u << 2 | m->got_suvu << 3 | m->got_cpu << 4 | m->got_ack << 5 | m->got_e2u << 6 | m->dsn_state << 7;
+                { static int lsig = -1; int sg = (int)v90tx_signal(&m->tx); if (m->state >= 7 && sg != lsig) { lsig = sg; printf("%7.3f s    V.92 sending signal %d (CPd is %d bits)\n", src / 8000.0, sg, m->ncpd); } }
+                if (g != lg) { lg = g; printf("%7.3f s    V.92 heard: Ja %d CPt %d E1u %d SUVu %d CPu %d ack %d E2u %d; design %d (%d steps); sending signal %d\n", src / 8000.0,
+                    m->got_ja, m->got_cpt, m->got_e1u, m->got_suvu, m->got_cpu, m->got_ack, m->got_e2u, m->dsn_state, m->dsn.steps, (int)v90tx_signal(&m->tx)); }
+            }
+            if (a->phase == ANS_P3X || a->phase == ANS_V92) {
                 static int ld = -1; const v92d_t *m = &a->u.v92;
                 if (m->dsn_state != ld) { ld = m->dsn_state;
                     if (ld == 2) printf("%7.3f s    CPd designed: %d bit/s (drn %d), trellis %d, LC %d (smallest point %d, largest %d), M0 %d, LZ2 %d LP1 %d, 4G %u; %d steps; "
@@ -215,7 +274,7 @@ int main(int argc, char **argv)
             if (a->phase == ANS_P3X || a->phase == ANS_V92) {
                 static int ls = -1, lu = -1;
                 if ((int)a->u.v92.state != ls || a->u.v92.up_rate != lu) { ls = (int)a->u.v92.state; lu = a->u.v92.up_rate;
-                    printf("%7.3f s    V.92 state %d (error %d), %d bit/s up, %d down, PCM upstream %s\n", src / 8000.0, ls, a->u.v92.error, lu, a->u.v92.down_rate, a->pcm_up ? "offered" : "withdrawn"); }
+                    printf("%7.3f s    V.92 state %d (error %d), %d bit/s up, %d down, PCM upstream %s; peak1 %ld, Jp frac %u\n", src / 8000.0, ls, a->u.v92.error, lu, a->u.v92.down_rate, a->pcm_up ? "offered" : "withdrawn", (long)a->u.v92.peak1, (unsigned)a->u.v92.jp.frac); }
             }
             if (a->phase == ANS_P3 && (int)a->p34.state != last_p34) { last_p34 = (int)a->p34.state; printf("%7.3f s    Phase 3/4 state %d (error %d)\n", src / 8000.0, last_p34, a->p34.error); }
         }

@@ -16,7 +16,12 @@
 #define EC_GUARD_MS    20       /* after TRN1d began + round trip: the caller has stopped Ja */
 #define EC_FAST        3000     /* samples at full NLMS step */
 #define RI_MIN_UNITS   32       /* Ri >= 192 T */
-#define TRN2D_FRAMES   400      /* TRN2d >= 2040 T = 340 data frames */
+/* TRN2d before MP. 9.4.1 asks for at least 2040 T (340 data frames) and 400
+ * frames, 0.3 s, were enough for two modems. A U.S. Robotics 56K of 1998
+ * (flash 5.1.4) was still training on it as a known sequence then: it went
+ * on repeating CPt through our MP and asked for a retrain 0.7 s later, each
+ * time; with 1200 frames, 0.9 s, it answers with CP. */
+#define TRN2D_FRAMES   1200
 
 /* time limits */
 #define T_FIRST_S_MS   6000     /* INFO1a to the first S: 70 ms nominal */
@@ -311,6 +316,12 @@ static void s_heard(p34d_t *p)
 /* How late is our echo? TRN1d is white and the caller is silent, so the
  * received samples of a short window, correlated with what we sent at every
  * candidate distance before them, peak where the echo path is strongest.
+ * The window holds the change from each sample to the next: a modem's line
+ * transformer can return the low frequencies of TRN1d as a tail tens of
+ * milliseconds long, larger in sum than the start of the echo, and on plain
+ * samples that tail put the peak anywhere (U.S. Robotics 5686: found 37 ms
+ * for an echo at 34, the canceller then sat beside the echo). The difference
+ * takes a flat tail away and leaves the start standing.
  * A few lags per sample keep the cost of any one sample small. ecpos has
  * moved on since the snapshot; the history still holds what is needed
  * (P34_EC_MAXLAG + P34_EC_WIN + the samples the search takes < P34_ECDL). */
@@ -486,7 +497,11 @@ uint8_t p34d_tick(p34d_t *p, int16_t rxs)
         (void)sdet_tick(&p->sdet, x);
         if (p->sdet.present >= SDET_PRESENT) s_heard(p);
     }
-    if (p->state >= P34_DATA && p->state <= P34_RT) {
+    /* Tone A asks for a retrain in data mode and in Phase 4 alike: a caller
+     * may give a start-up up there (a U.S. Robotics 56K did, 0.7 s into our
+     * MP, and went unheard until T_PHASE4_MS). Not in Phase 3, where the
+     * caller's own signals are not all known to stay clear of 2400 Hz. */
+    if (p->state >= P34_RI && p->state <= P34_RT) {
         if (tone_a(p, x)) { retrain(p, 0); return octet; }
     } else if (p->in_reneg && tone_a(p, x)) {
         retrain(p, 0); return octet;
@@ -507,8 +522,12 @@ uint8_t p34d_tick(p34d_t *p, int16_t rxs)
             if (p->cfg.echo_delay < 0) {
                 /* first find out how late the echo is (see echo_search) */
                 int32_t snap = from + P34_EC_MAXLAG + P34_EC_WIN;
-                if ((int32_t)n > snap - P34_EC_WIN && (int32_t)n <= snap) {
-                    p->ecwin[p->ecw_n++] = rxs;
+                if ((int32_t)n == snap - P34_EC_WIN) p->ecw_last = rxs;
+                else if ((int32_t)n > snap - P34_EC_WIN && (int32_t)n <= snap) {
+                    /* the change from sample to sample, not the sample: see echo_search */
+                    int32_t dv = (int32_t)rxs - p->ecw_last;
+                    p->ecw_last = rxs;
+                    p->ecwin[p->ecw_n++] = (int16_t)(dv > 32767 ? 32767 : dv < -32768 ? -32768 : dv);
                     if ((int32_t)n == snap) { p->ecs_pos = p->ecpos; p->ecs_lag = 0; p->ecs_best = -1; }
                 } else if ((int32_t)n > snap && p->ecs_lag <= P34_EC_MAXLAG) {
                     echo_search(p);

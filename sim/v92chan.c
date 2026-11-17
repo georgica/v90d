@@ -93,6 +93,8 @@ int16_t v92chan_tick(v92chan_t *c, uint8_t ds_octet, int valid, double amp, doub
     c->epos = (c->epos + 1) & 1023;
 
     y += cfg->echo_gain * echo + cfg->noise * rng_gauss(&c->rng);
+    if (cfg->wander != 0.0 && c->wn >= cfg->wander_from) y += cfg->wander * sin(6.283185307179586 * cfg->wander_hz * (double)c->wn / 8000.0);
+    c->wn++;
     if (y > 32767) y = 32767;
     if (y < -32767) y = -32767;
     if (cfg->rx_linear) return (int16_t)floor(y + 0.5);

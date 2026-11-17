@@ -28,6 +28,11 @@ typedef struct {
     int dil_n;              /* DIL-segments asked for (0 = SCR instead) */
     int dil_syms;           /* symbols of DIL wanted before CPt */
     int trn2u_min;          /* TRN2u before SUVu when no SUVd came (12000 nominal) */
+    int suvd_wait;          /* symbols of TRN2u after which a modem that has seen no SUVd gives up
+                               and falls silent, 0 = it waits (a U.S. Robotics 5686: 3.8 s) */
+    int cpd_wait;           /* the same from its first SUVu, for CPd (the 5686: 3.5 s) */
+    int first_cpd_plain;    /* a first CPd that has the acknowledge bit set is answered with
+                               silence (the 5686, seven calls of seven) */
     uint32_t up_rates;      /* Ja: upstream rates supported, bit r = (r + 18) * 8000 / 6 */
     int wait_cpu;           /* SUVu bit 26 */
     int Kt, Mt;             /* CPt: K and points per constellation */
@@ -67,6 +72,7 @@ typedef struct {
     uint8_t fr[V92_JA_MAX_BITS + 64]; int frn, frpos;
     int fr_kind, fr_ack;            /* sequence being sent: 0 SUVu, 1 CPu */
     int cpu_sent, ack_sent, cpu_repeat; long since_cpu;
+    long since_suvu;                /* symbols since the first SUVu of this Phase 4 */
     v92_enc_t enc; long b1_bits; int lead;
     /* downstream */
     v92a_dstate ds; long dn;

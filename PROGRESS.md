@@ -2019,3 +2019,222 @@ Conexant on PHONE 2, whose service is the plain internet:
 Not tried: a file transfer (Zmodem) through the bridge, a board that needs
 8-bit binary, ANSI art at speed, a real vintage terminal, two such calls at
 once, V.92 on such a call.
+
+## 2026-11-16: the HT801, from flash dumps (no unit)
+
+Two public HT801 flash dumps (crvallance/Grandstream-hax, hardware V1.0A
+and V1.1C) were compared with this HT802's own backup: same partition map,
+device trees equal except for the second SLIC, same SLIC description in the
+factory data with one device instead of two (HARDWARE.md, BOARDS.md).
+
+Changed, not yet in a release:
+- The loader accepts part numbers 9611003610A and 9610003611C
+  (`fw/loader/test`: 129 checks, 0 failures).
+- `slic_present()` (`fw/drv`): a ProSLIC identity read twice and a register
+  that keeps two written patterns (slic: 124 checks, 0 failures, host and
+  ARM). The line driver asks it for port 2 before making `/dev/v90line2`;
+  without that device the boot script already starts the daemon with one
+  line.
+- `make -C fw release` and `make -s -C fw test-release`: pass.
+
+On the bench HT802 (this build through its Firmware page): both ports
+present after the restart, and `ATDT2278353422` from the Conexant on PHONE 2
+reached Telehack, V.90 52000 / 28800.
+
+Not tested, because there is no HT801 here: everything on an HT801. Known
+open points: the Ethernet PHY of V1.x boards (not named anywhere in a dump;
+the boot loader sets it up and our kernel uses the generic driver, so it is
+expected to work) and the SLIC's revision.
+
+Because of the first: `v90nv where` now says `tried=yes` or `tried=no`, and
+on a board that is not tried the boot script confirms a start only after
+the network port has received a packet (`fw/startgood.sh`,
+`tools/test_startgood.sh`: 7 checks, 0 failures, sh and busybox sh).
+
+## 2026-11-16: a U.S. Robotics 5686, two calls at once, the echo delay
+
+A second modem brand: U.S. Robotics 56K FAX EXT (model 5686, firmware
+5.4.62), on PHONE 2, from Dial-Up Networking in Windows XP and from its AT
+commands over a serial bridge.
+
+- Windows XP, Dial-Up Networking: V.90 54666 down, LAPM, V.42bis, PPP up
+  with MPPC both ways.
+- Two calls at once (the first time): the Conexant on PHONE 1 from Linux
+  pppd (V.90 53333 / 28800, PPP 10.64.64.2) while the USR call was up on
+  PHONE 2 (V.90 56000 / 9600, PPP 10.64.64.3). Through the Conexant's link
+  4 of 4 pings to the box and 3 of 3 to 1.1.1.1, 120 to 130 ms; no errors
+  counted on either port.
+- Earlier the same day this modem did not accept the dial tone and did not
+  dial (`NO DIAL TONE` with X4, 18 s of nothing with X3), on both ports,
+  while the Conexant worked on the same port. Later, with nothing changed
+  on the box (daemon restarted, box restarted: the same), it accepted the
+  dial tone in 2.3 s every time. Not explained; nothing in the box's
+  recordings of the failed calls points at the box.
+
+The upstream was only 9600 bit/s, the receiver's error -18 dB. From the
+recording (`live/usr1.raw`, replayed with `live/replay`):
+
+- The modem's own signal is clean: its probing tones stand 45 dB above the
+  empty frequencies.
+- The echo of TRN1d comes back 25 dB down (Conexant: 16 dB), 270 samples
+  late on both modems, and from this modem with a flat tail of more than
+  12 ms (low frequencies, the line transformer).
+- The delay search took 308 for it, the canceller window began at 300 and
+  took nothing away (Conexant: delay 261, 14 to 17 dB taken away). The
+  same window offline gives the same 308; ten other windows give 270 or
+  274.
+
+Changed: the search correlates the change from sample to sample
+(`modem/p34d.c`). The same eleven windows of the recording: 270 every time.
+`test/test_p34.c` has the measured echo path as a line model, twelve noise
+sequences: found on 0 of 12 before, 12 of 12 after (p34: 361 checks, 0
+failures). `make check`: ALL HOST CHECKS PASS.
+
+On the box (bench build), the same modem, same port: V.90 54666 / 26400.
+
+### V.92 with the same modem
+
+With V.92 on, this modem asks for PCM upstream by itself (`+PIG` is 0 from
+the factory). The box's V.92 start-up gave up each time and the call fell
+back to V.90, 39 s to CONNECT instead of 21. Four causes, found one behind
+the other in recordings of the calls (`live/usr2.raw` on, replayed with
+`live/replay`):
+
+1. The V.92 engine has its own copy of the echo delay search, with the
+   same fault: 300 taken for 270, nothing cancelled, the design gave up
+   (error 6). Same change (`v92/v92_p34d.c`). After it: delay 262, 22 dB
+   cancelled.
+2. The modem waits 3.8 s into TRN2u for SUVd and then gives up. The box
+   sent SUVd only when the CPd design was done, and the design, one step
+   every four samples, took 4.5 to 7.5 s (9000 to 15000 steps). Now one
+   step every two samples (2.2 to 3.7 s), and SUVd goes out 2.5 s into
+   Phase 4 at the latest, the design done or not.
+3. A first CPd that has the acknowledge bit set (CPu was in before the
+   design was done) was answered with silence: 7 calls of 7. A first CPd
+   without the bit: the modem went on, 9 of 9. The first CPd is now always
+   sent without it.
+4. In data mode what is left of our own low frequencies wanders under the
+   caller's symbols: runs of tens of symbols 100 units off, the points 245
+   apart, B1u with 66 to 213 wrong bits in four calls, and 71 symbols of
+   4000 near a wrong decision in a call that went through. The receiver
+   now follows the baseline with the error of each decision (an eighth).
+   The four recordings replayed: B1u with 0 wrong bits; error 52 -> 17
+   units RMS.
+
+A wrong turn on the way: the refusals of point 3 looked like a limit on
+the transmit power the design asks for (refused at 0.89 to 0.98 of the
+limit, accepted at 0.58 to 0.84). With points 3 and 4 in, designs at 0.84
+to 1.02 of the limit were accepted 6 of 6; the margin was taken out again.
+
+Tests, each seen failing without its change (`test/test_v92call.c`, the
+simulated caller and line in `sim/v92a.c`, `sim/v92chan.c`): 25b a weak
+echo under its own slow tail (delay 349 and error 6 before, 263 after),
+25c a caller that waits 3.8 s for SUVd and 3.5 s for CPd and answers a
+first CPd with the acknowledge bit by silence, 25d a slow wander under the
+data (47981 wrong bits of 308502 before, 0 after). v92call: 1054 checks,
+0 failures.
+
+On the box (bench build), the same modem on PHONE 2, `AT&F1`,
+`ATX4DT6387825442`:
+
+- upstream limit 33600 (the default): V.92 54666 / 33333, 5 calls of 5;
+- upstream limit 48000: V.92 54666 / 40000, 5 calls of 5 (and 37333,
+  37333, 38666 with the power margin that was taken out again);
+- CONNECT after 22 to 25 s; the modem reports
+  `CONNECT 54666/ARQ/V92/LAPM/V42BIS`;
+- the line driver's counters for the port through a call of 34 s:
+  pump_underruns 0, pump_overruns 0, stale_writes 0 (the design at two
+  samples a step does not make the box late with one call up).
+
+Later the same day, the Conexant attached again (PHONE 1, `AT+PIG=0`):
+
+- V.92 on both ports at once, both orders. The USR in V.92 data on PHONE 2
+  (54666 / 40000) while the Conexant started up and connected on PHONE 1
+  (V.92 50666 / 28000); then the Conexant in a V.92 PPP session from Linux
+  pppd (52000 / 26666, 3 of 3 pings through it) while the USR started up
+  and connected (54666 / 40000). The line driver's counters of both ports,
+  read twice a second through both: pump_underruns, pump_overruns and
+  stale_writes stayed 0. The design at two samples a step does not make
+  the box late with a call on the other port.
+- The Conexant alone: V.92 49333 to 50666 down, 24000 to 26666 up, CONNECT
+  after 18 to 20 s, 22 calls of 25. Of the other three, two fell back to
+  V.90 (31 s) and one did not train; none of them was recorded. A loop of
+  recorded calls then caught one fallback after six good calls
+  (`live/cxfail.raw`): CPt is received, E1u is not, the channel estimate's
+  residual is 717121 where a good call has about 5000, and the call
+  retrains 2.2 s later, before Phase 4 begins. Echo delay (262) and
+  canceller (22 to 32 dB) are the same as in the good calls
+  (`live/cxa.raw`, `live/cxc.raw`). So it is not one of today's Phase 4
+  changes. Looked at symbol by symbol (`V92_TRACE`): in that call the
+  receiver's error on the second TRN1u never comes down (6.0e6 where a
+  good call is at 3e5 after 0.5 s and 7e4 after 2 s), but it dips to
+  2.6e6 and 2.9e6 at 2.20 s and 4.35 s into the state, and the two CPt
+  that parse are received in the first dip. A receiver trained at the
+  start that is right again every 2.15 s is one whose input slips a
+  sample in that time: the caller's transmit clock is 58 ppm off ours in
+  this call, where it is locked in the others. Starting the training up to
+  3 samples earlier or later changes nothing. PCM upstream cannot be
+  received from a caller that is not locked, and the retrain to V.90 is
+  the right end of such a call; nothing changed in the box.
+
+From Windows 98 SE Dial-Up Networking with the USR 5686: V.92 54666 /
+40000, LAPM, PPP up as `guest` with MPPC both ways, a call of 66 s. (Two
+calls before it connected at V.92, 40000 and 41333 up, and ended on a
+wrong password; one before those dialled `16387825442`, Windows' long
+distance 1, which the port's own number does not take.)
+
+### A U.S. Robotics 56K of 1998 (x2 and V.90)
+
+"U.S. Robotics 56K FAX EXT", product 00568603, flash 5.1.4 of 10/2/98,
+options `V32bis,V.80,V.34+,x2,V.90`; on PHONE 2, driven over the serial
+bridge. It names V.90 in its CM and goes into the V.90 start-up. Every
+call ended after 28 s with our busy tone; the modem's `ATI6`:
+"Disconnect Reason is Unable to Retrain". Recordings `live/x2a.raw`,
+`live/x2b.raw`; `live/replay` now prints the DIL descriptor and the CPt.
+
+1. 0.7 s into our MP the modem falls silent and sends Tone A (2400 Hz
+   with its 1800 Hz guard tone, 80 % / 20 % of the power). `p34d` listened
+   for Tone A in data mode and in a rate renegotiation only, went on
+   sending MP and failed with "no CP" 15 s later. It now listens through
+   Phase 4 as well. Test 17 in `test/test_p34.c`: before, state FAILED
+   error 7, 14933 ms after the tone began; after, RETRAIN after 66 ms.
+   On the box: the retrain is taken up and the call connects,
+   `CONNECT 28800/ARQ/V34/LAPM/V42BIS`, 2 calls of 2 (and one more with
+   `v92 = off`, the same).
+2. Why it gave V.90 up: it asks for the same training as the 5686 (DIL
+   N 197, H 10, CPt drn 16, Sr 1, ld 3, a1 64, nine points 30..89; only
+   that it sends the six constellations one by one and a codec
+   constellation equal to them), and through our TRN2d and MP it goes on
+   repeating CPt (1788 bits each) and never sends CP. The 5686 does the
+   same for 1.1 s and then sends CP. Our TRN2d was 400 data frames, 0.3 s
+   (9.4.1: at least 2040 T). With 1200 frames, 0.9 s, the modem answers
+   with CP. Test 18 (a caller that needs 0.8 s of TRN2d): red with 400,
+   green with 1200. p34: 372 checks, 0 failures (two older checks moved
+   with the later start of data mode: a bit count and the time of a
+   renegotiation).
+   On the box, 4 calls of 4 at V.90 with LAPM, CONNECT after 20.5 to
+   21.2 s, 28800 up each. Downstream as the modem reports it: 54666,
+   54666, 56000, 56000; as the box lists it: 54666, 50666, 56000, 54666.
+   The two do not agree call by call. Four more calls, recorded
+   (`live/x2r1.raw` to `x2r4.raw`): in three the modem's CONNECT, its CP
+   (drn 21, 65 points) and the box's list all say 54666. In the fourth the
+   CONNECT says 54666, and 6.7 s after its first CP the modem sends one
+   with drn 18 (46 points), a rate renegotiation of its own; the box
+   follows and lists 50666, and the modem's `ATI11` has "Speed Shifts
+   Up/Down 0/1" for that call and 0/0 for the others. The CONNECT message
+   is the rate at the start, the list has the rate at the end.
+
+The Conexant against the longer TRN2d (PHONE 1): V.90 with `AT+PIG=1`,
+3 calls of 3 (49333, 50666, 50666 / 28800); V.92 with `AT+PIG=0`, 3 of 3
+(49333, 50666, 50666 / 25333).
+
+The 5686 (flash 5.4.62) back on PHONE 2, the same build: V.90 with
+`v92 = off`, 3 calls of 3, 54666 / 26400; V.92, 3 of 3, 54666 / 40000,
+40000 and 38666.
+x2 itself is not implemented: there is no published description of it.
+
+The port's own number with a 1 in front: a ten-digit number is now taken
+with the long distance 1 as well (`tel/tel.c`; Windows dials it so unless
+told otherwise, and the call list showed `16387825442` as a wrong number
+three times that day). `test_trunk_one`: red before (1 failure), tel: 396
+checks, 0 failures after.

@@ -18,9 +18,12 @@
  * compile-time default of that setting. */
 /* The CPd design of a V.92 start-up takes one step every so many samples:
  * at one per sample the unit's ARM926 fell behind the line by 0.3 s in the
- * first calls with a real V.92 modem (v92/README.md, reading 56). */
+ * first calls with a real V.92 modem (v92/README.md, reading 56). At four
+ * the design took 4.5 to 7.5 s, and a U.S. Robotics 5686 waits 3.5 s for
+ * CPd after its SUVu; at two it is done in 2 to 3 s and the line driver
+ * counted no late block in a call (PROGRESS.md, 2026-11-16). */
 #ifndef V92_DESIGN_PACE
-#define V92_DESIGN_PACE 4
+#define V92_DESIGN_PACE 2
 #endif
 #ifndef V90_MAX_TX_CODE
 #define V90_MAX_TX_CODE ANS_MAX_TX_CODE

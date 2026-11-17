@@ -29,6 +29,8 @@
 #define T_TRAIN_MS     8000     /* 9.5.2.1.11: CPt within 5000 ms of Su-bar */
 #define T_PHASE4_MS    20000    /* 9.6.1.2.1: B1u within 20 s (+ 6 round trips) */
 #define T_RENEG_MS     8000
+#define BASE_MAX_Q4    (1024 << 4)  /* the baseline is followed this far from zero, linear units Q4 */
+#define SUVD_HOLD_MS   2500     /* SUVd at the latest so long into Phase 4, the design done or not */
 #define T_PACE_MS      2500     /* more for each sample the design waits between steps */
 
 #define CD_BLOCK       80       /* carrier watch: 10 ms */
@@ -166,6 +168,7 @@ static void upstream_start(v92d_t *p, int32_t m)
 {
     if (p->dsn_state != 2 || v92_dec_init(&p->dec, &p->cpd.map, put_data, p) != 0) { fail(p, V92D_ERR_B1); return; }
     v92_dec_any_start(&p->dec);
+    p->base_q4 = 0;
     p->m_b1u = m;
     p->data_k = m + p->dsn.dly;
     p->b1_left = (int32_t)V92_B1U_FRAMES * p->cpd.map.K; p->b1_bad = 0;
@@ -355,16 +358,25 @@ static void probe_cpd(v92_cpd_t *c)
 }
 #endif
 
-static void build_seqs(v92d_t *p)
+/* SUVd says nothing about the design: it is ready as soon as Phase 4 begins */
+static void build_suvd(v92d_t *p)
 {
     int D = V90_MAP_D(&p->tx.map[V90TX_MAP_TRAIN]), a, n;
     for (a = 0; a < 2; a++) {
         v92_suvd_t s;
-        v92_cpd_t *c = &p->cpd;
         s.silence = 0; s.ack = (uint8_t)a;
         n = v92_suvd_build(&s, D, p->sbits);
         v90_pack_bits(p->sbits, n, p->xsuvd[a]);
         (void)v90tx_set_xseq(&p->tx, a ? V90TX_XSEQ_SUVD_ACK : V90TX_XSEQ_SUVD, p->xsuvd[a], n);
+    }
+}
+
+static void build_seqs(v92d_t *p)
+{
+    int D = V90_MAP_D(&p->tx.map[V90TX_MAP_TRAIN]), a, n;
+    build_suvd(p);
+    for (a = 0; a < 2; a++) {
+        v92_cpd_t *c = &p->cpd;
         c->ack = (uint8_t)a;
         n = v92_cpd_build(c, D, p->sbits);
         if (n <= 0 || n > V92D_SBUF) { fail(p, V92D_ERR_DESIGN); return; }
@@ -553,8 +565,22 @@ uint8_t v92d_tick(v92d_t *p, int16_t rxs)
 #ifdef P34D_TRACE
             v92d_trace_data(p, v92_trn_sample(&p->trn, p->data_k));
 #endif
-            v92_dec_put(&p->dec, v92_trn_sample(&p->trn, p->data_k++), 0);
-            if (p->b1_sym >= 0) b1u_lead(p, v92_trn_sample(&p->trn, p->data_k - 1));
+            {
+                /* The baseline. What the canceller and its tail estimate leave
+                 * of our own low frequencies comes back as a slow wander under
+                 * the caller's symbols (a U.S. Robotics 5686: 100 units for
+                 * tens of symbols, the points 245 apart; whole runs of symbols
+                 * were then decided one point off). Each decision's error moves
+                 * the baseline by an eighth: slow against the symbols, fast
+                 * against the wander. A wrong decision moves it by a sixteenth
+                 * of a spacing at most. */
+                int32_t y = (int32_t)v92_trn_sample(&p->trn, p->data_k++) - (p->base_q4 >> 4), tent;
+                v92_dec_put(&p->dec, y, &tent);
+                p->base_q4 += (y - tent) * 2;
+                if (p->base_q4 > BASE_MAX_Q4) p->base_q4 = BASE_MAX_Q4;
+                if (p->base_q4 < -BASE_MAX_Q4) p->base_q4 = -BASE_MAX_Q4;
+                if (p->b1_sym >= 0) b1u_lead(p, (int16_t)(y > 32767 ? 32767 : y < -32767 ? -32767 : y));
+            }
         }
         if (p->state >= V92D_RETRAIN) return octet;
     }
@@ -596,8 +622,13 @@ uint8_t v92d_tick(v92d_t *p, int16_t rxs)
             if (p->cfg.echo_delay < 0) {
                 /* first find out how late the echo is (see echo_search) */
                 int32_t snap = from + V92D_EC_MAXLAG + V92D_EC_WIN;
-                if (n > snap - V92D_EC_WIN && n <= snap) {
-                    if (p->ecw_n < V92D_EC_WIN) p->ecwin[p->ecw_n++] = rxs;
+                if (n == snap - V92D_EC_WIN) p->ecw_last = rxs;
+                else if (n > snap - V92D_EC_WIN && n <= snap) {
+                    /* the change from sample to sample, as in p34d.c (a long flat
+                     * tail of the echo otherwise puts the peak anywhere) */
+                    int32_t dv = (int32_t)rxs - p->ecw_last;
+                    p->ecw_last = rxs;
+                    if (p->ecw_n < V92D_EC_WIN) p->ecwin[p->ecw_n++] = (int16_t)(dv > 32767 ? 32767 : dv < -32768 ? -32768 : dv);
                     if (n == snap) { p->ecs_pos = p->ecpos; p->ecs_lag = 0; p->ecs_best = -1; }
                 } else if (n > snap && p->ecs_lag <= V92D_EC_MAXLAG) {
                     echo_search(p);
@@ -698,6 +729,14 @@ uint8_t v92d_tick(v92d_t *p, int16_t rxs)
                 if (p->state != V92D_PH4) break;
             }
         }
+        if (p->dsn_state != 2 && !p->clearing && !p->in_reneg && sig == V90TX_TRN2D
+            && v90tx_units(&p->tx) >= (uint32_t)TRN2D_FRAMES && p->t >= MS(SUVD_HOLD_MS)) {
+            /* 9.6.1.1.1: TRN2d for at least 2040 T, then SUVd. The design may
+             * take longer than a caller waits for SUVd (a U.S. Robotics 5686
+             * went on by itself 3.8 s into TRN2u); CPd follows when it is done. */
+            build_suvd(p);
+            sel(p, suvd);
+        }
         if (p->dsn_state == 2) {
             if (p->clearing) {
                 /* 9.11: CPd with drn = 0, then silence */
@@ -714,7 +753,11 @@ uint8_t v92d_tick(v92d_t *p, int16_t rxs)
                 enter(p, V92D_ED);
             } else if (is_suvd) {
                 if (p->cpd_sent == 1) { p->cpd_sent = 2; p->t_cpd = p->now; }       /* the single CPd is out */
-                if (p->got_suvu && !p->cpd_sent) sel(p, cpd);                       /* 9.6.1.1.2 */
+                /* 9.6.1.1.2. The first CPd without the acknowledge bit, also when
+                 * CPu is in already (SUVd went out before the design was done):
+                 * a U.S. Robotics 5686 answered a first CPd that had the bit set
+                 * with silence, seven calls of seven, and a plain one never. */
+                if (p->got_suvu && !p->cpd_sent) sel(p, V90TX_CPD);
                 else if (p->cpd_sent == 2 && !p->got_ack && !p->cpd_repeat
                          && p->now - p->t_cpd > MS(100) + p->cfg.rtd + 1200) { p->cpd_repeat = 1; sel(p, cpd); }   /* 9.6.1.1.3 */
                 else if (sig != suvd) sel(p, suvd);                                 /* the acknowledge bit */

@@ -148,8 +148,9 @@ static double up_symbol(v92a_t *p)
         break;
     case VA_TRN2U:
         a = (double)v92_ml_tx(&p->ml, 0) / sqrt(p->ml.nbits == 3 ? 21.0 : 5.0);
+        if (!p->in_reneg && cfg->suvd_wait > 0 && p->un >= cfg->suvd_wait && p->suvd_n == 0) { unext(p, VA_DOWN); break; }
         if (p->un % 12 == 0 && (p->un >= (p->in_reneg ? 2400 : cfg->trn2u_min) || p->suvd_n > 0)) {
-            p->cpu_sent = 0; p->ack_sent = 0; p->since_cpu = 0;
+            p->cpu_sent = 0; p->ack_sent = 0; p->since_cpu = 0; p->since_suvu = 0;
             load_frame(p, F_SUVU, p->cpd_n > 0);
             unext(p, VA_SEQ);
         }
@@ -158,6 +159,7 @@ static double up_symbol(v92a_t *p)
         a = (double)v92_ml_tx(&p->ml, p->fr + p->frpos) / sqrt(p->ml.nbits == 3 ? 21.0 : 5.0);
         p->frpos += p->ml.nbits;
         if (p->cpu_sent) p->since_cpu++;
+        if (!p->in_reneg && cfg->cpd_wait > 0 && ++p->since_suvu >= cfg->cpd_wait && p->cpd_n == 0) { unext(p, VA_DOWN); break; }
         if (p->frpos >= p->frn) {                           /* a sequence is complete */
             int got_ack = p->suvd_ack || p->cpd_ack;
             if (p->fr_ack) p->ack_sent = 1;
@@ -281,6 +283,7 @@ static void train_frame_done(v92a_t *p, const uint8_t *bits, int D)
             r = v92_cpd_parse(p->mb, p->mbn, D, &p->cpd_new);
             if (r > 0) {
                 p->cpd = p->cpd_new; p->cpd_n++;
+                if (p->cfg.first_cpd_plain && p->cpd_n == 1 && p->cpd.ack) p->us = VA_DOWN;
                 if (p->cpd.ack) p->cpd_ack = 1;
                 if (p->cpd.drn == 0) p->clear_seen = 1;
             }

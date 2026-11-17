@@ -169,9 +169,17 @@ static void accept_number(tel_t *t)
  * of them, 1 = it begins one, 0 = it can be none */
 static int dialed_is(const tel_t *t)
 {
+    /* the port's own number, when it has the ten digits of a North American
+     * one, is taken with the long distance 1 in front as well (what Windows
+     * dials unless told otherwise) */
+    char one[TEL_NUMBER_MAX + 2];
     int i, best = 0;
-    for (i = -1; i < TEL_ALSO; i++) {
-        const char *num = i < 0 ? t->cfg.number : t->cfg.also[i];
+    one[0] = 0;
+    if (strlen(t->cfg.number) == 10 && t->cfg.number[0] != '1' && TEL_NUMBER_MAX >= 11) {
+        one[0] = '1'; strcpy(one + 1, t->cfg.number);
+    }
+    for (i = -2; i < TEL_ALSO; i++) {
+        const char *num = i == -2 ? one : i < 0 ? t->cfg.number : t->cfg.also[i];
         size_t want = strlen(num);
         size_t k;
         if (!want || (size_t)t->ndialed > want) continue;

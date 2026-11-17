@@ -26,12 +26,19 @@ typedef struct {
     int seconds;
     int echo_auto;          /* let the modem measure the echo delay */
     int echo_bulk;          /* extra delay of the echo path, samples (a line driver's buffering) */
+    int echo_spread;        /* the echo path is a weak, smeared one with a long tail instead of one tap and a
+                               small second one */
+    int nseed;              /* another noise sequence */
     /* rate renegotiation and cleardown, ms into the run (0 = never) */
     int snr2_ms; double snr2_db;                /* the line noise changes in mid-call */
     int a_reneg_sil;                            /* ... with a request for silence (CPs) */
     int a_reneg_ms, a_reneg_kd, a_reneg_scr;    /* the caller asks, optionally for a new K, with SCR before CP */
     int a_clear_ms;                             /* the caller clears down */
     int d_reneg_ms, d_clear_ms;                 /* we do */
+    int a_tone_ms;                              /* the caller gives the start-up up this long after we began MP:
+                                                   70 ms of silence, then Tone A with its guard tone (0 = never) */
+    int a_trn2d_ms;                             /* the caller trains on TRN2d as a known sequence and needs this
+                                                   much of it: an MP that comes sooner makes it give up the same way */
 } scen_t;
 
 typedef struct {
@@ -47,6 +54,7 @@ typedef struct {
     int d_end_at;           /* sample at which it gave up */
     int silent_after_end;   /* it sent only silence from then on */
     int req_rc;
+    int tone_at;            /* sample at which the caller's Tone A began (a_tone_ms) */
     p34a_t *a; p34d_t *d;
 } out_t;
 
@@ -81,10 +89,18 @@ static void run(const scen_t *s, out_t *o)
     ac.getbit = src_bit; ac.putbit = sink_bit; ac.user = &aio;
     p34a_init(&a, &ac);
 
-    rng_seed(&rng, 99);
+    rng_seed(&rng, 99 + (uint32_t)s->nseed);
     memset(o, 0, sizeof *o); o->d_data_at = -1; o->a = &a; o->d = &d;
     for (i = 0; i < s->seconds * 8000; i++) {
         double rx;
+        if (s->echo_spread) {
+            /* as measured: a start that changes sign from sample to sample, then a long flat tail
+             * (the low frequencies of what we send, through the modem's line transformer) */
+            static const double head[7] = { 0.010, 0.011, -0.015, 0.007, 0.012, -0.005, 0.014 }; int k;
+            rx = dl_u[(i - s->d_up + MAXD) % MAXD] + nrms * rng_gauss(&rng);
+            for (k = 0; k < 7; k++) rx += head[k] * dl_e[(i - 9 - k - s->echo_bulk + MAXD) % MAXD];
+            for (k = 0; k < 600; k++) rx += 0.010 * exp(-k / 300.0) * dl_e[(i - 16 - k - s->echo_bulk + MAXD) % MAXD];
+        } else
         rx = dl_u[(i - s->d_up + MAXD) % MAXD] + s->echo * dl_e[(i - 9 - s->echo_bulk + MAXD) % MAXD]
            + 0.3 * s->echo * dl_e[(i - 14 - s->echo_bulk + MAXD) % MAXD] + nrms * rng_gauss(&rng);
         if (rx > 32767) rx = 32767;
@@ -93,6 +109,18 @@ static void run(const scen_t *s, out_t *o)
         oct = p34d_tick(&d, (int16_t)floor(rx + 0.5));
         dl_o[i % MAXD] = oct; dl_e[i % MAXD] = (int16_t)v90_octet_linear(s->alaw, oct);
         dl_u[i % MAXD] = p34a_tick(&a, dl_o[(i - s->d_down + MAXD) % MAXD]);
+        if (s->a_tone_ms || s->a_trn2d_ms) {
+            static int mp_at, trn_at; int since;
+            if (i == 0) mp_at = trn_at = -1;
+            if (trn_at < 0 && d.state == P34_TRN2D) trn_at = i;
+            if (mp_at < 0 && d.state == P34_MP) mp_at = i;
+            since = mp_at < 0 ? -1 : i - mp_at - s->a_tone_ms * 8;
+            if (s->a_trn2d_ms && (mp_at < 0 || mp_at - trn_at >= s->a_trn2d_ms * 8)) since = -1;
+            if (since >= 0 && o->tone_at == 0) o->tone_at = i + 560;
+            if (since >= 0)
+                dl_u[i % MAXD] = since < 560 ? 0.0
+                               : s->gain * 2.0 * (sin(6.283185307179586 * 2400.0 * i / 8000.0) + 0.5 * sin(6.283185307179586 * 1800.0 * i / 8000.0));
+        }
         if (o->d_data_at < 0 && d.state == P34_DATA) o->d_data_at = i;
         if (o->d_data_at >= 0 && i > o->d_data_at + 8000 && d.rx.mse > o->worst_mse) o->worst_mse = d.rx.mse;
         {
@@ -223,6 +251,24 @@ int main(void)
     CHECK(o.echo_delay <= 9);
     CHECK(o.up_rate >= 28800);
 
+    /* a weak echo smeared over many samples, under noise (a U.S. Robotics 5686
+     * on the bench: 25 dB below what we send, 34 ms late, no tap standing out
+     * and a long tail): the measurement must still find where it starts,
+     * on every one of these lines */
+    {
+        int k, found = 0;
+        for (k = 0; k < 12; k++) {
+            memset(&s, 0, sizeof s);
+            s.rate = 3200; s.cn = 3; s.cd = 5; s.gain = 2000; s.d_down = 20; s.d_up = 24; s.seconds = 10;
+            s.snr_db = 22; s.echo_spread = 1; s.echo_bulk = 259; s.echo_auto = 1; s.dil_n = 6; s.nseed = k;
+            run(&s, &o);
+            if (o.echo_delay >= 259 + 9 - 12 && o.echo_delay <= 259 + 11) found++;
+            else printf("    weak smeared echo, noise %d: delay found %d (the echo path starts at %d)\n", k, o.echo_delay, 259 + 9);
+        }
+        printf("  weak smeared echo 34 ms late: found on %d of 12 lines\n", found);
+        CHECK(found == 12);
+    }
+
     /* ---- rate renegotiation (9.6) and cleardown (9.7) ---- */
     memset(&s, 0, sizeof s);
     s.rate = 3200; s.cn = 3; s.cd = 5; s.gain = 2000; s.d_down = 20; s.d_up = 24; s.seconds = 9;
@@ -241,7 +287,7 @@ int main(void)
     CHECK_EQ_I(o.a->dec_bad, 0); CHECK_EQ_I(o.a->b1d_bad, 0);
     CHECK(o.d_data2_at > 0 && o.d_data2_at < 4000 * 8 + 8000);
     /* downstream: data frame alignment kept, no bit lost or invented across it */
-    CHECK(o.down_bits > 300000); CHECK_EQ_I(o.down_bad, 0);
+    CHECK(o.down_bits > 270000); CHECK_EQ_I(o.down_bad, 0);
     /* upstream: clean before, clean after */
     CHECK_EQ_I(o.up_bad_before, 0);
     CHECK(o.up_bits2 > 80000); CHECK_EQ_I(o.up_bad2, 0);
@@ -333,9 +379,27 @@ int main(void)
     CHECK(o.d_end_at > 0 && o.d_end_at < (4000 + 15000) * 8);
     s.snr2_ms = 0; s.seconds = 9;
 
+    /* 17. the caller gives the start-up up in Phase 4 and asks for a retrain
+     * (as a U.S. Robotics 56K did, 0.7 s into our MP): we hear its Tone A
+     * there too, not only in data mode */
+    s.a_tone_ms = 1; s.seconds = 30;
+    run(&s, &o); report("Tone A during our MP", &s, &o);
+    printf("    retrain taken up %.0f ms after the tone began\n", (o.d_end_at - o.tone_at) / 8.0);
+    CHECK_EQ_I(o.state, P34_RETRAIN); CHECK_EQ_I(o.error, 0); CHECK(!o.d->retrain_ours);
+    CHECK(o.tone_at > 0 && o.d_end_at > o.tone_at + 50 * 8 && o.d_end_at < o.tone_at + 200 * 8);
+    s.a_tone_ms = 0; s.seconds = 9;
+
+    /* 18. a caller that needs 0.8 s of TRN2d before the MP (a U.S. Robotics
+     * 56K of 1998 gave up with 0.3 s and connected with 0.9 s) */
+    s.a_trn2d_ms = 800;
+    run(&s, &o); report("a caller that needs 0.8 s of TRN2d", &s, &o);
+    CHECK_EQ_I(o.state, P34_DATA); CHECK_EQ_I(o.error, 0);
+    CHECK(o.up_bits > 10000); CHECK_EQ_I(o.up_bad, 0); CHECK_EQ_I(o.down_bad, 0);
+    s.a_trn2d_ms = 0;
+
     /* 13. a renegotiation that never gets anywhere (the caller sends S,
      * S-bar and then SCR for ever): 9.6.1 asks for a retrain */
-    s.a_reneg_ms = 2500; s.a_reneg_scr = 1000000; s.seconds = 10;
+    s.a_reneg_ms = 3500; s.a_reneg_scr = 1000000; s.seconds = 10;
     run(&s, &o); report("renegotiation stalls", &s, &o);
     CHECK_EQ_I(o.state, P34_RETRAIN); CHECK_EQ_I(o.error, 0);
     CHECK(o.d->retrain_ours);

@@ -33,6 +33,10 @@ typedef struct {
     double echo_tail;           /* a slow tail of the echo: the downstream through a
                                    first order low-pass at 6.4 Hz (25 ms), times this (an FXS
                                    port's coupling; seen with a real modem, reading 53) */
+    double wander;              /* a slow drift added at the codec, linear units peak (a sine
+                                   of wander_hz), from sample wander_from on: what is left of
+                                   our own low frequencies once the downstream carries data */
+    double wander_hz; long wander_from;
     double dn_pad_db;           /* digital pad in the downstream path (lowers the echo) */
     double up_pad_db;           /* digital pad in the upstream path, 0 = none */
     int    up_delay;            /* extra upstream delay, samples (< 512) */
@@ -46,6 +50,7 @@ typedef struct {
     double dl[512]; int dpos;           /* upstream delay */
     double el[1024]; int epos;          /* downstream history for the echo */
     double dn_gain, up_gain;
+    long   wn;                          /* samples so far, for the wander */
     double etail;                       /* state of the slow echo tail */
     rng_t  rng;
 } v92chan_t;

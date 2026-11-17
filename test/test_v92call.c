@@ -27,7 +27,7 @@ static void sink_bit(void *u, int bit) { prbs_t *p = &((io_t *)u)->sink; p->n++;
 typedef struct {
     const char *name;
     int alaw, shape, dil_n;
-    double level, noise, echo, up_pad, phase0, gain_err, echo_tail;
+    double level, noise, echo, up_pad, phase0, gain_err, echo_tail, wander;
     int echo_delay, d_down, d_up;
     int seconds;
     int max_up;
@@ -36,6 +36,9 @@ typedef struct {
     int uinfo, ltot, lmax;      /* from Phase 2, 0 = defaults */
     int mute_ms;                /* the caller's signal stops for good */
     int echo_search;            /* the echo delay is not given to the digital modem */
+    int pace;                   /* samples per step of the CPd design (0: one) */
+    int suvd_wait, cpd_wait;    /* the caller's patience in Phase 4, symbols (0: any) */
+    int first_cpd_plain;        /* the caller answers a first CPd with the acknowledge bit by silence */
     int b1u_lead, z2_dead, conv_start, ja_no_ones, ntrn1, jd_wait;      /* the caller's ways, see ../sim/v92a.h */
 } scen_t;
 
@@ -68,18 +71,19 @@ static void run(const scen_t *s, out_t *o)
     dio.src.s = 11; aio.sink.s = 11; aio.src.s = 23; dio.sink.s = 23;
 
     cc.alaw = s->alaw; cc.shape = s->shape; cc.level = s->level; cc.noise = s->noise;
-    cc.echo_gain = s->echo; cc.echo_delay = s->echo_delay; cc.echo_tail = s->echo_tail; cc.up_pad_db = s->up_pad; cc.up_delay = s->d_up; cc.seed = 5;
+    cc.echo_gain = s->echo; cc.echo_delay = s->echo_delay; cc.echo_tail = s->echo_tail; cc.wander = s->wander; cc.wander_hz = 25.0; cc.wander_from = 40000; cc.up_pad_db = s->up_pad; cc.up_delay = s->d_up; cc.seed = 5;
     v92chan_init(&ch, &cc);
 
     dc.alaw = s->alaw; dc.uinfo = s->uinfo ? s->uinfo : 91; dc.md_len = 0;
     dc.ltot = s->ltot ? s->ltot : 256; dc.lmax = s->lmax ? s->lmax : 192;
-    dc.rtd = s->d_down + s->d_up; dc.echo_delay = s->echo_search ? -1 : s->echo_delay;
+    dc.rtd = s->d_down + s->d_up; dc.echo_delay = s->echo_search ? -1 : s->echo_delay; dc.dsn_pace = s->pace;
     dc.max_up_rate = s->max_up;
     dc.getbit = src_bit; dc.putbit = sink_bit; dc.user = &dio;
     CHECK_EQ_I(v92d_init(&d, &dc), 0);
 
     ac.alaw = s->alaw; ac.uinfo = dc.uinfo; ac.sil0 = 560; ac.ntrn1 = 2040; ac.ntrn1b = 2040; ac.jd_wait = 100;
-    ac.dil_n = s->dil_n; ac.dil_syms = 1500; ac.trn2u_min = 12000;
+    ac.dil_n = s->dil_n; ac.dil_syms = 1500; ac.trn2u_min = s->suvd_wait ? 1000000 : 12000;
+    ac.suvd_wait = s->suvd_wait; ac.cpd_wait = s->cpd_wait; ac.first_cpd_plain = s->first_cpd_plain;
     ac.up_rates = s->up_rates ? s->up_rates : 0x7FFFF;
     ac.Kt = 12; ac.Mt = 4; ac.Kd = 32; ac.Md = 41; ac.sr_d = 0; ac.ld_d = 0;
     ac.gain_err = s->gain_err;
@@ -370,6 +374,37 @@ int main(int argc, char **argv)
         base(&s, "25 echo at the caller's level, slow tail", 0, 0, 5, 40);
         s.level = 1400; s.echo = 0.2; s.echo_tail = 0.57; s.echo_delay = 270; s.echo_search = 1;
         s.seconds = 11;
+        run(&s, &o); report(&s, &o); check_good(&s, &o);
+
+        /* a U.S. Robotics 5686 on the same port: the echo 25 dB under what we
+         * send, its start no larger than one tap of the slow tail behind it;
+         * the delay must still be found (live/usr2.raw: 300 taken for 270,
+         * the canceller beside the echo, the design gave up) */
+        base(&s, "25b weak echo under its own slow tail", 0, 0, 5, 40);
+        s.level = 2700; s.echo = 0.02; s.echo_tail = 4.0; s.echo_delay = 270; s.echo_search = 1;
+        s.seconds = 11;
+        run(&s, &o); report(&s, &o); check_good(&s, &o);
+        printf("    echo delay found: %d\n", d.echo_delay);
+        CHECK(d.echo_delay >= 270 - 12 && d.echo_delay <= 270 + 4);
+
+        /* the same modem's patience: it gives up 3.8 s into TRN2u without
+         * SUVd and 3.5 s after its SUVu without CPd, and does not send SUVu
+         * by itself. A design at eight samples a step takes longer than
+         * the first and must still arrive within the second; CPu is in by
+         * then, and a first CPd that says so is answered with silence. */
+        base(&s, "25c a caller that waits 3.8 s for SUVd, 3.5 s for CPd", 0, 0, 5, 40);
+        s.level = 2700; s.echo = 0.02; s.echo_tail = 1.2; s.echo_delay = 270; s.echo_search = 1;
+        s.pace = 8; s.suvd_wait = 30400; s.cpd_wait = 28000; s.first_cpd_plain = 1; s.seconds = 14;
+        run(&s, &o); report(&s, &o); check_good(&s, &o);
+
+        /* and what it showed in data mode: a slow wander under the symbols
+         * (our own low frequencies, which the tail estimate does not take
+         * away once the downstream carries data), a hundred units where
+         * the points are 250 apart. Here it begins at 5 s, after the
+         * design, as a sine of 25 Hz. */
+        base(&s, "25d a slow wander under the data", 0, 0, 5, 40);
+        s.level = 2700; s.echo = 0.02; s.echo_tail = 1.2; s.echo_delay = 270; s.echo_search = 1;
+        s.wander = 100; s.seconds = 11;
         run(&s, &o); report(&s, &o); check_good(&s, &o);
 
         /* a data frame of Ki = 0 before B1u (reading 57) */

@@ -126,7 +126,9 @@ typedef struct {
     int64_t    et_pw;               /* ... and the smoothed power of its two inputs */
     int16_t    ecdl[V92D_ECDL]; int ecpos;
     int        echo_delay;          /* in use: cfg.echo_delay or the measured one */
-    int16_t    ecwin[V92D_EC_WIN];  /* echo delay search: received samples, newest last */
+    int16_t    ecwin[V92D_EC_WIN];  /* echo delay search: received samples (each less the one before), newest last */
+    int16_t    ecw_last;            /* the sample before, while the window fills */
+    int32_t    base_q4;             /* data mode: the baseline under the caller's symbols, Q4 */
     int        ecw_n;               /* samples collected */
     int        ecs_pos, ecs_lag;    /* ecpos at the snapshot; next lag to try */
     int64_t    ecs_best; int ecs_best_lag;

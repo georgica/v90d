@@ -205,9 +205,17 @@ Receive chain for the upstream signal:
   silent, at full NLMS step; afterwards it is frozen. It spans 12 ms, placed
   where the echo is: before training, the distance to the echo is found by
   correlating a stretch of received TRN1d with what was sent (a block-based
-  line driver puts tens of milliseconds between the two).
+  line driver puts tens of milliseconds between the two). The stretch is
+  taken as the change from sample to sample: a modem's line transformer
+  can return our low frequencies as a tail of tens of milliseconds, larger
+  in sum than the start of the echo, and that tail moved the peak (a
+  U.S. Robotics 5686; PROGRESS.md, 2026-11-16).
 - Adaptive filters round their updates. Truncation is a steady pull on every
   tap that takes a minute or an hour to show.
+- TRN2d is sent for 1200 data frames (0.9 s) before MP, and Tone A is
+  listened for through Phase 4 as in data mode: a U.S. Robotics 56K of 1998
+  gave the start-up up with 0.3 s of TRN2d and asked for a retrain that
+  went unheard (PROGRESS.md, 2026-11-16).
 - The caller falls silent twice (during TRN1d / Jd and, with a DIL, again
   until it has seen enough of it) and comes back with S. Its clock has
   drifted and its carrier phase is anybody's guess, but the line is the
@@ -268,9 +276,33 @@ decode. `v92/README.md` has the detail and every reading of the text.
   carrier detector of its own in data mode).
 - What a real modem (CX93001) needed is in `v92/README.md`, stage 4: a model
   of the slow echo tail behind the canceller, the CPd design spread over
-  time (one step every 4 samples on the unit), z2(64) kept at zero, the
+  time (one step every 4 samples on the unit then, 2 now), z2(64) kept at zero, the
   first data frame after E2u judged before B1u is counted, no assumed
   first state in the trellis decoder.
+- What a second one (U.S. Robotics 5686) needed, PROGRESS.md of 2026-11-16:
+  it waits 3.8 s for SUVd and 3.5 s more for CPd, so the design takes one
+  step every 2 samples and SUVd goes out 2.5 s into Phase 4 at the latest;
+  the first CPd never carries the acknowledge bit (one that did was
+  answered with silence); in data mode the receiver follows the baseline
+  under the caller's symbols with each decision's error, because what is
+  left of our own low frequencies wanders there.
+
+### 4.2b Not done, maybe later: K56flex and x2
+The two 56k schemes from before V.90 are not spoken; a modem that has
+nothing else gets V.34. Neither has a published specification.
+- K56flex (Rockwell / Lucent) opens with V.8bis, which is an ITU
+  recommendation, and carries its capability in a manufacturer's block
+  there and again in INFO1; after that it is a different downstream from
+  V.90 (fixed training levels and constellation tables, frames of 8
+  symbols with shell mapping, rates in steps of 2000 bit/s), a new engine
+  and not a variant of `v90/`.
+- x2 (U.S. Robotics) seems to be agreed inside the V.34 Phase 2; nothing
+  more is known from published text.
+- What there is beyond that are third parties' descriptions made from
+  closed modem software. Using them would be an exception to "written from
+  the recommendations" that has to be decided and stated, and it needs a
+  modem that speaks nothing newer to test against. Neither is at hand
+  (2026-11-16).
 
 ### 4.3 Fixed-point conventions
 - Samples are 16-bit linear; 0 dBm0 is an RMS of 15770.
@@ -438,7 +470,8 @@ front. A port whose own number looks like one of them keeps its number.
   page.
 - What a list can name is checked: a host is letters, digits, `.` and `-`,
   never begins with `-`, and is not the box itself (`localhost`, numeric
-  addresses in 127/8 and 0/8; a name that resolves there is not caught).
+  addresses in 127/8 and 0/8), and a name that resolves there is not
+  connected to (`bbsdial.c`).
   The host is looked at once more before it becomes an argument, and the
   fetched file is created anew, never through a link.
 
@@ -737,8 +770,13 @@ the loader then gives the box back to stock. It errs to the safe side.
 
 **Boot script** (`fw/rcS`): `v90nv where` into `/tmp/v90d.where` first; the
 settings through `conf-load` and `conf-save`; `v90nv confirm` after a minute
-with the daemon alive and before a restart that was asked for. With scheme
-"none" it writes nothing.
+with the daemon alive and before a restart that was asked for. On a board
+that no unit has run (`where` says `tried=no`: in the loader's list from
+its flash contents alone) the confirmation also waits until the network
+port has received a packet (`fw/startgood.sh`), so a box whose Ethernet
+does not work under our kernel is back in the stock firmware after three
+starts instead of being ours and unreachable. With scheme "none" it writes
+nothing.
 
 **Web page** ("Firmware" tab, behind the login like the settings): version
 and build, scheme and set, what the next start will run, the count, whether

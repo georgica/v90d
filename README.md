@@ -92,7 +92,8 @@ second board takes the next free number, so look a number up on the page or
 with `?` before you put it in a phone book. A short list in the image
 ([lists/bbs.txt](lists/bbs.txt)) serves until the first fetch or when the
 box has no way out. Only boards of the list can be called. The port's own
-number is still the dial-up connection.
+number is still the dial-up connection (a ten-digit one also with a 1 in
+front, the way Windows dials it).
 
 The idea is that of [2600.network](https://2600.network), which does this
 for callers on the real telephone network; here it is one box and your own
@@ -120,27 +121,42 @@ Tried on one unit: HT802 hardware V2.5A, part number 9610003725A, coming
 from stock firmware 1.0.65. The loader refuses to start on a board whose
 part number it does not know and hands the box back to the stock firmware,
 so an untried revision should end up where it started; that path has been
-tested on models only. The HT801 and other HT802 revisions are expected to
-work but are not yet tested; see [BOARDS.md](BOARDS.md).
+tested on models only. Two HT801 revisions are accepted from what their
+flash contents say (one phone port, found by the line driver), but no HT801
+has run it yet; other HT802 revisions are not listed. See
+[BOARDS.md](BOARDS.md).
 
-Tested with a Conexant USB modem on every modulation in the list, from
-Linux pppd and from Dial-Up Networking in Windows 98 SE and Windows XP
-(V.90 with MPPC compression in both). V.92 is offered by default
-(`v92 = off` to stop it) and used when the caller's modem asks for PCM
-upstream (`AT+PIG=0` on the Conexant): such a call connects as V.92 with
-error correction and PPP up, in a bench call 52000 down / 32000 up. A
-caller that does not ask gets V.90. An upgraded box keeps the setting it
-had.
+Tested with three modems:
 
-The bulletin board calls were made with the same modem: a board's own
+| modem | what connects |
+|---|---|
+| Conexant CX93010 (USB) | every modulation in the list; V.90 about 50666 down / 28800 up; V.92 about 50666 / 25333 (`AT+PIG=0`) |
+| U.S. Robotics 5686 (external, V.92) | V.90 54666 / 26400; V.92 54666 / 40000 (it asks for PCM upstream by itself) |
+| U.S. Robotics 56K of 1998 (x2 with the V.90 upgrade) | V.90 54666 to 56000 / 28800 |
+
+From Linux pppd and from Dial-Up Networking in Windows 98 SE and Windows XP
+with MPPC compression: V.90 in both, V.92 in Windows 98 SE with the 5686.
+Two calls at once, one on each port, have been made at V.90 and at V.92.
+
+V.92 is offered by default (`v92 = off` to stop it) and used when the
+caller's modem asks for PCM upstream; a caller that does not ask gets V.90,
+and so does a V.92 call whose start-up does not succeed (with the Conexant
+about one call in seven). An upgraded box keeps the setting it had.
+
+The two 56k schemes from before V.90, x2 and K56flex, are not spoken; a
+modem that has nothing newer is left with V.34 (the 1998 modem above
+connected at V.34, 28800, when its V.90 start-up did not go through; no
+modem without V.90 has been tried). Neither scheme was ever published; see
+DESIGN.md, 4.2b.
+
+The bulletin board calls were made with the Conexant: a board's own
 number from Linux (227 835 3422 reached Telehack), and 1 800 BBS DIAL from
 HyperTerminal in Windows XP at V.90 with error correction. The box fetched
 the Telnet BBS Guide's list by itself, 1073 boards that day.
 
-Not tested yet: other modem brands, two calls at the same time, a real
-Dreamcast or Saturn, Windows 95 and Windows Me, a file transfer (Zmodem)
-on a bulletin board call, and Windows callers against a port with V.92
-on.
+Not tested yet: other modems, an HT801, a real Dreamcast or Saturn,
+Windows 95 and Windows Me, and a file transfer (Zmodem) on a bulletin
+board call.
 
 ## Installing
 

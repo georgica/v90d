@@ -938,3 +938,43 @@ differ in places where two members are almost equally good.
   call longer than a few minutes have not been tried on the line.
 * The replay cannot reproduce data mode beyond the modem itself (see top).
 
+
+## Stage 5: a second V.92 modem (U.S. Robotics 5686)
+
+Measurements and test output: PROGRESS.md, 2026-11-16. The modem asks for
+PCM upstream without being told to. What it needed, as readings:
+
+60. The echo delay is searched on the change from sample to sample (as in
+    `modem/p34d.c`): this modem returns our low frequencies as a tail of
+    more than 12 ms, and on plain samples the tail put the peak 4 ms late.
+61. 9.6.1.1.1 says TRN2d for at least 2040 T and then SUVd; it does not
+    say that SUVd waits for the design. The modem waits 3.8 s into TRN2u
+    for SUVd and 3.5 s from its SUVu for CPd, then falls silent and
+    retrains. SUVd is sent when the design is done or 2.5 s into Phase 4,
+    whichever is first, and the design takes a step every 2 samples
+    (9000 to 15000 steps: 2.2 to 3.7 s).
+62. The first CPd is sent without the acknowledge bit even when CPu has
+    been received already (which reading 61 makes possible). A first CPd
+    with the bit set was acknowledged and then answered with silence, 7
+    calls of 7; without it the modem went on to B1u, 9 of 9. The bit
+    follows in SUVd' as before.
+63. In data mode the receiver follows the baseline under the symbols: each
+    decision's error moves it by an eighth. Without that, what the echo
+    canceller and its tail estimate leave of our own low frequencies moved
+    whole runs of symbols a point off (100 units, points 245 apart).
+
+Not a reading: for a while the refusals of reading 62 were taken for a
+limit on the transmit power asked for. Designs at 0.84 to 1.02 of the
+limit were accepted once 62 and 63 were in.
+
+### Measured on the line (unit, port 2)
+
+V.92 54666 / 40000 with the upstream limit at 48000, 54666 / 33333 at the
+default 33600; CONNECT after 22 to 25 s; five calls of five each.
+
+### Not done, not verified
+
+* The CX93001 on the line against readings 60 to 63: V.92 in about 6
+  calls of 7. In the one failure that was recorded its transmit clock was
+  58 ppm off ours during the second TRN1u (PROGRESS.md); the call retrains
+  to V.90. A receiver that follows such a caller is not there.

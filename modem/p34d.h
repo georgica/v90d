@@ -103,7 +103,8 @@ typedef struct {
     int        ec_mu;
     int16_t    ecdl[P34_ECDL]; int ecpos;   /* what we sent, for the delayed echo reference */
     int        echo_delay;          /* in use: cfg.echo_delay or the measured one */
-    int16_t    ecwin[P34_EC_WIN];   /* echo delay search: received samples, newest last */
+    int16_t    ecwin[P34_EC_WIN];   /* echo delay search: received samples (each less the one before), newest last */
+    int16_t    ecw_last;            /* the sample before, while the window fills */
     int        ecw_n;               /* samples collected, P34_EC_WIN = snapshot taken */
     int        ecs_pos, ecs_lag;    /* ecpos at the snapshot; next lag to try */
     int64_t    ecs_best; int ecs_best_lag;
