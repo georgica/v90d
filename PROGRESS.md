@@ -2251,6 +2251,59 @@ twice, once dialled as `16387825442`. The Conexant and the 5686 were not
 attached for this last check; they were tested on the same sources in the
 bench build (above).
 
+## 2026-11-16: one copy of the echo delay measurement and of the tone watch
+
+No change in what the modem does; the aim was that a correction is made
+once.
+
+- `modem/ecdly.[ch]`: the history of what was sent and the echo delay
+  measurement, out of `modem/p34d.c`, `v92/v92_p34d.c` and `modem/v34dx.c`,
+  which each had a copy (the 5686's correction earlier that day went into
+  two of them by hand). `modem/tonedet.[ch]`: the retrain tone watch, out
+  of the same three.
+- Checked three ways. The engines' own tests as before (p34: 372 checks,
+  v34dx: 690, v34call: 296, v92call: 1054, answer_v92: 231, all 0
+  failures). A test of the two modules alone, `test_ecdly`: 1019 checks, 0
+  failures; with the search's index and the tone threshold spoiled on
+  purpose it gave 6 failures. And 13 recordings of real calls (Conexant,
+  5686 and the 1998 U.S. Robotics; V.34, V.90 and V.92), each replayed
+  with both port settings before and after: 26 outputs, all identical
+  octet for octet.
+- `test/test_p34.c`: the mid-call events (renegotiation, cleardown, the
+  line getting worse) are now timed from the moment data mode is reached,
+  not from the start of the run. With TRN2d made a second longer for a
+  trial (2600 data frames, data mode at 4.00 s instead of 2.95) the test
+  still gives 372 checks, 0 failures; the day before, 0.6 s more had
+  broken three of its checks. Two thresholds went down by under 2 % with
+  the run 50 ms shorter (270000 to 265000 and 300000 to 295000 bits).
+- Bulletin board calls: an entry or a name that leads to one of the box's
+  own addresses, to a link-local or a multicast address is not connected
+  to (`bbsdial_is_self`; the point the review of 0.4.0 raised). Test first:
+  6 failures (the three address classes, the own address, a listener on
+  the own address that was reached), then srv: 1144 checks, 0 failures.
+
+
+### 0.4.1
+
+Host and ARM suites on these sources: "ALL HOST CHECKS PASS", "ALL ARM
+CHECKS PASS" (run before the version number was set; only `fw/VERSION` and
+this file changed after). `make -C fw release`, `make -C fw test-release`
+as 0.4.1: 11 tests OK, loader: 129 checks, 0 failures. The image
+(`v90d-ht802fw.bin`, SHA-256 4d7371d3...41a6ca68) uploaded on the unit's
+Firmware page over 0.4.0: back after about 100 s as 0.4.1, starts not
+confirmed 0, no telnet. On it, the 1998 U.S. Robotics on PHONE 2:
+
+| call | result |
+|---|---|
+| as it comes | `CONNECT 54666/ARQ/V90`, the box's list: V.90, 56000 / 28800 |
+| `ATS32=66` (no V.90, no x2) | `CONNECT 31200/ARQ/V34/LAPM/V42`, the list: V.34, 31200 / 31200 |
+| 227 835 3422 | V.90, "Calling Telehack ...", Telehack's greeting and prompt |
+
+After the release was published the 5686 (flash 5.4.62) went back on the
+bridge, the same image on the box: V.92, 3 calls of 3, `CONNECT 54666`, the
+box's list 54666 / 40000, 38666 and 38666. The Conexant was not tried on
+this image.
+
 ## libv90modem: the modem as a library of its own, Phase 1 (2026-11-16)
 
 The modem (`modem/`, `v32/`, `v34/`, `v90/`, `v92/`), V.42 (`v42/`), the line
@@ -2288,3 +2341,32 @@ x2r2, x2b), install / uninstall / pkg-config, a cross build with
 Found on the way: the test of `dce_init` on a dce_t full of rubbish
 (test_call (l)) failed when the modem was allocated by the first call; the
 modem and V.42 memory are part of the dce_t again (`v90m_init` on it).
+
+## main (0.4.1) merged; its modem changes in libv90modem (2026-11-17)
+
+main since the split (819d38e..4799c4c: 0.4.0, one copy of the echo delay
+measurement and of the tone watch, bulletin boards that lead back into the
+box, 0.4.1) merged into this branch. The modem's part (`modem/ecdly`,
+`modem/tonedet`, `p34d`, `v92_p34d`, `v34dx`, their tests) lives in
+libv90modem now: there on its branch `sync-0.4.1` (8eee1b3), applied as
+main has it. Here: `srv/bbsdial.[ch]` and its tests, `fw/VERSION`, DESIGN
+and PROGRESS as main has them; `live/replay.c` and the top Makefile stay as
+this branch has them (the trace is libv90modem's `tools/trace.c`, which
+reads `ecd.delay` now, as does `test_srv`'s V.92 call).
+
+Proof, before (main at 4799c4c, a clean worktree) and after (this merge
+against libv90modem 8eee1b3), same PC:
+
+| | before | after |
+|---|---|---|
+| `make check` | 108 programs, 2,836,310 checks, 0 failures, ALL HOST CHECKS PASS | every one of the 108 lines the same (`ecdly: 1019` among them, now in the library), except `tel: 396` -> `401` (this branch's `v90d -o`, aa91646; main did not touch `tel/`); plus 18 of the library's calling side and this branch (anstone, api 187, dce_orig, orig, orig_v32, orig_v34, orig_v90, p2call, p2v90, srv_orig, test_acdet, test_caller, v8orig, v90a, v90adec, v90arx, v90arx_robust, v90dil): 126 programs, 2,839,215 checks, 0 failures, ALL HOST CHECKS PASS |
+| `make check-arm` | 107 programs, 0 failures, ALL ARM CHECKS PASS | the same 107 lines (tel as above), 125 programs, ALL ARM CHECKS PASS |
+| `make bench-v90` | transmit hash 8e3136e9 (host, qemu-arm) | 8e3136e9 by the internals and by the public API (static, shared, qemu-arm) |
+| replays: 106 recordings of `live/` x 8 configurations | 848 outputs, 394 V.92 trace checksums, 230 bit dumps, 48 + 93 data dumps: 1613 files | the same 1613 files, byte for byte |
+| `make -C fw test-release` | passes (11 tests OK, loader: 129 checks, 0 failures) | the same; `v90d-ht802fw.bin` 0.4.1, 2552040 octets (2517992 before) |
+| ARM daemon (`srv/build/v90d-arm`) | 569152 octets | 630592 octets: the calling side of the library and `v90d -o` |
+
+The bench hash is the one of 0.3 / Phase 1: 0.4.x did not change what the
+answerer sends in that simulated call. `V90M_MEM_SIZE` went from 100 to
+112 KiB in the library (the larger echo history), so `dce_t` is 12 KiB
+larger.

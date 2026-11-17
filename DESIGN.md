@@ -306,8 +306,13 @@ front. A port whose own number looks like one of them keeps its number.
   page.
 - What a list can name is checked: a host is letters, digits, `.` and `-`,
   never begins with `-`, and is not the box itself (`localhost`, numeric
-  addresses in 127/8 and 0/8), and a name that resolves there is not
-  connected to (`bbsdial.c`).
+  addresses in 127/8 and 0/8). What a name resolves to is checked again
+  before the connection (`bbsdial_is_self`): 127/8, 0/8, the address of any
+  of the box's own interfaces (found by asking the kernel which address it
+  would send from towards it; nothing goes out), link-local 169.254/16,
+  multicast and broadcast are not connected to. The rest of the local
+  network is: a board may stand beside the box, and a dial-up caller
+  reaches the local network anyway.
   The host is looked at once more before it becomes an argument, and the
   fetched file is created anew, never through a link.
 

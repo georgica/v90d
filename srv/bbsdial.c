@@ -43,6 +43,27 @@ static int connect_within(int s, const struct sockaddr *a, socklen_t al, int ms)
     return fcntl(s, F_SETFL, fl);
 }
 
+int bbsdial_is_self(uint32_t addr)
+{
+    uint32_t net = addr >> 24;
+    struct sockaddr_in a; socklen_t al = sizeof a; int u, own = 0;
+
+    if (net == 127 || net == 0) return 1;           /* the box itself */
+    if (addr >> 16 == 0xa9fe) return 1;             /* link-local */
+    if (net >= 224) return 1;                       /* multicast, reserved, broadcast */
+    /* One of our interfaces' addresses? The address the kernel would send
+     * from towards it is then that very address. A datagram socket's
+     * connect() only looks the route up; nothing goes out. */
+    u = socket(AF_INET, SOCK_DGRAM, 0);
+    if (u < 0) return 0;
+    memset(&a, 0, sizeof a);
+    a.sin_family = AF_INET; a.sin_port = htons(9); a.sin_addr.s_addr = htonl(addr);
+    if (connect(u, (const struct sockaddr *)&a, sizeof a) == 0 && getsockname(u, (struct sockaddr *)&a, &al) == 0)
+        own = ntohl(a.sin_addr.s_addr) == addr;
+    close(u);
+    return own;
+}
+
 int bbsdial_run(const char *host, const char *port, int fd, unsigned connect_s, int self_ok)
 {
     struct addrinfo hint, *res = NULL, *ai; int s = -1; char buf[2048];
@@ -56,8 +77,8 @@ int bbsdial_run(const char *host, const char *port, int fd, unsigned connect_s, 
     if (getaddrinfo(host, port, &hint, &res) != 0) res = NULL;
     (void)alarm(0);
     for (ai = res; ai && s < 0; ai = ai->ai_next) {
-        uint32_t net = ntohl(((const struct sockaddr_in *)(const void *)ai->ai_addr)->sin_addr.s_addr) >> 24;
-        if (!self_ok && (net == 127 || net == 0)) continue;     /* the box itself, by whatever name */
+        uint32_t addr = ntohl(((const struct sockaddr_in *)(const void *)ai->ai_addr)->sin_addr.s_addr);
+        if (!self_ok && bbsdial_is_self(addr)) continue;        /* the box itself, by whatever name */
         s = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
         if (s >= 0 && connect_within(s, ai->ai_addr, ai->ai_addrlen, (int)connect_s * 1000) < 0) { close(s); s = -1; }
     }
