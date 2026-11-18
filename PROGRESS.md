@@ -2370,3 +2370,132 @@ The bench hash is the one of 0.3 / Phase 1: 0.4.x did not change what the
 answerer sends in that simulated call. `V90M_MEM_SIZE` went from 100 to
 112 KiB in the library (the larger echo history), so `dce_t` is 12 KiB
 larger.
+
+## 2026-11-17: Bell 103
+
+A caller at 300 bit/s from North America is a Bell 103 modem more often
+than a V.21 one (the 5686's default at 300, S27 bit 0 clear). On 0.4.1 such
+a call failed: `AT&N1` on the 5686 said CONNECT, the box's list said "none,
+negotiation failed" after 35 s. The caller took our signal for its carrier
+and sent its mark, 1270 Hz; the box sat in the V.22bis wait and then gave up.
+
+Now (`modem/answer.c`, DESIGN.md 4.1): a steady 1270 Hz from a caller
+without V.8, heard behind a band-pass that keeps our own signal out
+(`modem/bell103_bpf.h`, from `tools/gen_v21_bpf.py bell103`), switches to
+300 bit/s FSK on Bell 103's tones with the V.21 modulator, demodulator and
+start-stop path. On when V.21 is on for the port. Shown as "Bell 103"
+(`bell103` in the JSON; status value 8, appended).
+
+Test first, `test/test_answer.c` with a plain Bell 103 caller in it: 6
+failures (the answering modem stuck in the V.22 phase, as on the box), then
+0. A port without V.22: taken for V.21 at first (2 failures: the V.21
+receiver took 1270 Hz for its carrier), then 0. answer: 46 checks, 0
+failures. `test_status` wanted "unknown" for value 8: now for 9. Host suite:
+"ALL HOST CHECKS PASS".
+
+On the box (the image built from these sources, still numbered 0.4.1), the
+5686 with `AT&B1` and a fixed rate, 227 835 3422:
+
+| call | the modem | the box's list | received |
+|---|---|---|---|
+| `&N1` | `CONNECT` | Bell 103, 300 / 300 | Telehack's greeting, 709 octets as sent |
+| `&N1S27=1` | `CONNECT` | V.21, 300 / 300 | the same, 711 octets |
+| `&N2` | `CONNECT 1200/ARQ` | V.22, 1200 / 1200 | the same, 1204 octets |
+
+Without `&B1` the 5686 follows the line rate on its serial port: at 300 the
+bridge then reads rubbish and no command reaches the modem until the call
+ends (the box was restarted to end one). A call that connects and sends no
+PPP to the internet number ends as "error" in the list: PPP gave up, which
+is what the earlier 1200 bit/s test call showed.
+
+## 2026-11-17: Bell 212A
+
+Looked up after the Bell 103 work: single-chip modems of the time detect
+the answering modem in Bell 212A (and 103) originate mode by 2225 Hz within
+10 Hz (TDK 73K222 data sheets), and manuals give the answer tone as the
+difference between the two (`B0` 2100 Hz, `B1` 2225 Hz). Our V.22bis answer
+sequence has 2100 Hz and then 2250 Hz in it: a caller that strict never
+answers it.
+
+Now (`modem/answer.c`, DESIGN.md 4.1): after 4 s of the V.22bis answer
+sequence without an answer from a caller without V.8, 2225 Hz in place of
+the unscrambled ones for the next 4 s, the V.22bis modem listening all the
+while; then V.21 as before. A call that began during the tone is shown as
+"Bell 212A" (`bell212a`, status value 9). On when V.22 or V.22bis is on.
+
+Test first, `test/test_answer.c`: a 212A caller that takes nothing but
+2225 Hz within some 10 Hz for an answering modem. 6 failures (it stayed
+silent, nothing connected), then 0: connected at 10.96 s, 1200 bit/s, text
+both ways. Not offered: no call, as before. answer: 54 checks, 0 failures;
+test_status: 611 checks, 0 failures. Host suite: "ALL HOST CHECKS PASS".
+
+On the box, the 5686, 227 835 3422, Telehack's greeting received as sent
+in every call:
+
+| image | the modem | the box's list |
+|---|---|---|
+| these sources | `&N1` | Bell 103, 300 / 300 |
+| these sources | `&N1S27=1` | V.21, 300 / 300 (CONNECT after 21.6 s) |
+| these sources | `&N2` | V.22, 1200 / 1200 |
+| these sources | `&N2S32=0` (no V.8) | V.22, 1200 / 1200 |
+| 2225 Hz from the start (`V22_BELL_MS` 0, a build for this test only) | `&N2`, twice | V.22: the 5686 does V.8 at 1200 too, the tone was never reached |
+| the same | `&N2S32=0`, twice | Bell 212A, 1200 / 1200, `CONNECT 1200/ARQ` |
+| the same | `&N1` | Bell 103, 300 / 300 |
+
+So a real modem has started 1200 bit/s against our 2100 Hz and 2225 Hz
+with no unscrambled ones ever sent, and the box's receiver has found its
+scrambled ones under the echo of the tone. What that does not show: a
+modem that calls as 212A and nothing else. The 5686 would have connected
+to the V.22 sequence as well, and none of the other kind has been on the
+line. The box was left on the image from these sources (4 s before the
+tone).
+
+ARM suite on these sources, after the commit: "ALL ARM CHECKS PASS"
+(answer: 54 checks, 0 failures).
+
+
+### 0.5.0
+
+The sources of the two sections above, `fw/VERSION` 0.5.0. Host and ARM
+suites passed on them before the version number was set (only `fw/VERSION`
+and this file changed after). `make -C fw release`, `make -C fw
+test-release`: exit 0 (32 tests OK with 1 skipped, twice; 18 tests OK;
+loader: 129 checks, 0 failures). The image (`v90d-ht802fw.bin`, SHA-256
+bdb07007...fe7a1de4) uploaded on the unit's Firmware page: back as 0.5.0,
+no telnet. On it, the 5686 with `AT&B1`:
+
+| call | the modem | the box's list |
+|---|---|---|
+| `&N1`, 227 835 3422 | `CONNECT`, Telehack's greeting | Bell 103, 300 / 300 |
+| `&N1S27=1`, the same | `CONNECT`, the greeting | V.21, 300 / 300 |
+| `&N2`, the same | `CONNECT 1200/ARQ`, the greeting | V.22, 1200 / 1200 |
+| as it comes, the internet number | `CONNECT 54666/ARQ` | V.92, 54666 / 40000 |
+
+Bell 212A was not called on this image: the 5686 answers the V.22 sequence
+before the 2225 Hz tone begins. Its calls were made on the test build
+described above. Not tried on this image: the 1998 U.S. Robotics, the
+Conexant.
+
+## main (0.5.0) merged; Bell through libv90modem's API (2026-11-17)
+
+main 4799c4c..9484fb7: Bell 103 and Bell 212A answering. Its modem files
+(`modem/answer.*`, `v21.h`, `bell103_bpf.h`, `test_answer`,
+`tools/gen_v21_bpf.py`) are not in this tree: they are in libv90modem's
+sync-0.5.0 (629ae89), with API 0.2.0. Here, main's dce / srv / cfg changes
+reach Bell through the public API instead of `ANS_MODE_*`:
+`srv` offers `V90M_MOD_BELL212A` with V.22 and `V90M_MOD_BELL103` with V.21
+(the calling mode, `v90d -o`, masks both out as before); `mod_of` maps
+`V90M_CONN_BELL103` / `_BELL212A` to the status page's; `dce` starts V.42
+straight in start-stop for `V90M_CONN_BELL103` as for V.21. cfg, srv/main,
+README, fw/VERSION 0.5.0 as main has them.
+
+Proof, same PC, against main 9484fb7 built on its own (recordings copied
+once and replayed from that copy on both sides):
+
+| | main 9484fb7 | this branch + libv90modem 6036127 |
+|---|---|---|
+| `make check` | 108 programs, 2,836,351 checks, 0 failures | the same 108 lines (`answer: 54`, `test_status: 611` among them), except `tel: 396` -> `401` (this branch's `v90d -o`); plus the 18 of the calling side and this branch (`api` now 237): 126 programs, 2,839,306 checks, 0 failures |
+| `make check-arm` | 107 programs, 547,858 checks, 0 failures | the same 107 lines but `tel`; 125 programs, 550,723 checks, 0 failures |
+| `make bench-v90` | transmit hash 8e3136e9 | 8e3136e9 (internals and API) |
+| replay, 106 `live/*.raw` x 8 `live/*.conf` | 1613 files | identical octet for octet (the two manifests compare equal) |
+| `make -C fw release`, `test-release` | built, passes | built, passes, the same lines |

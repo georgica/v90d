@@ -148,6 +148,12 @@ K56flex, fixed-point conventions). v90d uses its public API
 (`include/v90modem.h`): `dce/` runs one modem and one V.42 endpoint per
 call, sample by sample.
 
+Bell 103 and Bell 212A (answering; libv90modem's DESIGN.md, 4.1) have no
+setting of their own: a port that has V.21 on offers Bell 103
+(`V90M_MOD_BELL103`), one with V.22 or V.22bis on offers Bell 212A
+(`V90M_MOD_BELL212A`), and a call that began during the 2225 Hz tone is
+shown as "Bell 212A". Bell 103 has no error control, as V.21.
+
 ## 5. Above the modem
 
 - `v42/`: answerer role. Detection phase (ODP/ADP), LAPM with selective

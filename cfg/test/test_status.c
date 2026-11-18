@@ -320,8 +320,8 @@ static void test_values(void)
 static void test_enums(void)
 {
     static const char *const lines[] = { "idle", "ringing", "negotiating", "connected", "hanging up" };
-    static const char *const mods[] = { "none", "v90", "v34", "v32bis", "v22bis", "v22", "v21", "v92" };
-    static const char *const modh[] = { "none", "V.90", "V.34", "V.32bis", "V.22bis", "V.22", "V.21", "V.92" };
+    static const char *const mods[] = { "none", "v90", "v34", "v32bis", "v22bis", "v22", "v21", "v92", "bell103", "bell212a" };
+    static const char *const modh[] = { "none", "V.90", "V.34", "V.32bis", "V.22bis", "V.22", "V.21", "V.92", "Bell 103", "Bell 212A" };
     static const char *const v42s[] = { "off", "detect", "lapm", "async" };
     static const char *const ppps[] = { "dead", "establish", "authenticate", "network", "running", "terminate" };
     status_t s;
@@ -336,8 +336,8 @@ static void test_enums(void)
         snprintf(want, sizeof want, "<td>%s</td>", lines[i]);
         CHECK(has(html, want));
     }
-    CHECK_EQ_I(ST_MOD_V21, 6); CHECK_EQ_I(ST_MOD_V92, 7);      /* appended: the old values stay */
-    for (i = 0; i < 8; i++) {
+    CHECK_EQ_I(ST_MOD_V21, 6); CHECK_EQ_I(ST_MOD_V92, 7); CHECK_EQ_I(ST_MOD_BELL103, 8); CHECK_EQ_I(ST_MOD_BELL212A, 9);      /* appended: the old values stay */
+    for (i = 0; i < 10; i++) {
         st_call_t call;
         status_init(&s); s.modulation = (st_mod_t)i;
         CHECK(status_render_json(&s, json, sizeof json) > 0);
@@ -365,7 +365,7 @@ static void test_enums(void)
     CHECK(has(html, "<p class=\"sum\">V.92 &middot; 52000 / 44000 bit/s</p>"));
     /* the upstream bar is scaled to 48000 for V.92: 44000 is 91% of it */
     CHECK(has(html, "<small>Upstream</small><b>44000</b> bit/s<div class=\"m\"><i style=\"width:91%\"></i></div></div>"));
-    s.modulation = (st_mod_t)8;
+    s.modulation = (st_mod_t)10;
     CHECK(status_render_json(&s, json, sizeof json) > 0);
     CHECK(has(json, "\"modulation\":\"unknown\""));
     status_init(&s); s.line = ST_LINE_CONNECTED; s.modulation = ST_MOD_V34;

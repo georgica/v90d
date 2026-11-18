@@ -357,7 +357,7 @@ static void v42_start(dce_t *d, int odp_bypass)
         /* octets as they are: straight to start-stop, as below */
         vc.detect = 1; vc.fallback = 1; vc.t400_ms = 1;
         vc.lapm.v42bis_tx = 0; vc.lapm.v42bis_rx = 0; vc.lapm.v44_tx = 0; vc.lapm.v44_rx = 0;
-    } else if (d->modulation == V90M_CONN_V21) {
+    } else if (d->modulation == V90M_CONN_V21 || d->modulation == V90M_CONN_BELL103) {
         /* No error control at 300 bit/s FSK: the modem delivers characters,
          * not the bit-transparent stream LAPM needs. v42ec has no "start in
          * start-stop mode" switch; the shortest detection phase does it. */
