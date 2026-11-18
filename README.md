@@ -127,6 +127,13 @@ flash contents say (one phone port, found by the line driver), but no HT801
 has run it yet; other HT802 revisions are not listed. See
 [BOARDS.md](BOARDS.md).
 
+The **HT802V2** is a different, newer product that runs signed firmware
+(stock 1.0.15.x, `SecureStatus: 3`). Its stock upgrader refuses v90d, because
+the install relies on the upgrader taking an unsigned image, so the normal
+install path is closed. Whether v90d can still be booted another way (its
+kernel and userspace written past the upgrader, under the genuine signed
+U-Boot) is an open question, not yet decided. See [BOARDS.md](BOARDS.md).
+
 Tested with three modems:
 
 | modem | what connects |

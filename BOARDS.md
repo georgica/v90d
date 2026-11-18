@@ -19,6 +19,7 @@ stock as before.
 | HT801 | V1.0A | `9611003610A` | DVF99 (same device tree) | 1 | 1 × Si3217x (factory data) | **Accepted by the loader, untested** |
 | HT801 | V1.1C | `9610003611C` | DVF99 (same device tree) | 1 | 1 × Si3217x (factory data) | **Accepted by the loader, untested** |
 | HT801 | V2.x | not yet known | DVF9918 (expected) | 1 | 1 × Si3217x (expected) | **Expected, untested** |
+| HT802V2 | V2.0A | `9610009420A` | not confirmed | 2 | not confirmed | **Signed firmware; under investigation** |
 
 ## What the status words mean
 
@@ -39,6 +40,66 @@ stock as before.
   list, so v90d starts on this board, and the line driver brings up one port
   when no second SLIC answers. Nobody has run it there. See the HT801 section
   below for what is known and what can go wrong.
+
+- **Signed firmware; under investigation**: the stock upgrader on this board
+  refuses v90d because the image is not signed, so the normal install path is
+  closed. Whether v90d can still be booted another way is an open question
+  (below), not yet decided either way.
+
+## The HT802V2 (signed firmware)
+
+The **HT802V2** is a newer product than the HT802 this firmware was built on,
+not a hardware revision of it. It is reported (issue #1) to run a signed
+firmware generation: stock firmware 1.0.15.x, dropbear SSH into a restricted
+"HT802V2 Command Shell" with no shell escape, lighttpd, and a `status` that
+reports `Certificate Type: ECDSA+SHA384` and `SecureStatus: 3`.
+
+**The stock upgrader will not install v90d on it.** The v90d install path
+depends on the stock upgrader accepting an unsigned, repacked image: on the
+generation this project targets, the flasher checks only the container magic,
+a 16-bit checksum and version/generation/hardware compatibility, with no
+public-key signature (`HARDWARE.md`, "Firmware image format"). The HT802V2
+adds exactly that missing check:
+
+- The stock container format and the 32-character header key are unchanged,
+  and the four partition **headers** still decrypt, so the upgrader still
+  recognises our file (it reaches "Upgrading").
+- But there is a ~256-octet high-entropy block in front of the container
+  magic (a signature/certificate block), and the partition **payloads** no
+  longer decrypt with the body-key derivation of the older format. The
+  upgrader then fails a cryptographic check and reports "Invalid".
+- `mkgsfw.py` cannot produce a block this unit accepts: there is no key or
+  derivation in the public image that would let us sign for it. Uploading a
+  repacked image is a dead end.
+
+**Whether v90d can run at all is still open, and turns on one question: does
+the signed U-Boot verify the kernel?** Secure boot is a chain. The bootrom
+verifies U-Boot; U-Boot may or may not verify the kernel it boots. On the
+tested HT802 (V2.5A), U-Boot (`gsboot`) checks only the magic word and a
+checksum, with no signature (`HARDWARE.md`, "Bootloader"), and v90d already
+installs by leaving the stock U-Boot in place and replacing only the core
+(kernel), base and prog (userspace) partitions. If the HT802V2's signed
+U-Boot is the same in that respect, v90d's kernel and userspace could be
+written **past the upgrader** (over the serial console with U-Boot's own
+`sf`/`qspi` write, or with an external flash programmer, neither of which
+checks a signature) and the genuine signed U-Boot would boot them, even with
+bootrom secure boot fully enabled. If instead the V2 tightened U-Boot to
+verify the kernel, that route is closed and only a signing key or a bootrom
+bug would open it.
+
+The two things that decide it:
+
+1. **A UART boot log** from a V2. It shows whether the signature is enforced
+   at the upgrader only or also at `bootm`, and whether autoboot is
+   interruptible.
+2. **A dump of the `uboot` partition** (~256 KB; `sf read` / `qspi read` from
+   the U-Boot prompt). Disassembling `gsboot` shows the kernel check directly,
+   the same way it was read on the non-V2 unit. A full flash dump is not
+   needed and would include the unit's `factory` data (MAC/serial), which is
+   best kept private.
+
+The SoC and SLIC of this board are also unconfirmed, since there is no root
+shell to read `/proc`.
 
 ## The HT801, from two flash dumps
 

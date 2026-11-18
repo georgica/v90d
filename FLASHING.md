@@ -3,6 +3,11 @@
 Tried on: HT802 hardware V2.5A (part number 9610003725A) with stock firmware
 1.0.65. Read "If something goes wrong" before you start.
 
+**Not the HT802V2.** That is a newer product with signed firmware
+(`SecureStatus: 3`); its upgrader refuses v90d, so the upload steps below do
+not work on it. Whether another route exists is under investigation. See
+[BOARDS.md](BOARDS.md).
+
 ## Install
 
 1. Get `v90d-ht802fw.bin` (from the releases page, or build it: README.md).
