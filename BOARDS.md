@@ -105,49 +105,73 @@ rootfs cannot be extracted from it, and the SoC cannot be confirmed from it
 cannot forge the 256-octet signature, so a repacked image is refused.
 Uploading through the stock page is a dead end.
 
-### Whether v90d can run at all, in Rockchip terms
+### Whether v90d can run at all, in Rockchip terms (assume OTP burned)
 
-The RK3308 keeps a hash of the firmware signing key in on-chip OTP. Secure
-boot is enforced only if that OTP is burned. `SecureStatus: 3` /
-`ECDSA+SHA384` suggests it is, but that is not yet confirmed (it may describe
-only the Grandstream container signature, a separate layer). Two outcomes:
+The RK3308 enforces secure boot only if a hash of the signing key is burned
+into on-chip OTP, and on this SoC that burn is done by the signed firmware
+itself: Rockchip's secure-boot note says the loader writes the key hash to OTP
+during startup and enables secure boot. So any unit that has ever booted
+Grandstream's signed firmware has almost certainly already burned its OTP, and
+`SecureStatus: 3` is consistent with that. We therefore **assume OTP is
+burned** on any field unit. The unburned state, in which MaskROM would accept
+our own loader, would exist only on a factory-fresh board that had never
+booted, which is not a realistic unit to obtain.
 
-- **OTP not burned:** the RK3308 MaskROM accepts any loader over USB. We load
-  our own U-Boot and kernel with `rkdeveloptool` (VID `0x2207`), full control,
-  and MaskROM is a built-in recovery path that is very hard to brick. Best
-  case.
-- **OTP burned:** MaskROM runs only signed loaders (`rkdeveloptool` hangs on
-  an unsigned one), so we cannot replace U-Boot. The same chain question then
-  decides it: does the signed stock U-Boot verify the kernel? If it boots
-  whatever is in the kernel partition, we write only core and rootfs (leaving
-  the signed U-Boot in place) and it boots our kernel. If it verifies the
-  kernel, that route is closed short of a signing key or a bootrom bug.
+Two consequences of assuming OTP burned:
 
-Safety rule for any attempt: only ever rewrite the kernel and rootfs, never
-the loader, so the genuine signed U-Boot always comes up and can re-flash.
+- **MaskROM is not a route for us.** With OTP burned, the BootROM verifies the
+  loader even in USB download mode, so `rkdeveloptool` will not run our own
+  DDR-init or U-Boot, and MaskROM cannot be used to dump the NAND either: it is
+  signature-gated. (The "RK3308 DDR security issue" Grandstream patched in
+  firmware 1.0.9.3 is not a bypass. It most likely refers to enabling DDR data
+  scrambling, a hardening feature, not a hole. No public CVE or exploit maps
+  to it.)
+- **The one live route is kernel and rootfs replacement under the genuine
+  signed U-Boot.** The BootROM forces a genuine U-Boot, but that U-Boot may or
+  may not verify the kernel it boots. If it does not, we write only the core
+  (kernel) and rootfs partitions, leave the signed U-Boot in place, and it
+  boots v90d, exactly as v90d already installs on the DVF9918. Safety rule:
+  never rewrite the loader, so the genuine signed U-Boot always comes up and
+  can re-flash.
 
 Unlike the DVF9918, the RK3308 is a fully documented, open SoC: mainline
-U-Boot and Linux, a public TRM, and MaskROM USB recovery. A v90d port to it
-would be a real ARMv8 port (new kernel config and device tree, a Si32283
-driver, RK3308 audio / TDM routing, a new boot story), but every piece is
-supported upstream, and the modem, V.42, V.90, V.92, PPP and web stack is
-SoC-agnostic C that moves across unchanged.
+U-Boot and Linux, and a public TRM. A v90d port would be a real ARMv8 port
+(new kernel config and device tree, a Si32283 driver, RK3308 audio / TDM
+routing, a new boot story), but every piece is supported upstream, and the
+modem, V.42, V.90, V.92, PPP and web stack is SoC-agnostic C that moves across
+unchanged.
 
-### What would decide it, on a unit in hand
+### What a UART log from J404 decides
 
-1. **A UART boot log from `J404`** at power-on: shows the BootROM / TPL / SPL
-   / U-Boot messages, whether a signature is verified and at which stage, and
-   whether the kernel boot is gated.
-2. **MaskROM over the USB port** (`rkdeveloptool list`): if it accepts an
-   unsigned DDR-init loader, OTP is not burned and we own the box; if it
-   hangs, OTP is burned. Check first whether the power micro-USB's data lines
-   reach the RK3308 OTG, or whether MaskROM needs a flash test pad.
-3. **A NAND dump** (via MaskROM, or an external programmer on the XT26Q01):
-   the partitions sit decrypted in flash, so a dump gives the real Rockchip
-   images to unpack with standard tools, and sidesteps the payload encryption
-   entirely.
-4. **Grandstream GPL source** (U-Boot + kernel): answers the kernel-check
-   question directly and provides the RK3308 + Si32283 device tree.
+The log answers two questions, and the pair gives four outcomes:
+
+- **Q1: can autoboot be interrupted to a U-Boot console?** (a "hit a key"
+  prompt, versus `bootdelay=0` blowing straight through, as on the OBi302).
+- **Q2: does the signed U-Boot verify the kernel?** (a verify step and a
+  refusal, versus loading and jumping).
+
+1. **Console yes, no kernel verify (the win).** RAM-boot v90d first, writing
+   nothing: load kernel and rootfs over the console (ymodem, or TFTP if U-Boot
+   brings up the network) and `bootm`. If it runs, write only kernel and
+   rootfs to NAND from U-Boot and leave the signed U-Boot. Recovery is the
+   signed U-Boot re-flashing stock.
+2. **Console yes, kernel verified.** The signed U-Boot refuses our kernel.
+   Narrow: look for an unverified boot path (some builds verify the flash boot
+   partition but `bootm` a RAM or TFTP image without checking, or have a
+   recovery mode that skips verify). If the verify is airtight, closed short of
+   a signing key or a U-Boot bug.
+3. **No console, no kernel verify.** Use an external SPI-NAND programmer on the
+   `XT26Q01`: dump it, disassemble the stock U-Boot to confirm it does not
+   verify the kernel, then write kernel and rootfs back with the programmer.
+   Riskier (no RAM-boot dry run) but recoverable by reprogramming stock.
+4. **No console and kernel verified.** Closed, short of fault injection on the
+   BootROM.
+
+Either way the log also hands us the port's boot parameters: the U-Boot
+version, DDR and load addresses, kernel command line, console baud, and the
+NAND/mtd partition map. A NAND dump (for the real images and the stock device
+tree) now means an external programmer on the `XT26Q01`, not MaskROM, since
+MaskROM is signature-gated once OTP is burned.
 
 ## The HT801, from two flash dumps
 
