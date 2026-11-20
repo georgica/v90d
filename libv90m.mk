@@ -1,10 +1,12 @@
 # libv90modem, as v90d builds against it. Included by the Makefiles that
 # need the modem (srv, dce, fw/drv, the top level, live/replay.mk).
 #
-#   LIBV90M       the library's source tree, a checkout of its own repository
-#                 (default: ../libv90modem, next to this tree). Tests and
-#                 tools need the source: they link the simulated callers and
-#                 look at the modem's internals.
+#   LIBV90M       the library's source tree. The default is the pinned copy
+#                 fw/setup.sh unpacks at $(V90D_ROOT)/libv90modem; point it
+#                 at a checkout of the repository (LIBV90M=../libv90modem) to
+#                 build against a working copy. Tests and tools need the
+#                 source: they link the simulated callers and look at the
+#                 modem's internals.
 #   LIBV90M_DEFS  -D options for the modem code (live/replay's trace hooks,
 #                 the bench experiments of live/*.sh); each set of them gets
 #                 a build directory of its own.
@@ -15,7 +17,7 @@
 #   make LIBV90M_A=/usr/lib/libv90modem.a LIBV90M_INC="$(pkg-config --cflags libv90modem)"
 
 V90D_ROOT    := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
-LIBV90M      ?= $(abspath $(V90D_ROOT)/../libv90modem)
+LIBV90M      ?= $(abspath $(V90D_ROOT)/libv90modem)
 LIBV90M_DEFS ?=
 LIBV90M_TAG  := $(subst =,_,$(subst $() ,-,$(strip $(patsubst -D%,%,$(LIBV90M_DEFS)))))
 LIBV90M_OUT  ?= $(V90D_ROOT)/build/libv90modem$(if $(LIBV90M_TAG),-$(LIBV90M_TAG))
@@ -32,7 +34,7 @@ LIBV90M_DEV_ARM  := $(LIBV90M_OUT)/arm/libv90modem-dev.a
 LIBV90M_ARM_CC   ?= $(wildcard $(V90D_ROOT)/toolchain/*/bin/arm-linux-gcc)
 
 ifeq ($(wildcard $(LIBV90M)/include/v90modem.h),)
-$(error libv90modem is not at $(LIBV90M): check it out next to this tree, or say where with LIBV90M=)
+$(error libv90modem is not at $(LIBV90M): run fw/setup.sh to fetch it, or build against a checkout with LIBV90M=/path/to/libv90modem)
 endif
 
 # The library's own Makefile decides what is out of date.

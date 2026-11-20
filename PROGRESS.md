@@ -2499,3 +2499,35 @@ once and replayed from that copy on both sides):
 | `make bench-v90` | transmit hash 8e3136e9 | 8e3136e9 (internals and API) |
 | replay, 106 `live/*.raw` x 8 `live/*.conf` | 1613 files | identical octet for octet (the two manifests compare equal) |
 | `make -C fw release`, `test-release` | built, passes | built, passes, the same lines |
+
+## main (0.5.1) merged; the modem pinned to libv90modem 0.3.0 (2026-11-20)
+
+main 9484fb7..35df47b. The 0.5.1 changes were two V.92 answering fixes and
+the Phase 2 speed-ups, all modem: they live in libv90modem 0.3.0, so main's
+`modem/*` and `v92/*` edits are not taken here; the modem comes from the
+library. Only the non-modem commits cross over: the HT802V2 board/firmware
+notes (BOARDS.md, README.md, FLASHING.md) and fw/VERSION 0.5.1.
+
+The library is now pinned, not a loose checkout next door. `fw/setup.sh`
+fetches a released source tarball (a GitHub release asset, SHA-256
+a9fef7ca..., so its bytes cannot change under us) and unpacks it at
+`libv90modem/`, where `libv90m.mk` looks by default; a developer builds
+against a working copy with `make LIBV90M=/path`. To move the modem, bump
+`LIBV90M_VER` / `LIBV90M_SHA` in setup.sh.
+
+Proof, built against the pinned libv90modem 0.3.0 (the daemon links its
+public API only):
+
+- `make check`: ALL HOST CHECKS PASS (the library's suite first, then
+  v90d's), 0 failures.
+- `make -C fw release`: built `v90d-ht802fw.bin` (v90d ht802 0.5.1); release
+  through the loader 22 checks, 0 failures.
+- `make bench-v90`: transmit hash 8e3136e9, the same as 0.5.0 and 0.5.1,
+  reported both through the library's internals and its public API. The
+  modem on the line is byte-for-byte what shipped.
+
+Not re-run here, on purpose: `make check-arm` and `make -C fw test-release`.
+The modem sources are byte-for-byte libv90modem 0.3.0, which went through
+check-arm on its own and shipped in v90d 0.5.1; the loader and boot models
+are unchanged by this restructure and were green in 0.5.1. The release
+image was not put on the unit (the 0.5.1 image, the same modem, was).

@@ -112,9 +112,12 @@ The one other outside part is OpenVPN (with mbed TLS), built unchanged from
 source for the optional IWANGO tunnel. There is no Grandstream code or
 binary in the image and no closed blob.
 
-The modem is libv90modem (GPL-2.0-only), a library in a repository of its
-own that v90d builds against: check it out next to this tree
-(`../libv90modem`) or say where it is with `LIBV90M=` (`libv90m.mk`).
+The modem is [libv90modem](https://github.com/georgica/libv90modem)
+(GPL-2.0-only), a library in a repository of its own that v90d builds
+against. `fw/setup.sh` fetches a pinned release of it (checked by SHA-256,
+like the other dependencies) and unpacks it next to this tree; to build
+against a working copy instead, say where it is with `LIBV90M=`
+(`libv90m.mk`).
 
 `DESIGN.md` says how it is built and why, `HARDWARE.md` what was learned
 about the box, `PROGRESS.md` what was measured and when, with the test
@@ -185,8 +188,7 @@ A Linux PC with the usual build tools (gcc, make, python3, curl, bc, flex,
 bison) is enough.
 
 ```
-git clone <libv90modem> ../libv90modem   # the modem, next to this tree
-sh fw/setup.sh          # fetches the cross toolchain, Linux, busybox, OpenVPN and mbed TLS (checked by SHA-256) and builds them
+sh fw/setup.sh          # fetches libv90modem, the cross toolchain, Linux, busybox, OpenVPN and mbed TLS (checked by SHA-256) and builds them
 make -C fw release      # fw/build/release/v90d-ht802fw.bin
 ```
 
