@@ -447,7 +447,7 @@ static const struct { const char *text; int line; const char *what; } bad[] = {
     { "[line]\nidle_timeout = -5\n", 2, "idle_timeout: -5 is out of range 0..10080" },
     { "[line]\nrings = 2\n", 2, "unknown key 'rings' in [line]" },
     { "[modem]\nnumber = 5\n", 2, "unknown key 'number' in [modem]" },
-    { "[lines]\n", 1, "unknown section [lines] (sections: network, ppp, modem, modem2, line, line2, status, log)" },
+    { "[lines]\n", 1, "unknown section [lines] (sections: network ppp modem modem2 line line2 status log system)" },
     /* the admin password */
     { "[status]\nadmin_password = <redacted>\n", 2, "admin_password: password is <redacted>" },
     { "[status]\nadmin_password = two words\n", 2, "admin_password: unexpected text after the password" },
@@ -805,6 +805,10 @@ static void test_load(void)
     CHECK_EQ_I(cfg_load(&c, tmp, err, sizeof err), CFG_OK);
     CHECK_EQ_I(c.n_users, 3);
     CHECK_EQ_I(c.status_port, 8080);
+    CHECK_EQ_I(put_file(tmp, "[system]\nupdate_check = on\n", 27), 0);
+    memset(&c, 0, sizeof c);
+    CHECK_EQ_I(cfg_load(&c, tmp, err, sizeof err), CFG_OK);
+    CHECK_EQ_I(c.update_check, 1);
     CHECK_EQ_I(put_file(tmp, "[ppp]\nmru = 9\n", 14), 0);
     memset(&c, 0x33, sizeof c);
     CHECK_EQ_I(cfg_load(&c, tmp, err, sizeof err), CFG_ERR);

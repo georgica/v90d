@@ -158,6 +158,12 @@ typedef struct {
      * now, which is sent to the browser (409) with the connection kept. */
     const char *(*take)(void *ctx, int what, int fd, const char *early, size_t early_len,
                         size_t content_length, const char *ctype);
+    /* POST /firmware/update: install the release the daily check found (its
+     * version is in the Firmware page's WHERE text as update_avail). No body.
+     * Return NULL once it is under way (the box then downloads, writes and
+     * restarts on its own), or the reason it cannot be done now (sent 409,
+     * connection kept). NULL here: /firmware/update is refused (501). */
+    const char *(*install)(void *ctx);
     void       *ctx;
 } httpd_fw_t;
 

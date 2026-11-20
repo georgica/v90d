@@ -226,6 +226,8 @@ typedef struct {
     char       admin_password[CFG_SECRET_MAX + 1];  /* "" = settings open */
     /* [log] */
     int        log_level;       /* CFG_LOG_* */
+    /* [system] */
+    int        update_check;    /* 1 = check GitHub daily for a newer release and offer it on the Firmware page; off = never phone home */
     /* port 2; the [modem] and [line] fields above and ppp_peer are port 1 */
     cfg_port_t port2;
 } cfg_t;

@@ -66,6 +66,18 @@ static void test_pages(void)
     n = firmware_render_html("x", "scheme=loader\nset=A\ninstalled=half\n", "", 1, html, sizeof html);
     CHECK(n > 0 && has("<tr><th>Installation</th><td>not complete") && has("no system image that checks"));
 
+    /* an available update: the section, the release link, the install form */
+    n = firmware_render_html("0.5.2", "scheme=loader\nset=A\nupdate_avail=0.6.0\n", "", 1, html, sizeof html);
+    CHECK(n > 0 && has("<h2>Update available</h2>") && has("Version 0.6.0 has been released"));
+    CHECK(has("href=\"https://github.com/georgica/v90d/releases/tag/v0.6.0\""));
+    CHECK(has("action=\"/firmware/update\"") && has("Download and install"));
+    /* nowhere to write: the offer shows, the install form does not */
+    n = firmware_render_html("0.5.2", "scheme=loader\nset=A\nupdate_avail=0.6.0\n", "", 0, html, sizeof html);
+    CHECK(n > 0 && has("<h2>Update available</h2>") && !has("action=\"/firmware/update\"") && has("cannot be installed from here"));
+    /* no update: no section */
+    n = firmware_render_html("0.5.2", LOADER, "", 1, html, sizeof html);
+    CHECK(n > 0 && !has("Update available"));
+
     n = firmware_render_stock(LOADER, html, sizeof html);
     CHECK(n > 0 && n == (int)strlen(html) && n <= FIRMWARE_HTML_MAX);
     CHECK(has("<form method=\"post\" action=\"/firmware/stock\">") && has("name=\"confirm\" value=\"stock\" required>"));

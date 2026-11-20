@@ -93,3 +93,9 @@ admin_password = ""
 [log]
 # error, warn, info (default) or debug
 level = info
+
+[system]
+# off (default) or on: once a day, check GitHub for a newer v90d release and,
+# if there is one, offer it on the Firmware page (one click to install). Off
+# means the box never contacts GitHub. Nothing is installed without a click.
+update_check = off

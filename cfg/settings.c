@@ -13,7 +13,7 @@ enum {
     F_NUMBER, F_TONES, F_RINGS, F_BUSY, F_DROP, F_SESSION, F_IDLE, F_AUTH,
     F_MODS, F_V90, F_V34, F_V32BIS, F_V22BIS, F_V22, F_V21, F_DOWN, F_UP, F_ADMINPW, F_ADMINCLR,
     F_LAN, F_ADDRESS, F_NETMASK, F_GATEWAY, F_DNS1, F_DNS2, F_PORT, F_SERVICE, F_V92, F_COMPRESSION,
-    F_DCNOW, F_DCLAN, F_DCUPNP, F_DCIWANGO, F_SATMATCH,
+    F_DCNOW, F_DCLAN, F_DCUPNP, F_DCIWANGO, F_SATMATCH, F_UPDATE_CHECK,
     F_COUNT,
     F_USER = 100, F_PASS = 200      /* plus the row */
 };
@@ -31,6 +31,7 @@ static const struct { const char *name; const char *sec; } fields[F_COUNT] = {
     { "gateway", "network" }, { "dns1", "network" }, { "dns2", "network" },
     { "port", "line" }, { "service", "line" }, { "v92", "modem" }, { "compression", "ppp" },
     { "dreamcast_now", "line" }, { "dreamcast_lan", "line" }, { "dreamcast_upnp", "line" }, { "dreamcast_iwango", "line" }, { "saturn_matchmaking", "line" },
+    { "update_check", "system" },
 };
 
 static const char *const n_tones[] = { "us", "eu" };
@@ -51,6 +52,8 @@ static const char *const t_satmatch[] = { "Off: direct only (dial 0 to wait, #a*
                                           "On: pair players through saturn.dreampipe.net (dial #0NN# and #NN)" };
 static const char *const t_v92[]   = { "Off: V.90 upstream (V.34, up to 33600 bit/s)",
                                        "On: offer PCM upstream to V.92 callers" };
+static const char *const t_update[] = { "Off: the box never contacts GitHub",
+                                        "On: check GitHub once a day and offer a newer release on the Firmware page" };
 static const char *const n_comp[]  = { "off", "on" };
 static const char *const t_comp[]  = { "Off: no PPP compression",
                                        "On: Deflate or MPPC, whichever the caller asks for" };
@@ -366,6 +369,11 @@ int settings_render_page(const cfg_t *c, int page, int saved, const char *error,
 
     }
     if (ON(SETTINGS_SYSTEM)) {
+    sb_puts(&b, "<section><h2>Software updates</h2>\n<table>\n");
+    in_select(&b, "Check for updates", F_UPDATE_CHECK, c->update_check, n_v92, t_update, 2);
+    sb_puts(&b, "</table>\n<p>When on, the box asks GitHub once a day whether a newer v90d"
+                " release exists and, if there is, offers it on the Firmware page. Nothing is"
+                " installed without your click. Off: the box never contacts GitHub.</p></section>\n");
     sb_puts(&b, "<section><h2>Login</h2>\n<table>\n");
     row_open(&b, "Admin password");
     in_password(&b, fields[F_ADMINPW].name, -1);
@@ -601,6 +609,7 @@ static void set_field(form_t *f, int fi, const char *v, size_t len)
     case F_DCIWANGO: set_enum(f, fi, &c->dc_iwango, v, n_v92, 2, "on, off"); break;
     case F_SATMATCH: set_enum(f, fi, &c->sat_match, v, n_v92, 2, "on, off"); break;
     case F_COMPRESSION: set_enum(f, fi, &c->compression, v, n_comp, 2, "on, off"); break;
+    case F_UPDATE_CHECK: set_enum(f, fi, &c->update_check, v, n_v92, 2, "on, off"); break;
     case F_ADDRESS: set_addr(f, fi, &c->lan_addr, v, 0); break;
     case F_NETMASK: set_addr(f, fi, &c->lan_netmask, v, 0); break;
     case F_GATEWAY: set_addr(f, fi, &c->lan_gateway, v, 1); break;
