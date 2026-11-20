@@ -19,6 +19,7 @@ stock as before.
 | HT801 | V1.0A | `9611003610A` | DVF99 (same device tree) | 1 | 1 × Si3217x (factory data) | **Accepted by the loader, untested** |
 | HT801 | V1.1C | `9610003611C` | DVF99 (same device tree) | 1 | 1 × Si3217x (factory data) | **Accepted by the loader, untested** |
 | HT801 | V2.x | not yet known | DVF9918 (expected) | 1 | 1 × Si3217x (expected) | **Expected, untested** |
+| HT802V2 | V2.0A | `9610009420A` | Rockchip RK3308H | 2 | Si32283 ProSLIC | **Rockchip; under investigation** |
 
 ## What the status words mean
 
@@ -39,6 +40,138 @@ stock as before.
   list, so v90d starts on this board, and the line driver brings up one port
   when no second SLIC answers. Nobody has run it there. See the HT801 section
   below for what is known and what can go wrong.
+
+- **Rockchip; under investigation**: this board is a Rockchip RK3308 platform
+  (not the DVF9918) running signed firmware. The stock upgrader refuses v90d
+  because the image is not signed, so the normal install path is closed.
+  Whether v90d can still be booted another way (over the RK3308 MaskROM, or by
+  writing kernel and rootfs under the signed U-Boot) is an open question
+  (below), not yet decided either way.
+
+## The HT802V2 (Rockchip RK3308, signed firmware)
+
+The **HT802V2** is a newer product than the HT802 this firmware was built on,
+not a hardware revision of it, and it is a completely different platform. From
+a board photo (silkscreen `HT802_V2_MB_V1.0A`, 2025-06-12) the parts are:
+
+- **SoC: Rockchip RK3308H** (quad Cortex-A35, ARMv8). Not the DSPG DVF9918.
+- **SLIC: Si32283-FM** (Silicon Labs / Skyworks Si3228x ProSLIC, dual-channel
+  FXS). The same ProSLIC family v90d already targets (`refs/si3226x-facts.md`):
+  raw PCM to the host, no closed voice DSP.
+- **Flash: XT26Q01CWSIG** (XTX), a 1 Gbit (128 MB) SPI NAND.
+- **Ethernet PHY: RTL8201F** (Realtek 10/100).
+- A **`DEBUG` header at `J404`**, almost certainly the UART console.
+
+It runs a signed firmware generation (issue #1): stock 1.0.15.x, dropbear SSH
+into a restricted "HT802V2 Command Shell" with no shell escape, lighttpd, and
+a `status` that reports `Certificate Type: ECDSA+SHA384` and `SecureStatus: 3`.
+
+### The stock upgrader will not install v90d on it
+
+The v90d install path depends on the stock upgrader accepting an unsigned,
+repacked image: on the generation this project targets the flasher checks only
+the container magic, a 16-bit checksum and version/generation/hardware
+compatibility, with no public-key signature (`HARDWARE.md`, "Firmware image
+format"). The stock `ht80xv2fw.bin` (1.0.15.x) was downloaded and read with
+`mkgsfw.py`. It keeps the same base format (magic `0x23C97AF9`, same
+32-character header key, model key still `0xFD21`) with three changes from
+1.0.65:
+
+- a 256-octet high-entropy block (a signature / certificate) in front of the
+  container magic, which now sits at file offset `0x100`;
+- a slimmed directory that carries only the magic and the four partition
+  names, with no sizes or versions;
+- the file header beyond offset `0x20` and the whole payload are now encrypted
+  under a key the old body-key derivation does not produce (in 1.0.65 the
+  header past `0x20`, including the CPU field, was plaintext). Only the first
+  32 octets of each 512-octet partition header still decrypt with the stock
+  key, which is enough to read the version, size and image id.
+
+The four partitions (genuine 1.0.15.x, versions matching a running unit):
+
+| partition | version | payload | flash capacity |
+|---|---|---|---|
+| `ht80xv2boot` | 1.0.15.2 | 676 KB | 1 MB |
+| `ht80xv2core` (kernel) | 1.0.15.2 | 2.9 MB | 5 MB |
+| `ht80xv2base` (rootfs) | 1.0.15.3 | 9.1 MB | 15 MB |
+| `ht80xv2prog` (app) | 1.0.15.3 | 5.2 MB | 26 MB |
+
+Because one universal file installs on every unit, the payload key is not
+device-unique: it is a new fixed key inside the upgrader or a new derivation,
+and the binary that holds it is inside the encrypted rootfs. So the firmware
+file yields the layout but not the boot images: U-Boot, the kernel and the
+rootfs cannot be extracted from it, and the SoC cannot be confirmed from it
+(the RK3308 identification is from the board, not the file). `mkgsfw.py` also
+cannot forge the 256-octet signature, so a repacked image is refused.
+Uploading through the stock page is a dead end.
+
+### Whether v90d can run at all, in Rockchip terms (assume OTP burned)
+
+The RK3308 enforces secure boot only if a hash of the signing key is burned
+into on-chip OTP, and on this SoC that burn is done by the signed firmware
+itself: Rockchip's secure-boot note says the loader writes the key hash to OTP
+during startup and enables secure boot. So any unit that has ever booted
+Grandstream's signed firmware has almost certainly already burned its OTP, and
+`SecureStatus: 3` is consistent with that. We therefore **assume OTP is
+burned** on any field unit. The unburned state, in which MaskROM would accept
+our own loader, would exist only on a factory-fresh board that had never
+booted, which is not a realistic unit to obtain.
+
+Two consequences of assuming OTP burned:
+
+- **MaskROM is not a route for us.** With OTP burned, the BootROM verifies the
+  loader even in USB download mode, so `rkdeveloptool` will not run our own
+  DDR-init or U-Boot, and MaskROM cannot be used to dump the NAND either: it is
+  signature-gated. (The "RK3308 DDR security issue" Grandstream patched in
+  firmware 1.0.9.3 is not a bypass. It most likely refers to enabling DDR data
+  scrambling, a hardening feature, not a hole. No public CVE or exploit maps
+  to it.)
+- **The one live route is kernel and rootfs replacement under the genuine
+  signed U-Boot.** The BootROM forces a genuine U-Boot, but that U-Boot may or
+  may not verify the kernel it boots. If it does not, we write only the core
+  (kernel) and rootfs partitions, leave the signed U-Boot in place, and it
+  boots v90d, exactly as v90d already installs on the DVF9918. Safety rule:
+  never rewrite the loader, so the genuine signed U-Boot always comes up and
+  can re-flash.
+
+Unlike the DVF9918, the RK3308 is a fully documented, open SoC: mainline
+U-Boot and Linux, and a public TRM. A v90d port would be a real ARMv8 port
+(new kernel config and device tree, a Si32283 driver, RK3308 audio / TDM
+routing, a new boot story), but every piece is supported upstream, and the
+modem, V.42, V.90, V.92, PPP and web stack is SoC-agnostic C that moves across
+unchanged.
+
+### What a UART log from J404 decides
+
+The log answers two questions, and the pair gives four outcomes:
+
+- **Q1: can autoboot be interrupted to a U-Boot console?** (a "hit a key"
+  prompt, versus `bootdelay=0` blowing straight through, as on the OBi302).
+- **Q2: does the signed U-Boot verify the kernel?** (a verify step and a
+  refusal, versus loading and jumping).
+
+1. **Console yes, no kernel verify (the win).** RAM-boot v90d first, writing
+   nothing: load kernel and rootfs over the console (ymodem, or TFTP if U-Boot
+   brings up the network) and `bootm`. If it runs, write only kernel and
+   rootfs to NAND from U-Boot and leave the signed U-Boot. Recovery is the
+   signed U-Boot re-flashing stock.
+2. **Console yes, kernel verified.** The signed U-Boot refuses our kernel.
+   Narrow: look for an unverified boot path (some builds verify the flash boot
+   partition but `bootm` a RAM or TFTP image without checking, or have a
+   recovery mode that skips verify). If the verify is airtight, closed short of
+   a signing key or a U-Boot bug.
+3. **No console, no kernel verify.** Use an external SPI-NAND programmer on the
+   `XT26Q01`: dump it, disassemble the stock U-Boot to confirm it does not
+   verify the kernel, then write kernel and rootfs back with the programmer.
+   Riskier (no RAM-boot dry run) but recoverable by reprogramming stock.
+4. **No console and kernel verified.** Closed, short of fault injection on the
+   BootROM.
+
+Either way the log also hands us the port's boot parameters: the U-Boot
+version, DDR and load addresses, kernel command line, console baud, and the
+NAND/mtd partition map. A NAND dump (for the real images and the stock device
+tree) now means an external programmer on the `XT26Q01`, not MaskROM, since
+MaskROM is signature-gated once OTP is burned.
 
 ## The HT801, from two flash dumps
 
