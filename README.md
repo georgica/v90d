@@ -59,6 +59,11 @@ the stock firmware stays in the box, one click away.
   Dreamcast switches and the Saturn matchmaking switch) when a port uses one
   of those services. The pages follow the box: both phone ports on an HT802,
   a single port on a one-port box.
+- An optional update check (off by default, under System on the Settings
+  page): once a day the box asks GitHub whether a newer release exists and,
+  if so, offers it on the Firmware page with one-click install. It contacts
+  no one until you turn it on, and installs nothing without a click. See
+  [FLASHING.md](FLASHING.md).
 
 ## 1 800 BBS DIAL
 

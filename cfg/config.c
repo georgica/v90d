@@ -10,8 +10,8 @@
 
 #define MSG_MAX 128     /* message without the "file:line: " prefix */
 
-enum { S_NETWORK, S_PPP, S_MODEM, S_LINE, S_STATUS, S_LOG, S_MODEM2, S_LINE2, S_COUNT };
-static const char *const sec_names[S_COUNT] = { "network", "ppp", "modem", "line", "status", "log", "modem2", "line2" };
+enum { S_NETWORK, S_PPP, S_MODEM, S_LINE, S_STATUS, S_LOG, S_MODEM2, S_LINE2, S_SYSTEM, S_COUNT };
+static const char *const sec_names[S_COUNT] = { "network", "ppp", "modem", "line", "status", "log", "modem2", "line2", "system" };
 
 enum {
     K_LAN, K_ADDRESS, K_NETMASK, K_GATEWAY, K_PPP_LOCAL, K_PPP_PEER, K_DNS1, K_DNS2, K_NAT,
@@ -20,7 +20,7 @@ enum {
     K_NUMBER, K_TONES, K_BUSY, K_DROP, K_SESSION, K_IDLE, K_SERVICE, K_DCNOW, K_DCLAN, K_DCUPNP, K_DCIWANGO, K_SATMATCH,
     K_LISTEN, K_PORT, K_ADMINPW,
     K_LEVEL,
-    K_PPP_PEER2, K_ARCHIVE, K_COMPRESSION,
+    K_PPP_PEER2, K_ARCHIVE, K_COMPRESSION, K_UPDATE_CHECK,
     /* port 2: the keys of [modem] and [line] again, in the same order */
     K2_MODS, K2_MAXDOWN, K2_MAXUP, K2_TXLEVEL, K2_V42, K2_V42BIS, K2_V92, K2_RINGS, K2_LAW,
     K2_NUMBER, K2_TONES, K2_BUSY, K2_DROP, K2_SESSION, K2_IDLE, K2_SERVICE, K2_DCNOW, K2_DCLAN, K2_DCUPNP, K2_DCIWANGO, K2_SATMATCH,
@@ -40,7 +40,7 @@ static const struct { int sec; const char *name; } keydefs[K_COUNT] = {
     { S_LINE, "service" }, { S_LINE, "dreamcast_now" }, { S_LINE, "dreamcast_lan" }, { S_LINE, "dreamcast_upnp" }, { S_LINE, "dreamcast_iwango" }, { S_LINE, "saturn_matchmaking" },
     { S_STATUS, "listen" }, { S_STATUS, "port" }, { S_STATUS, "admin_password" },
     { S_LOG, "level" },
-    { S_NETWORK, "ppp_peer2" }, { S_NETWORK, "archive" }, { S_PPP, "compression" },
+    { S_NETWORK, "ppp_peer2" }, { S_NETWORK, "archive" }, { S_PPP, "compression" }, { S_SYSTEM, "update_check" },
     { S_MODEM2, "modulations" }, { S_MODEM2, "max_downstream" }, { S_MODEM2, "max_upstream" },
     { S_MODEM2, "tx_level" }, { S_MODEM2, "v42" }, { S_MODEM2, "v42bis" }, { S_MODEM2, "v92" },
     { S_MODEM2, "rings" }, { S_MODEM2, "law" },
@@ -638,6 +638,7 @@ static int set_value(cfg_t *c, pctx_t *px, int k, int mk, int line, const char *
     case K_DNS1:      return set_ip(&c->dns[0], mk, v, 1, msg);
     case K_DNS2:      return set_ip(&c->dns[1], mk, v, 1, msg);
     case K_NAT:       return set_enum(&c->nat, mk, v, n_onoff, 2, l_onoff, msg);
+    case K_UPDATE_CHECK: return set_enum(&c->update_check, mk, v, n_onoff, 2, l_onoff, msg);
     /* the switch for the whole box of older settings: see cfg_parse */
     case K_ARCHIVE:   return set_enum(&px->old_archive, mk, v, n_onoff, 2, l_onoff, msg);
     case K_AUTH:      return set_enum(&c->auth, mk, v, n_auth, 3, l_auth, msg);
@@ -710,8 +711,8 @@ static int do_line(cfg_t *c, pctx_t *px, int *sec, int lineno, char *line, char 
         key = trim(l + 1, l + n - 1);
         *sec = pick(key, strlen(key), sec_names, S_COUNT);
         if (*sec < 0) {
-            snprintf(msg, MSG_MAX, "unknown section [%.40s] (sections: network, ppp, modem, modem2,"
-                     " line, line2, status, log)", key);
+            snprintf(msg, MSG_MAX, "unknown section [%.40s] (sections: network ppp modem modem2"
+                     " line line2 status log system)", key);
             return -1;
         }
         return 0;
@@ -977,6 +978,9 @@ int cfg_write(const cfg_t *c, int with_secrets, char *buf, size_t cap)
 
     sb_puts(&s, "\n[log]\n");
     w_str(&s, K_LEVEL, nm(n_level, 4, c->log_level));
+
+    sb_puts(&s, "\n[system]\n");
+    w_str(&s, K_UPDATE_CHECK, nm(n_onoff, 2, c->update_check));
     return sb_end(&s);
 }
 

@@ -38,6 +38,8 @@ file /etc/v90d.conf $fw/v90d.conf 600 0 0
 file /etc/v90d.bbs $top/lists/bbs.txt 644 0 0
 file /etc/bbsfetch.sh $fw/bbsfetch.sh 755 0 0
 file /etc/bbsguide.awk $fw/bbsguide.awk 644 0 0
+file /etc/updatecheck.sh $fw/updatecheck.sh 755 0 0
+file /etc/fwupdate.sh $fw/fwupdate.sh 755 0 0
 file /etc/confpack.sh $fw/confpack.sh 644 0 0
 file /etc/startgood.sh $fw/startgood.sh 644 0 0
 file /usr/sbin/v90d $top/srv/build/v90d-arm 755 0 0

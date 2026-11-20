@@ -708,8 +708,8 @@ static void firmware_request(httpd_t *h, httpd_conn_t *c, size_t n, int method, 
     hdr_t hd, host;
     size_t cl = 0, max, have, i;
 
-    if (method == M_OTHER || (sub == 0 && method == M_POST) || (sub == 1 && method != M_POST)) {
-        respond_text(h, c, 405, sub == 1 ? "Allow: POST\r\n" : sub == 2 ? ALLOW_FORM : ALLOW_READ, NULL, head_only, now);
+    if (method == M_OTHER || (sub == 0 && method == M_POST) || ((sub == 1 || sub == 3) && method != M_POST)) {
+        respond_text(h, c, 405, (sub == 1 || sub == 3) ? "Allow: POST\r\n" : sub == 2 ? ALLOW_FORM : ALLOW_READ, NULL, head_only, now);
         return;
     }
     a = authorised(h, p, n, now);
@@ -740,6 +740,15 @@ static void firmware_request(httpd_t *h, httpd_conn_t *c, size_t n, int method, 
             respond_text(h, c, 403, NULL, "This request comes from another site.", 0, now);
             return;
         }
+    }
+    if (sub == 3) {
+        const char *why;
+        if (!h->fw.install) { respond_text(h, c, 501, NULL, "This firmware cannot update itself.", 0, now); return; }
+        why = h->fw.install(h->fw.ctx);
+        if (why) { respond_text(h, c, 409, NULL, why, 0, now); return; }
+        respond_text(h, c, 200, NULL, "The box is fetching the update, and will check it, write the spare flash"
+                     " copy and restart into it. Leave the power on; this takes a few minutes. The settings are kept.", 0, now);
+        return;
     }
     if (!h->fw.take) { respond_text(h, c, 403, NULL, "The firmware cannot be changed here.", 0, now); return; }
     hdr_find(p, n, "transfer-encoding", &hd);
@@ -823,7 +832,8 @@ static void handle(httpd_t *h, httpd_conn_t *c, size_t n, uint32_t now)
     settings_set_two_ports(h->status2 != NULL);    /* one port (HT801): no port-2 pages */
     if (plen >= 9 && memcmp(uri, "/firmware", 9) == 0) {
         int sub = plen == 9 ? 0 : plen == 16 && memcmp(uri + 9, "/upload", 7) == 0 ? 1
-                : plen == 15 && memcmp(uri + 9, "/stock", 6) == 0 ? 2 : -1;
+                : plen == 15 && memcmp(uri + 9, "/stock", 6) == 0 ? 2
+                : plen == 16 && memcmp(uri + 9, "/update", 7) == 0 ? 3 : -1;
         if (sub >= 0) { firmware_request(h, c, n, method, sub, now); return; }
     }
     if (settings_page_of(uri, plen) >= 0) {

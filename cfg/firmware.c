@@ -89,6 +89,24 @@ int firmware_render_html(const char *version, const char *where, const char *sta
     if (firmware_value(where, "board", v, sizeof v)) row(&b, "Board", v);
     sb_puts(&b, "</table></section>\n");
 
+    if (firmware_value(where, "update_avail", v, sizeof v) && v[0]) {
+        sb_puts(&b, "<section><h2>Update available</h2>\n<p>Version ");
+        sb_html(&b, v, sizeof v, 0);
+        sb_puts(&b, " has been released. <a href=\"https://github.com/georgica/v90d/releases/tag/v");
+        sb_html(&b, v, sizeof v, 0);
+        sb_puts(&b, "\">Release notes</a>.</p>\n");
+        if (can_write && scheme) {
+            sb_puts(&b, "<p>Install it: the box downloads the release from GitHub, checks it in full (a damaged"
+                        " file or one for another box is refused), writes the spare flash copy and restarts into"
+                        " it. The stock firmware and your settings are kept. Not while a call is in progress.</p>\n"
+                        "<form method=\"post\" action=\"/firmware/update\">\n"
+                        "<p><input type=\"submit\" value=\"Download and install\"></p>\n</form>\n");
+        } else {
+            sb_puts(&b, "<p>This system has no place in the flash to write to, so it cannot be installed from here.</p>\n");
+        }
+        sb_puts(&b, "</section>\n");
+    }
+
     if (state[0]) {
         sb_puts(&b, "<section><h2>Last upload</h2>\n<p>");
         sb_html(&b, state, FIRMWARE_TEXT_MAX, 0);

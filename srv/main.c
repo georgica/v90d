@@ -69,6 +69,7 @@
 #include "daemon.h"
 #include "satlink.h"
 #include "bbslink.h"
+#include "update.h"
 #include "netsvc.h"
 #include "vpn.h"
 #include "settings.h"
@@ -96,6 +97,7 @@ static volatile sig_atomic_t stop;
  * script noted about how the box was started, and what that child noted
  * about its last write. */
 static const char *fw_tool = "/usr/sbin/v90nv";
+static const char *fw_update_cmd = "sh /etc/fwupdate.sh";    /* run as CMD VERSION to install an update */
 static pid_t    fw_pid;
 
 void logf_(int level, const char *fmt, ...)
@@ -177,16 +179,28 @@ static int all_onhook(void)
 static int fw_text(void *ctx, int which, char *buf, size_t cap)
 {
     const char *path = which == HTTPD_FW_WHERE ? getenv("V90D_WHERE") : getenv("V90NV_STATE");
-    ssize_t n;
+    ssize_t n = 0;
     int fd;
     (void)ctx;
     if (!path) path = which == HTTPD_FW_WHERE ? "/tmp/v90d.where" : "/tmp/v90d.fwstate";
     buf[0] = '\0';
-    if ((fd = open(path, O_RDONLY | O_CLOEXEC)) < 0) return 0;
-    n = read(fd, buf, cap - 1);
-    close(fd);
-    if (n < 0) n = 0;
+    if ((fd = open(path, O_RDONLY | O_CLOEXEC)) >= 0) {
+        n = read(fd, buf, cap - 1);
+        close(fd);
+        if (n < 0) n = 0;
+    }
     buf[n] = '\0';
+    /* let the Firmware page see an available update as one more WHERE line */
+    if (which == HTTPD_FW_WHERE) {
+        char ver[32];
+        if (update_available(ver, sizeof ver)) {
+            size_t have = (size_t)n;
+            if (have && buf[have - 1] != '\n' && have + 1 < cap) buf[have++] = '\n';
+            n = (ssize_t)have + snprintf(buf + have, cap - have, "update_avail=%s\n", ver);
+            if (n >= (ssize_t)cap) n = (ssize_t)cap - 1;
+            buf[n] = '\0';
+        }
+    }
     return (int)n;
 }
 
@@ -223,6 +237,41 @@ static const char *fw_take(void *ctx, int what, int fd, const char *early, size_
     return NULL;
 }
 
+/* POST /firmware/update: install the release the daily check found. Same
+ * guards as an upload. A child fetches our own release image and hands it to
+ * the flash tool; the daemon keeps serving while it runs, and the child
+ * leaves the restart note when it is done. Its words go to the state file,
+ * so the Firmware page's "Last upload" shows how it went. */
+static const char *fw_install(void *ctx)
+{
+    char ver[32], cmd[160];
+    int i;
+    (void)ctx;
+    if (!update_available(ver, sizeof ver)) return "There is no update to install.";
+    if (!all_onhook()) return "A call is in progress. Try again when the lines are free.";
+    if (fw_pid > 0 && waitpid(fw_pid, NULL, WNOHANG) == 0) return "The flash is being written already. Wait until that is done.";
+    fw_pid = 0;
+    /* ver is digits and dots only (update_available checks), so the command is safe to build */
+    if (snprintf(cmd, sizeof cmd, "%s %s", fw_update_cmd, ver) >= (int)sizeof cmd) return "The box cannot start the update just now.";
+    fw_pid = fork();
+    if (fw_pid == 0) {
+        const char *st = getenv("V90NV_STATE"); int fd;
+        struct sched_param sp;
+        memset(&sp, 0, sizeof sp);
+        (void)sched_setscheduler(0, SCHED_OTHER, &sp);
+        (void)munlockall();
+        if (!st) st = "/tmp/v90d.fwstate";
+        fd = open(st, O_WRONLY | O_CREAT | O_TRUNC, 0600);   /* the script's words land where the page reads them */
+        if (fd >= 0) { (void)dup2(fd, 1); (void)dup2(fd, 2); }
+        for (i = 3; i < 256; i++) close(i);
+        execl("/bin/sh", "sh", "-c", cmd, (char *)NULL);
+        _exit(127);
+    }
+    if (fw_pid < 0) { fw_pid = 0; return "The box cannot start the update just now."; }
+    logf_(CFG_LOG_INFO, "firmware page: installing update %s with %s", ver, fw_update_cmd);
+    return NULL;
+}
+
 /* TUN devices, forwarding and NAT as the configuration in force wants them */
 
 /* a new configuration is in force from the next call */
@@ -240,6 +289,7 @@ static void adopt(const cfg_t *n)
             net_dirty = 1;
         srv_reconfigure(&S[i], &view);
     }
+    update_config(n->update_check, V90D_VERSION);
 }
 
 static int store(const cfg_t *n)
@@ -355,7 +405,7 @@ int main(int argc, char **argv)
     /* the telephone lights: <prefix><port>/brightness, lit while the port is off hook */
     const char *led_prefix = "/sys/class/leds/ht802:phone"; int led_fd[PORTS] = { -1, -1 }, led_on[PORTS] = { -1, -1 };
 
-    while ((opt = getopt(argc, argv, "c:l:d:i:t:vpow:W:L:A:N:R:P:D:G:E:O:V:M:S:XB:b:J:T:")) != -1) {
+    while ((opt = getopt(argc, argv, "c:l:d:i:t:vpow:W:L:A:N:R:P:D:G:E:O:V:M:S:XB:b:J:T:u:U:Y:")) != -1) {
         switch (opt) {
         case 'c': cfg_path = optarg; break;
         case 'l': if (n_ports >= PORTS) usage(); line_spec[n_ports++] = optarg; break;
@@ -388,6 +438,9 @@ int main(int argc, char **argv)
         case 'b': bbslink_set_fetch(optarg); break;   /* the command that prints the bbs list; "" = never fetch */
         case 'J': bbslink_set_live(optarg); break;    /* where a fetched bbs list is kept */
         case 'T': bbslink_set_prog(optarg); break;    /* run instead of nc to reach a board: PROG HOST PORT */
+        case 'u': update_set_cmd(optarg); break;      /* the command that prints the latest release version; "" = never check */
+        case 'U': fw_update_cmd = optarg; break;      /* run as CMD VERSION to install an update (instead of fwupdate.sh) */
+        case 'Y': update_set_state(optarg); break;    /* where the available-update result is kept */
         case 'V': netsvc_set_vpnpath(optarg); break;  /* where the VPN profile is kept */
         case 'E': netsvc_set_lease(optarg); break;    /* prints the console's address on the network (instead of udhcpc) */
         case 'G': netsvc_set_dcnow(optarg); break;    /* run instead of wget for the Dreamcast Now report: PROG URL BODY */
@@ -451,9 +504,10 @@ int main(int argc, char **argv)
     httpd_on_bbs(&H, bbslink_rows, NULL);
     { char r[48]; settings_set_vpn(netsvc_vpn_remote(r, sizeof r) ? r : NULL); }
     {
-        static const httpd_fw_t fw = { V90D_VERSION " (built " __DATE__ ")", fw_text, fw_take, NULL };
+        static const httpd_fw_t fw = { V90D_VERSION " (built " __DATE__ ")", fw_text, fw_take, fw_install, NULL };
         httpd_on_firmware(&H, &fw);
     }
+    update_config(live.update_check, V90D_VERSION);
 
     /* The line gives us 10 ms blocks and wants each answered in time; a late
      * one costs the caller's modem its training. So: ahead of everything
@@ -536,6 +590,7 @@ int main(int argc, char **argv)
             }
             satlink_poll(now_ms);
             bbslink_poll(now_ms);
+            update_poll(now_ms);
             netsvc_poll(now_ms);
             if (fw_pid > 0 && now_ms % 1000 == 0 && waitpid(fw_pid, NULL, WNOHANG) == fw_pid) fw_pid = 0;
             /* the Restart button, once its answer has gone out */
@@ -584,6 +639,7 @@ int main(int argc, char **argv)
     httpd_close(&H);
     netsvc_stop();
     bbslink_stop();
+    update_stop();
     for (p = 0; p < n_ports; p++) line_close(&line[p]);
     logf_(CFG_LOG_INFO, "stopped");
     return 0;

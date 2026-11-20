@@ -48,6 +48,20 @@ are not kept across that).
 On the v90d pages: Firmware, upload the new `v90d-ht802fw.bin`. Settings
 are kept.
 
+The box can also tell you when there is a newer release and fetch it for
+you. On the Settings page, under System, turn "Check for updates" on (it is
+off to start with, so the box contacts no one unless you ask). Once a day
+the box then asks GitHub whether a newer v90d release exists; if one does,
+the Firmware page shows "Update available" with the version, a link to its
+release notes, and a "Download and install" button. The button makes the
+box download that release, check it in full (a damaged file, or one for
+another box, is refused and nothing changes), write the spare flash copy
+and restart into it, the same as uploading the file by hand. Nothing is
+ever installed without that click, and the stock firmware and the settings
+are kept. It fetches only the project's own release over HTTPS; there is
+no signature on the image yet, so the trust is the same as downloading the
+file from the releases page and uploading it yourself.
+
 ## If something goes wrong
 
 - **The box does not come back with v90d.** Every start of v90d is counted

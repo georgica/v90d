@@ -28,7 +28,7 @@ SIM_SRC := ../dce/test/caller.c ../ppp/test/pppc.c $(LIBV90M_DEV)
 SIM_SRC_ARM := ../dce/test/caller.c ../ppp/test/pppc.c $(LIBV90M_DEV_ARM)
 HDRS := $(wildcard *.h ../tel/*.h ../dce/*.h ../dce/test/*.h ../cfg/*.h ../ppp/*.h) $(LIBV90M)/include/v90modem.h
 
-DAEMON_SRC := main.c satlink.c bbslink.c netsvc.c tun.c nat.c ../cfg/httpd.c ../cfg/settings.c ../cfg/firmware.c ../cfg/vpn.c $(CORE_SRC)
+DAEMON_SRC := main.c satlink.c bbslink.c update.c netsvc.c tun.c nat.c ../cfg/httpd.c ../cfg/settings.c ../cfg/firmware.c ../cfg/vpn.c $(CORE_SRC)
 # the firmware's version, shown on the pages: one place, fw/VERSION
 VERSION := $(shell cat ../fw/VERSION 2>/dev/null || echo dev)
 DAEMON_DEF := -DV90D_VERSION='"$(VERSION)"'
@@ -95,12 +95,14 @@ test-ns: $(BUILD)/v90d $(BUILD)/ns_call test-ns-nat test-ns-upnp
 	@rm -f $(BUILD)/ns_flash.bin
 	@$(MAKE) -s test-ns-pppd
 
-test: $(BUILD)/test_srv $(BUILD)/test_rig $(BUILD)/test_orig
+test: $(BUILD)/test_srv $(BUILD)/test_rig $(BUILD)/test_orig $(BUILD)/test_update
 	./$(BUILD)/test_srv
+	./$(BUILD)/test_update
 	./$(BUILD)/test_rig
 	./$(BUILD)/test_orig
-test-arm: $(BUILD)/arm_test_srv $(BUILD)/arm_test_rig $(BUILD)/arm_test_orig
+test-arm: $(BUILD)/arm_test_srv $(BUILD)/arm_test_rig $(BUILD)/arm_test_orig $(BUILD)/arm_test_update
 	$(QEMU) ./$(BUILD)/arm_test_srv
+	$(QEMU) ./$(BUILD)/arm_test_update
 	$(QEMU) ./$(BUILD)/arm_test_rig
 	$(QEMU) ./$(BUILD)/arm_test_orig
 $(BUILD)/test_orig: test/test_orig.c $(CORE_SRC) $(SIM_SRC) $(HDRS)
@@ -110,6 +112,10 @@ $(BUILD)/arm_test_orig: test/test_orig.c $(CORE_SRC) $(SIM_SRC_ARM) $(HDRS)
 	@mkdir -p $(BUILD)
 	$(ARM_CC) $(CFLAGS) $(INC) -static -o $@ test/test_orig.c $(CORE_SRC) $(SIM_SRC_ARM) $(LDLIBS)
 
+$(BUILD)/test_update: test/test_update.c update.c update.h $(HDRS) | $(BUILD)
+	$(CC) $(CFLAGS) $(INC) -o $@ test/test_update.c update.c $(LDLIBS)
+$(BUILD)/arm_test_update: test/test_update.c update.c update.h $(HDRS) | $(BUILD)
+	$(ARM_CC) $(CFLAGS) $(INC) -static -o $@ test/test_update.c update.c $(LDLIBS)
 $(BUILD)/test_srv: test/test_srv.c $(CORE_SRC) $(SIM_SRC) $(HDRS)
 	@mkdir -p $(BUILD)
 	$(CC) $(CFLAGS) $(INC) -o $@ test/test_srv.c $(CORE_SRC) $(SIM_SRC) $(LDLIBS)

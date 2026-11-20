@@ -1747,6 +1747,13 @@ static const char *fw_take(void *ctx, int what, int fd, const char *early, size_
     fw.fd = dup(fd);                    /* what a forked helper would hold */
     return NULL;
 }
+static int fw_inst_calls, fw_inst_refuse;
+static const char *fw_install(void *ctx)
+{
+    (void)ctx;
+    fw_inst_calls++;
+    return fw_inst_refuse ? "A call is in progress." : NULL;
+}
 
 static void test_firmware(void)
 {
@@ -1770,7 +1777,7 @@ static void test_firmware(void)
                        "Content-Length: 13\r\n\r\nconfirm=stock"), 403);
 
     memset(&f, 0, sizeof f);
-    f.version = "9.8.7 <test>"; f.text = fw_text; f.take = fw_take; f.ctx = "writing v90d & co";
+    f.version = "9.8.7 <test>"; f.text = fw_text; f.take = fw_take; f.install = fw_install; f.ctx = "writing v90d & co";
     httpd_on_firmware(&H, &f);
     memset(&fw, 0, sizeof fw);
     len = exchange("GET /firmware HTTP/1.0\r\nHost: 192.168.1.2\r\n\r\n", resp, sizeof resp);
@@ -1795,6 +1802,21 @@ static void test_firmware(void)
     CHECK_EQ_I(code_of("GET /firmwares HTTP/1.0\r\n\r\n"), 404);
     CHECK_EQ_I(code_of("GET /firmware/uploads HTTP/1.0\r\n\r\n"), 404);
     CHECK_EQ_I(fw.calls, 0);
+
+    /* the self-update route: GET is not allowed; POST hands off to install */
+    CHECK_EQ_I(code_of("GET /firmware/update HTTP/1.0\r\nHost: 192.168.1.2\r\n\r\n"), 405);
+    CHECK(strstr(resp, "\r\nAllow: POST\r\n") != NULL);
+    fw_inst_calls = fw_inst_refuse = 0;
+    CHECK_EQ_I(code_of("POST /firmware/update HTTP/1.0\r\nHost: 192.168.1.2\r\nContent-Length: 0\r\n\r\n"), 200);
+    CHECK_EQ_I(fw_inst_calls, 1);
+    fw_inst_refuse = 1;                 /* a call in progress: the reason is sent, 409 */
+    CHECK_EQ_I(code_of("POST /firmware/update HTTP/1.0\r\nHost: 192.168.1.2\r\nContent-Length: 0\r\n\r\n"), 409);
+    CHECK_EQ_I(fw_inst_calls, 2);
+    f.install = NULL; httpd_on_firmware(&H, &f);     /* no installer behind it: not implemented */
+    CHECK_EQ_I(code_of("POST /firmware/update HTTP/1.0\r\nHost: 192.168.1.2\r\nContent-Length: 0\r\n\r\n"), 501);
+    CHECK_EQ_I(fw_inst_calls, 2);
+    f.install = fw_install; httpd_on_firmware(&H, &f);
+    fw_inst_refuse = 0;
 
     /* a post that is not in order never reaches the taker */
     snprintf(req, sizeof req, "%s\r\nabcd", UP);
