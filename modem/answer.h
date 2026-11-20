@@ -126,7 +126,6 @@ typedef struct {
                                 for the rest of the call when a V.92 start-up failed or the
                                 line did not carry the lowest PCM upstream rate */
     int        v92_data;     /* this V.92 engine has reached data mode */
-    int        rt_asked;     /* answer_retrain() began the retrain under way */
 } answer_t;
 
 void    answer_init(answer_t *a, const answer_cfg *cfg);

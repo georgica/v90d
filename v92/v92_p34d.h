@@ -166,6 +166,8 @@ typedef struct {
     int        in_reneg, reneg_ours, clearing;
     int        renegs;              /* renegotiations completed */
     int        retrain_ours;
+    int        up_floor;            /* the retrain is ours because the upstream did not hold
+                                       even the lowest PCM rate in data mode */
     tonedet_t  tone_a;              /* Tone A (2400 Hz) watch */
     /* line quality in data mode */
     uint32_t   q_limit; int32_t q_bad; uint32_t bad_seen;

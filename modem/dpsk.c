@@ -23,7 +23,9 @@ void dpsktx_init(dpsktx_t *t, int fc, int level, int guard)
         for (u = p; u < STEP_N; u += UNITS_SYM) g += v22_txh[u];
         for (u = p; u < STEP_N; u += UNITS_SYM) {
             acc += v22_txh[u];
-            t->step[u] = (int16_t)(((int64_t)acc << 14) / g);
+            /* acc 16384 / g; in 32 bits where the product fits (the same
+             * quotient: ARMv5 divides 64-bit numbers slowly) */
+            t->step[u] = (int16_t)(acc < 131072 && acc > -131072 ? acc * 16384 / g : (int64_t)acc * 16384 / g);
         }
     }
     t->base = 0; t->nev = 0; t->cur = 0;

@@ -1,6 +1,5 @@
 /* L1 / L2 line probing: generator and block-DFT analyser. See probe.h. */
 #include "probe.h"
-#include "sintab.h"
 
 int probe_has_tone(int m)
 {
@@ -13,30 +12,41 @@ static int phase180(int m)
     return m == 2 || m == 11 || m == 15 || m == 18 || m == 20 || m == 21 || m == 22 || m == 23;
 }
 
-/* cos(2 pi k / 160), Q15, by linear interpolation in the sine table */
-static void cos160(int16_t *cs)
-{
-    int k;
-    for (k = 0; k < PROBE_BLK; k++) {
-        uint32_t ph = (uint32_t)(((uint64_t)k << 32) / PROBE_BLK) + 0x40000000u;
-        int i = (int)(ph >> 22);
-        int32_t f = (int32_t)((ph >> 7) & 0x7fff);
-        int32_t a = sintab[i & SIN_MASK], b = sintab[(i + 1) & SIN_MASK];
-        cs[k] = (int16_t)(a + (((b - a) * f) >> 15));
-    }
-}
+/* cos(2 pi k / 160), Q15, by linear interpolation in the sine table: ph =
+ * k 2^32 / 160 + 2^30, i = ph >> 22, f = (ph >> 7) & 0x7fff, sintab[i] +
+ * ((sintab[i + 1] - sintab[i]) f >> 15), computed once (ARMv5 took some 50000
+ * instructions for its 64-bit divisions, in one tick, at every start) */
+static const int16_t cos160_tab[PROBE_BLK] = {
+    32767, 32741, 32666, 32540, 32363, 32137, 31861, 31536, 31163, 30741, 30273, 29757,
+    29195, 28589, 27938, 27245, 26508, 25732, 24915, 24061, 23170, 22242, 21280, 20285,
+    19259, 18204, 17120, 16011, 14876, 13718, 12539, 11341, 10125, 8894, 7649, 6393,
+    5125, 3851, 2570, 1286, 0, -1287, -2571, -3851, -5126, -6393, -7650, -8895,
+    -10126, -11342, -12539, -13719, -14876, -16011, -17121, -18204, -19260, -20286, -21281, -22243,
+    -23170, -24062, -24916, -25733, -26509, -27245, -27938, -28590, -29196, -29757, -30273, -30742,
+    -31164, -31537, -31862, -32137, -32364, -32541, -32666, -32742, -32767, -32742, -32667, -32541,
+    -32364, -32137, -31862, -31537, -31164, -30742, -30273, -29758, -29196, -28590, -27939, -27245,
+    -26509, -25733, -24916, -24062, -23170, -22243, -21281, -20286, -19260, -18204, -17121, -16012,
+    -14877, -13719, -12539, -11342, -10126, -8895, -7650, -6393, -5126, -3852, -2571, -1287,
+    0, 1286, 2570, 3850, 5125, 6393, 7649, 8894, 10125, 11341, 12539, 13718,
+    14875, 16010, 17120, 18204, 19259, 20285, 21280, 22242, 23170, 24061, 24915, 25732,
+    26508, 27245, 27937, 28589, 29195, 29756, 30273, 30741, 31163, 31536, 31861, 32137,
+    32363, 32540, 32665, 32741,
+};
 
 void probetx_init(probetx_t *p, int level)
 {
-    int16_t cs[PROBE_BLK];
-    int k, m;
-    cos160(cs);
+    const int16_t *cs = cos160_tab;
+    uint8_t tm[PROBE_NBIN], tn[PROBE_NBIN];             /* the tones at 0 and at 180 degrees */
+    int k, m, i, n0 = 0, n1 = 0;
+    for (m = 1; m <= PROBE_NBIN; m++) {
+        if (!probe_has_tone(m)) continue;
+        if (phase180(m)) tn[n1++] = (uint8_t)m; else tm[n0++] = (uint8_t)m;
+    }
     for (k = 0; k < PROBE_BLK; k++) {
         int32_t acc = 0;
-        for (m = 1; m <= PROBE_NBIN; m++) {
-            if (!probe_has_tone(m)) continue;
-            acc += phase180(m) ? -cs[(3 * m * k) % PROBE_BLK] : cs[(3 * m * k) % PROBE_BLK];
-        }
+        /* the same sum, tone by tone: cs[(3 m k) mod 160] */
+        for (i = 0; i < n0; i++) acc += cs[(3 * tm[i] * k) % PROBE_BLK];
+        for (i = 0; i < n1; i++) acc -= cs[(3 * tn[i] * k) % PROBE_BLK];
         /* each tone at amplitude level * sqrt(2/21) (10113 in Q15) */
         acc = (int32_t)(((int64_t)acc * 10113) >> 15);
         p->tab[k] = (int16_t)(((int64_t)acc * level) >> 15);
@@ -57,30 +67,35 @@ int16_t probetx_tick(probetx_t *p, int l1)
 void proberx_init(proberx_t *r)
 {
     int m;
-    cos160(r->cs);
     r->n = 0; r->nblk = 0;
     for (m = 0; m <= PROBE_NBIN; m++) {
+        r->ar[m] = r->ai[m] = 0;
         r->lr[m] = r->li[m] = 0;
         r->pw[m] = r->p0[m] = r->cr[m] = r->ci[m] = 0;
     }
 }
 
+/* The block's DFT at 150 m Hz, m = 1 .. 25, summed as the samples come
+ * (sample k of the block meets cos and sin of 2 pi 3 m k / 160: the same sums,
+ * in the same order, as over the whole block at its end, which took some
+ * 80000 ARM instructions in one tick) */
 void proberx_tick(proberx_t *r, int16_t x)
 {
-    int m, k;
-    r->blk[r->n++] = x;
-    if (r->n < PROBE_BLK) return;
+    const int16_t *cs = cos160_tab;
+    int m, k = r->n, step = 3 * k, idx = 0;
+    while (step >= PROBE_BLK) step -= PROBE_BLK;     /* idx = (3 m k) mod 160, isn = (idx - 40) mod 160 */
+    for (m = 1; m <= PROBE_NBIN; m++) {
+        int isn;
+        idx += step; if (idx >= PROBE_BLK) idx -= PROBE_BLK;
+        isn = idx + PROBE_BLK - 40; if (isn >= PROBE_BLK) isn -= PROBE_BLK;
+        r->ar[m] += (int32_t)x * cs[idx];
+        r->ai[m] -= (int32_t)x * cs[isn];
+    }
+    if (++r->n < PROBE_BLK) return;
     r->n = 0;
     for (m = 1; m <= PROBE_NBIN; m++) {
-        int64_t ar = 0, ai = 0;
-        int32_t xr, xi;
-        int idx = 0, step = (3 * m) % PROBE_BLK;
-        for (k = 0; k < PROBE_BLK; k++) {
-            ar += (int32_t)r->blk[k] * r->cs[idx];
-            ai -= (int32_t)r->blk[k] * r->cs[(idx + PROBE_BLK - 40) % PROBE_BLK];
-            idx += step; if (idx >= PROBE_BLK) idx -= PROBE_BLK;
-        }
-        xr = (int32_t)(ar >> 15); xi = (int32_t)(ai >> 15);     /* amplitude * 80 */
+        int32_t xr = (int32_t)(r->ar[m] >> 15), xi = (int32_t)(r->ai[m] >> 15);     /* amplitude * 80 */
+        r->ar[m] = r->ai[m] = 0;
         r->pw[m] += (int64_t)xr * xr + (int64_t)xi * xi;
         if (r->nblk == 0) r->p0[m] = (int64_t)xr * xr + (int64_t)xi * xi;
         if (r->nblk > 0) {
@@ -180,7 +195,13 @@ static int32_t log2q8(int64_t v)
     int n = 0, i, f;
     int64_t t = v;
     if (v <= 0) return -(64 << 8);
-    while (t > 1) { t >>= 1; n++; }
+    /* n = floor(log2 v), by halves */
+    if (t >= (int64_t)1 << 32) { t >>= 32; n += 32; }
+    if (t >= (int64_t)1 << 16) { t >>= 16; n += 16; }
+    if (t >= (int64_t)1 << 8) { t >>= 8; n += 8; }
+    if (t >= (int64_t)1 << 4) { t >>= 4; n += 4; }
+    if (t >= (int64_t)1 << 2) { t >>= 2; n += 2; }
+    if (t >= (int64_t)1 << 1) { n += 1; }
     /* 8 mantissa bits below the leading one */
     t = n >= 8 ? (v >> (n - 8)) & 0xff : (v << (8 - n)) & 0xff;
     i = (int)(t >> 4); f = (int)(t & 15);

@@ -24,8 +24,7 @@ void    probetx_init(probetx_t *p, int level);
 int16_t probetx_tick(probetx_t *p, int l1);
 
 typedef struct {
-    int16_t  cs[PROBE_BLK];             /* cos(2 pi k / 160), Q15 */
-    int16_t  blk[PROBE_BLK];
+    int64_t  ar[PROBE_NBIN + 1], ai[PROBE_NBIN + 1];    /* the block's bins so far, sample by sample */
     int      n, nblk;
     int32_t  lr[PROBE_NBIN + 1], li[PROBE_NBIN + 1];    /* previous block's bins */
     int64_t  pw[PROBE_NBIN + 1];        /* sum |X|^2 */

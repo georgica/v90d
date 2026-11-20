@@ -962,6 +962,9 @@ PCM upstream without being told to. What it needed, as readings:
     decision's error moves it by an eighth. Without that, what the echo
     canceller and its tail estimate leave of our own low frequencies moved
     whole runs of symbols a point off (100 units, points 245 apart).
+    (Later, with a G.711 codec only: less where the codec's step at the
+    point is more than the noise, or the error may be a wrong decision;
+    the simulator's bursts at the top rates, ../PROGRESS.md answer-fix 1.)
 
 Not a reading: for a while the refusals of reading 62 were taken for a
 limit on the transmit power asked for. Designs at 0.84 to 1.02 of the

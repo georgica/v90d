@@ -23,7 +23,12 @@ int16_t ec_tick(ec_t *e, int16_t tx, int16_t rx, int mu_shift)
     e->x[e->pos] = e->x[e->pos + EC_NTAP] = tx;
     x = &e->x[e->pos];
 
-    for (i = 0; i < EC_NTAP; i++) acc += (int64_t)e->h[i] * x[i];
+    /* four taps a pass (EC_NTAP is a multiple of 4): the same sum */
+    for (i = 0; i < EC_NTAP; i += 4)
+    {
+        acc += (int64_t)e->h[i] * x[i]; acc += (int64_t)e->h[i + 1] * x[i + 1];
+        acc += (int64_t)e->h[i + 2] * x[i + 2]; acc += (int64_t)e->h[i + 3] * x[i + 3];
+    }
     err = rx - (int32_t)((acc + (1 << 23)) >> 24);
 
     if (mu_shift >= 0 && e->energy > 65536) {

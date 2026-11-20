@@ -121,7 +121,7 @@ void answer_init(answer_t *a, const answer_cfg *cfg)
     /* V.92 9.1: Phase 1 is that of V.90, and V.8 cannot say V.92 (the NOTE
      * there; Table 5/V.8 has one bit for "V.90 or V.92 digital modem"), so
      * nothing above depends on ANS_MODE_V92. Phase 2 says it. */
-    a->v92_both = 0; a->v92_data = 0; a->rt_asked = 0;
+    a->v92_both = 0; a->v92_data = 0;
     a->pcm_up = local.has_pcm && (cfg->modes & ANS_MODE_V92) != 0;
 }
 
@@ -402,20 +402,23 @@ int16_t answer_tick(answer_t *a, int16_t rx)
         } else if (m->state == V92D_FAILED || m->state == V92D_RETRAIN) {
             /* 9.5.1.2 and 9.6.1.2: what recovers a start-up that went wrong
              * is a retrain; so does the caller's Tone A (9.7.1.2) and our
-             * own wish. Phase 2 of that retrain is V.92's (9.3). PCM
-             * upstream is offered in it again, except when
+             * own wish, asked for or v92d's (a rate renegotiation that
+             * stalled, 9.8). Phase 2 of that retrain is V.92's (9.3), and
+             * it measures the line again: PCM upstream is offered in it
+             * again, except when
              *   - this start-up never reached data mode, whoever gave up, or
-             *   - v92d itself gave up in data mode (the line does not carry
-             *     the lowest rate, or a rate renegotiation stalled):
+             *   - v92d failed, or retrains because the upstream did not hold
+             *     even the lowest PCM rate in data mode (the line does not
+             *     carry PCM upstream, whatever a new design says):
              * then bit 70 of INFO1d says "no PCM upstream" for the rest of
              * the call and the caller is left with V.34 upstream (V.90). */
-            if (m->state == V92D_FAILED || !a->v92_data || (m->retrain_ours && !a->rt_asked)) a->pcm_up = 0;
+            if (m->state == V92D_FAILED || !a->v92_data || m->up_floor) a->pcm_up = 0;
             (void)begin_retrain(a); tx = 0;
         } else if (m->state == V92D_DATA) {
             /* also after a rate renegotiation */
             a->connected = 1; a->modulation = ANS_MOD_V92;
             a->bitrate = m->down_rate; a->rx_bitrate = m->up_rate;
-            a->phase = ANS_V92; a->retraining = 0; a->v92_data = 1; a->rt_asked = 0;
+            a->phase = ANS_V92; a->retraining = 0; a->v92_data = 1;
             if (++a->rt_clock >= MS(60000)) { a->rt_clock = 0; if (a->rt_recent > 0) a->rt_recent--; }
         }
         break;
@@ -578,11 +581,7 @@ int answer_retrain(answer_t *a)
 {
     if (a->phase == ANS_V34) return v34ans_retrain(&a->v34);
     if (a->phase == ANS_V32) return v32_retrain(&a->u.v32);
-    if (a->phase == ANS_V92) {
-        if (v92d_retrain(&a->u.v92) != 0) return -1;
-        a->rt_asked = 1;                /* ours, by request: PCM upstream stays on offer */
-        return 0;
-    }
+    if (a->phase == ANS_V92) return v92d_retrain(&a->u.v92);
     if (a->phase != ANS_V90) return -1;
     return p34d_retrain(&a->p34);
 }

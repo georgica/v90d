@@ -2409,3 +2409,38 @@ Bell 212A was not called on this image: the 5686 answers the V.22 sequence
 before the 2225 Hz tone begins. Its calls were made on the test build
 described above. Not tried on this image: the 1998 U.S. Robotics, the
 Conexant.
+
+## 2026-11-19: two V.92 answering fixes and the Phase 2 speed-ups, from libv90modem
+
+These come from libv90modem 0.3.0. There the library's own calling modem
+found the two bugs. v90d has no calling side, so the tests that show them
+are in the library (`test_orig_seeds`, `test_orig_retrain`), not here.
+
+- **V.92 upstream bursts** (libv90modem 1826689; `v92/v92_p34d.c`): the
+  digital modem's receiver baseline follower. Bursts of upstream errors at
+  34666 to 37333 bit/s with a G.711 codec on the receive path.
+- **PCM upstream after our own retrain** (libv90modem 0c67d6f;
+  `modem/answer.c`, `answer.h`, `v92/v92_p34d.c`, `v92_p34d.h`). After a
+  retrain the answering modem began by itself, PCM upstream was dropped for
+  the rest of the call.
+- **Speed-ups with the same output** (the shared files of libv90modem
+  06d164e and e796152): probing's analysis (`modem/probe.c`, `probe.h`), the
+  divisions in `dpsktx_init`, `v34_params_init`'s loops, four taps a pass in
+  the echo canceller and in the V.92 precoder. In the library these halved
+  the start of Phase 2 on ARM (189 -> 98 k instructions) and cut the end of
+  probing from 223 k to 82 k. `dpsk.c` was ported by hand (the library's
+  copy also has a portability change). `proberx_bin`, used only by the
+  calling side, was left out.
+
+Proof against 0.5.0 (9484fb7, /home/georgica/sync-build/proof/before050):
+- `make check`: the same counts, program by program (the e2e log's path
+  differs).
+- `make check-arm`: the same counts.
+- bench-v90: transmit hash 8e3136e9.
+- The replay of the 106 recordings against the 8 configs: all 1613
+  outputs identical.
+- `make -C fw release` and `make -C fw test-release`: exit 0, with the
+  same test results as 0.5.0 (loader: 129 checks, 0 failures). The image
+  was not put on the unit.
+
+No real call was made on these sources.

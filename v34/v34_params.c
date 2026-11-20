@@ -83,15 +83,17 @@ static uint32_t shell_energy_q8(const v34_params_t *p, unsigned lg,
 
     for (i = 0; i <= 3 * (M - 1); i++) {         /* g3 = g2 * g1 */
         uint32_t t = 0;
-        for (k = 0; k <= i && k <= 2 * (M - 1); k++)
-            if (i - k < M) t += p->g2[k];
+        /* the terms with k <= i, k <= 2 (M - 1), i - k < M (the same sum
+         * as over all k with those tests: ARMv5 runs it at every start) */
+        unsigned k0 = i >= M ? i - (M - 1) : 0, k1 = i < 2 * (M - 1) ? i : 2 * (M - 1);
+        for (k = k0; k <= k1; k++) t += p->g2[k];
         g3[i] = t;
     }
     c7[0] = 0;
     for (i = 0; i <= 7 * (M - 1); i++) {         /* g7 = g4 * g3 */
         uint32_t t = 0;
-        for (k = 0; k <= i && k <= 4 * (M - 1); k++)
-            if (i - k <= 3 * (M - 1)) t += p->g4[k] * g3[i - k];
+        unsigned k0 = i > 3 * (M - 1) ? i - 3 * (M - 1) : 0, k1 = i < 4 * (M - 1) ? i : 4 * (M - 1);
+        for (k = k0; k <= k1; k++) t += p->g4[k] * g3[i - k];
         g7[i] = t;
         c7[i + 1] = c7[i] + t;                   /* may wrap; see below */
     }
@@ -142,18 +144,17 @@ int v34_params_init(v34_params_t *p, const v34_cfg_t *cfg)
         p->g2[i] = (uint8_t)(i < M ? i + 1 : 2 * M - 1 - i);
     for (i = 0; i <= 4 * (M - 1); i++) {
         unsigned t = 0;
-        for (k = 0; k <= i; k++)
-            if (k <= 2 * (M - 1) && i - k <= 2 * (M - 1))
-                t += (unsigned)p->g2[k] * p->g2[i - k];
+        /* k within both g2's ranges: the terms the tests let through */
+        unsigned k0 = i > 2 * (M - 1) ? i - 2 * (M - 1) : 0, k1 = i < 2 * (M - 1) ? i : 2 * (M - 1);
+        for (k = k0; k <= k1; k++) t += (unsigned)p->g2[k] * p->g2[i - k];
         p->g4[i] = (uint16_t)t;
     }
     z = 0;
     for (i = 0; i <= 8 * (M - 1); i++) {
         p->z8[i] = z > 0xFFFFFFFFu ? 0xFFFFFFFFu : (uint32_t)z;
+        unsigned k0 = i > 4 * (M - 1) ? i - 4 * (M - 1) : 0, k1 = i < 4 * (M - 1) ? i : 4 * (M - 1);
         g8 = 0;
-        for (k = 0; k <= i; k++)
-            if (k <= 4 * (M - 1) && i - k <= 4 * (M - 1))
-                g8 += (uint64_t)p->g4[k] * p->g4[i - k];
+        for (k = k0; k <= k1; k++) g8 += (uint64_t)p->g4[k] * p->g4[i - k];
         z += g8;
     }
     p->z8[i] = z > 0xFFFFFFFFu ? 0xFFFFFFFFu : (uint32_t)z;   /* = M^8 */

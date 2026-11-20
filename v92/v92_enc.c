@@ -70,6 +70,35 @@ static int32_t rnd_shift(int64_t v, int sh)
 /* history sample `back` symbols ago, back = 1 .. V92_MAX_LSEC */
 #define HIDX(hp, back) ((hp) >= (back) ? (hp) - (back) : (hp) + V92_MAX_LSEC - (back))
 
+/* sum over k = 1 .. n of hist[HIDX(hp, k)] c[k - 1]: the history newest
+ * first, in the two runs that do not wrap (n <= V92_MAX_LSEC) */
+static int64_t hdot16(const int16_t *hist, int hp, const int16_t *c, unsigned n)
+{
+    int64_t acc = 0;
+    unsigned k = 0, n1 = (unsigned)hp < n ? (unsigned)hp : n;
+    const int16_t *h = hist + hp - 1;
+    for (; k < n1; k++, h--) acc += (int32_t)*h * c[k];
+    for (h = hist + V92_MAX_LSEC - 1; k < n; k++, h--) acc += (int32_t)*h * c[k];
+    return acc;
+}
+static int64_t hdot32(const int32_t *hist, int hp, const int16_t *c, unsigned n)
+{
+    int64_t acc = 0;
+    unsigned k = 0, n1 = (unsigned)hp < n ? (unsigned)hp : n;
+    const int32_t *h = hist + hp - 1;
+    for (; k + 4 <= n1; k += 4, h -= 4) {
+        acc += (int64_t)h[0] * c[k]; acc += (int64_t)h[-1] * c[k + 1];
+        acc += (int64_t)h[-2] * c[k + 2]; acc += (int64_t)h[-3] * c[k + 3];
+    }
+    for (; k < n1; k++, h--) acc += (int64_t)*h * c[k];
+    for (h = hist + V92_MAX_LSEC - 1; k + 4 <= n; k += 4, h -= 4) {
+        acc += (int64_t)h[0] * c[k]; acc += (int64_t)h[-1] * c[k + 1];
+        acc += (int64_t)h[-2] * c[k + 2]; acc += (int64_t)h[-3] * c[k + 3];
+    }
+    for (; k < n; k++, h--) acc += (int64_t)*h * c[k];
+    return acc;
+}
+
 int32_t v92_enc_symbol(v92_enc_t *e, v92_sym_t *s)
 {
     const v92_map_t *m = e->map;
@@ -78,7 +107,6 @@ int32_t v92_enc_symbol(v92_enc_t *e, v92_sym_t *s)
     int lc = v92_lc(m, i);
     int r, period, first, eta, n;
     int32_t fb = 0, u, x, v, out;
-    unsigned c;
 
     /* data frame boundary: scramble K bits and run the modulus encoder */
     if (i == 0) {
@@ -110,10 +138,9 @@ int32_t v92_enc_symbol(v92_enc_t *e, v92_sym_t *s)
     if (f) {
         int64_t acc = 0;                    /* Q(XQ + 14) */
         const int16_t *z1 = f->coef, *p1 = z1 + f->lz1;
-        for (c = 1; c <= f->lz1; c++)       /* Q0 * Q15, one bit down */
-            acc += (int64_t)e->uh[HIDX(e->hp, c)] * z1[c - 1] * (1 << (V92_XQ - 1));
-        for (c = 1; c <= f->lp1; c++)       /* XQ * Q14 */
-            acc += (int64_t)e->xh[HIDX(e->hp, c)] * p1[c - 1];
+        /* Q0 * Q15, one bit down; XQ * Q14 */
+        acc += hdot16(e->uh, e->hp, z1, f->lz1) * (1 << (V92_XQ - 1));
+        acc += hdot32(e->xh, e->hp, p1, f->lp1);
         fb = rnd_shift(acc, 14);
     }
 
@@ -145,10 +172,8 @@ int32_t v92_enc_symbol(v92_enc_t *e, v92_sym_t *s)
         int64_t xs = (int64_t)u * (1 << V92_XQ) + fb;
         x = xs > INT32_MAX ? INT32_MAX : xs < -INT32_MAX ? -INT32_MAX : (int32_t)xs;
         acc += (int64_t)x * z2[0];
-        for (c = 1; c < f->lz2; c++)
-            acc += (int64_t)e->xh[HIDX(e->hp, c)] * z2[c];
-        for (c = 1; c <= f->lp2; c++)       /* XQ * Q14, one bit up */
-            acc += (int64_t)e->vh[HIDX(e->hp, c)] * p2[c - 1] * 2;
+        if (f->lz2 > 1) acc += hdot32(e->xh, e->hp, z2 + 1, f->lz2 - 1u);
+        acc += hdot32(e->vh, e->hp, p2, f->lp2) * 2;    /* XQ * Q14, one bit up */
         v = rnd_shift(acc, 15);
         /* G = gain4 / 2^18; result in Q14 */
         out = rnd_shift((int64_t)v * f->gain4, V92_XQ + 18 - 14);
