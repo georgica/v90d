@@ -2304,6 +2304,72 @@ bridge, the same image on the box: V.92, 3 calls of 3, `CONNECT 54666`, the
 box's list 54666 / 40000, 38666 and 38666. The Conexant was not tried on
 this image.
 
+## libv90modem: the modem as a library of its own, Phase 1 (2026-11-16)
+
+The modem (`modem/`, `v32/`, `v34/`, `v90/`, `v92/`), V.42 (`v42/`), the line
+simulator (`sim/`), the modem tests, the recorders and benches moved into
+`libv90modem/` (`git mv`, the same relative paths), with a public API in one
+header, `include/v90modem.h` (0.1.0, not stable before 1.0). v90d builds
+against it (`libv90m.mk`): the daemon links `libv90modem.a`, in which only the
+`v90m_*` functions are visible; the tests link the library's dev archive
+(internals and simulator). Nothing was to change in what goes on the line.
+
+Proof, before (819d38e, a clean worktree) and after (this branch), same PC:
+
+| | before | after |
+|---|---|---|
+| `make check` | 107 programs, 2,835,154 checks, 0 failures, ALL HOST CHECKS PASS | the same 107 with the same counts, plus `api: 74 checks, 0 failures`; ALL HOST CHECKS PASS |
+| `make check-arm` | 106 programs, 0 failures, ALL ARM CHECKS PASS | the same 106 with the same counts, plus the API test; ALL ARM CHECKS PASS |
+| `make bench-v90` | transmit hash 8e3136e9 (host, qemu-arm) | 8e3136e9 by the internals (host, qemu-arm) and by the public API (static, shared, qemu-arm) |
+| replays: 106 recordings of `live/` x 8 configurations | 848 outputs, 394 V.92 per-sample trace checksums, 371 bit dumps | the same 1613 files, byte for byte |
+| `make -C fw test-release` | passes | passes; release image built against the library (`v90d-ht802fw.bin` 0.4.0, 2523144 octets, through the loader: 22 checks, 0 failures) |
+| ARM daemon, stripped | 573248 octets | 577344 octets |
+| ARM instructions per second of V.90 data mode (qemu) | 39,605,966 (`bench_v90`) | 40,170,131 through the API (`bench_api`): +1.4 %, about 70 per sample |
+
+New with the library (no "before"): the API test (`test/api/test_api.c`:
+configuration and its errors, memory of the caller's and full of rubbish,
+G.711, a V.22bis call through the API, two modems in one process, blocks of
+1, 7 and 160 samples giving the same samples on the line, V.42 alone), the
+public-API bench, the example `examples/answer_file.c` (the Conexant V.92
+call `cxa.raw` gives `CONNECT 50666/25333 V.92 at 24.805 s` on the host,
+static and shared, and cross-built under qemu-arm), the replay tool
+`v90m-replay` (modem and V.42 without telephony: the transmit matches the
+recording to the bit until data mode on cxa, cxc, v34a, v21a, usr6, usr7,
+x2r2, x2b), install / uninstall / pkg-config, a cross build with
+`CC=arm-linux-gcc`.
+
+Found on the way: the test of `dce_init` on a dce_t full of rubbish
+(test_call (l)) failed when the modem was allocated by the first call; the
+modem and V.42 memory are part of the dce_t again (`v90m_init` on it).
+
+## main (0.4.1) merged; its modem changes in libv90modem (2026-11-17)
+
+main since the split (819d38e..4799c4c: 0.4.0, one copy of the echo delay
+measurement and of the tone watch, bulletin boards that lead back into the
+box, 0.4.1) merged into this branch. The modem's part (`modem/ecdly`,
+`modem/tonedet`, `p34d`, `v92_p34d`, `v34dx`, their tests) lives in
+libv90modem now: there on its branch `sync-0.4.1` (8eee1b3), applied as
+main has it. Here: `srv/bbsdial.[ch]` and its tests, `fw/VERSION`, DESIGN
+and PROGRESS as main has them; `live/replay.c` and the top Makefile stay as
+this branch has them (the trace is libv90modem's `tools/trace.c`, which
+reads `ecd.delay` now, as does `test_srv`'s V.92 call).
+
+Proof, before (main at 4799c4c, a clean worktree) and after (this merge
+against libv90modem 8eee1b3), same PC:
+
+| | before | after |
+|---|---|---|
+| `make check` | 108 programs, 2,836,310 checks, 0 failures, ALL HOST CHECKS PASS | every one of the 108 lines the same (`ecdly: 1019` among them, now in the library), except `tel: 396` -> `401` (this branch's `v90d -o`, aa91646; main did not touch `tel/`); plus 18 of the library's calling side and this branch (anstone, api 187, dce_orig, orig, orig_v32, orig_v34, orig_v90, p2call, p2v90, srv_orig, test_acdet, test_caller, v8orig, v90a, v90adec, v90arx, v90arx_robust, v90dil): 126 programs, 2,839,215 checks, 0 failures, ALL HOST CHECKS PASS |
+| `make check-arm` | 107 programs, 0 failures, ALL ARM CHECKS PASS | the same 107 lines (tel as above), 125 programs, ALL ARM CHECKS PASS |
+| `make bench-v90` | transmit hash 8e3136e9 (host, qemu-arm) | 8e3136e9 by the internals and by the public API (static, shared, qemu-arm) |
+| replays: 106 recordings of `live/` x 8 configurations | 848 outputs, 394 V.92 trace checksums, 230 bit dumps, 48 + 93 data dumps: 1613 files | the same 1613 files, byte for byte |
+| `make -C fw test-release` | passes (11 tests OK, loader: 129 checks, 0 failures) | the same; `v90d-ht802fw.bin` 0.4.1, 2552040 octets (2517992 before) |
+| ARM daemon (`srv/build/v90d-arm`) | 569152 octets | 630592 octets: the calling side of the library and `v90d -o` |
+
+The bench hash is the one of 0.3 / Phase 1: 0.4.x did not change what the
+answerer sends in that simulated call. `V90M_MEM_SIZE` went from 100 to
+112 KiB in the library (the larger echo history), so `dce_t` is 12 KiB
+larger.
 
 ## 2026-11-17: Bell 103
 
@@ -2410,37 +2476,58 @@ before the 2225 Hz tone begins. Its calls were made on the test build
 described above. Not tried on this image: the 1998 U.S. Robotics, the
 Conexant.
 
-## 2026-11-19: two V.92 answering fixes and the Phase 2 speed-ups, from libv90modem
+## main (0.5.0) merged; Bell through libv90modem's API (2026-11-17)
 
-These come from libv90modem 0.3.0. There the library's own calling modem
-found the two bugs. v90d has no calling side, so the tests that show them
-are in the library (`test_orig_seeds`, `test_orig_retrain`), not here.
+main 4799c4c..9484fb7: Bell 103 and Bell 212A answering. Its modem files
+(`modem/answer.*`, `v21.h`, `bell103_bpf.h`, `test_answer`,
+`tools/gen_v21_bpf.py`) are not in this tree: they are in libv90modem's
+sync-0.5.0 (629ae89), with API 0.2.0. Here, main's dce / srv / cfg changes
+reach Bell through the public API instead of `ANS_MODE_*`:
+`srv` offers `V90M_MOD_BELL212A` with V.22 and `V90M_MOD_BELL103` with V.21
+(the calling mode, `v90d -o`, masks both out as before); `mod_of` maps
+`V90M_CONN_BELL103` / `_BELL212A` to the status page's; `dce` starts V.42
+straight in start-stop for `V90M_CONN_BELL103` as for V.21. cfg, srv/main,
+README, fw/VERSION 0.5.0 as main has them.
 
-- **V.92 upstream bursts** (libv90modem 1826689; `v92/v92_p34d.c`): the
-  digital modem's receiver baseline follower. Bursts of upstream errors at
-  34666 to 37333 bit/s with a G.711 codec on the receive path.
-- **PCM upstream after our own retrain** (libv90modem 0c67d6f;
-  `modem/answer.c`, `answer.h`, `v92/v92_p34d.c`, `v92_p34d.h`). After a
-  retrain the answering modem began by itself, PCM upstream was dropped for
-  the rest of the call.
-- **Speed-ups with the same output** (the shared files of libv90modem
-  06d164e and e796152): probing's analysis (`modem/probe.c`, `probe.h`), the
-  divisions in `dpsktx_init`, `v34_params_init`'s loops, four taps a pass in
-  the echo canceller and in the V.92 precoder. In the library these halved
-  the start of Phase 2 on ARM (189 -> 98 k instructions) and cut the end of
-  probing from 223 k to 82 k. `dpsk.c` was ported by hand (the library's
-  copy also has a portability change). `proberx_bin`, used only by the
-  calling side, was left out.
+Proof, same PC, against main 9484fb7 built on its own (recordings copied
+once and replayed from that copy on both sides):
 
-Proof against 0.5.0 (9484fb7, /home/georgica/sync-build/proof/before050):
-- `make check`: the same counts, program by program (the e2e log's path
-  differs).
-- `make check-arm`: the same counts.
-- bench-v90: transmit hash 8e3136e9.
-- The replay of the 106 recordings against the 8 configs: all 1613
-  outputs identical.
-- `make -C fw release` and `make -C fw test-release`: exit 0, with the
-  same test results as 0.5.0 (loader: 129 checks, 0 failures). The image
-  was not put on the unit.
+| | main 9484fb7 | this branch + libv90modem 6036127 |
+|---|---|---|
+| `make check` | 108 programs, 2,836,351 checks, 0 failures | the same 108 lines (`answer: 54`, `test_status: 611` among them), except `tel: 396` -> `401` (this branch's `v90d -o`); plus the 18 of the calling side and this branch (`api` now 237): 126 programs, 2,839,306 checks, 0 failures |
+| `make check-arm` | 107 programs, 547,858 checks, 0 failures | the same 107 lines but `tel`; 125 programs, 550,723 checks, 0 failures |
+| `make bench-v90` | transmit hash 8e3136e9 | 8e3136e9 (internals and API) |
+| replay, 106 `live/*.raw` x 8 `live/*.conf` | 1613 files | identical octet for octet (the two manifests compare equal) |
+| `make -C fw release`, `test-release` | built, passes | built, passes, the same lines |
 
-No real call was made on these sources.
+## main (0.5.1) merged; the modem pinned to libv90modem 0.3.0 (2026-11-20)
+
+main 9484fb7..35df47b. The 0.5.1 changes were two V.92 answering fixes and
+the Phase 2 speed-ups, all modem: they live in libv90modem 0.3.0, so main's
+`modem/*` and `v92/*` edits are not taken here; the modem comes from the
+library. Only the non-modem commits cross over: the HT802V2 board/firmware
+notes (BOARDS.md, README.md, FLASHING.md) and fw/VERSION 0.5.1.
+
+The library is now pinned, not a loose checkout next door. `fw/setup.sh`
+fetches a released source tarball (a GitHub release asset, SHA-256
+a9fef7ca..., so its bytes cannot change under us) and unpacks it at
+`libv90modem/`, where `libv90m.mk` looks by default; a developer builds
+against a working copy with `make LIBV90M=/path`. To move the modem, bump
+`LIBV90M_VER` / `LIBV90M_SHA` in setup.sh.
+
+Proof, built against the pinned libv90modem 0.3.0 (the daemon links its
+public API only):
+
+- `make check`: ALL HOST CHECKS PASS (the library's suite first, then
+  v90d's), 0 failures.
+- `make -C fw release`: built `v90d-ht802fw.bin` (v90d ht802 0.5.1); release
+  through the loader 22 checks, 0 failures.
+- `make bench-v90`: transmit hash 8e3136e9, the same as 0.5.0 and 0.5.1,
+  reported both through the library's internals and its public API. The
+  modem on the line is byte-for-byte what shipped.
+
+Not re-run here, on purpose: `make check-arm` and `make -C fw test-release`.
+The modem sources are byte-for-byte libv90modem 0.3.0, which went through
+check-arm on its own and shipped in v90d 0.5.1; the loader and boot models
+are unchanged by this restructure and were green in 0.5.1. The release
+image was not put on the unit (the 0.5.1 image, the same modem, was).

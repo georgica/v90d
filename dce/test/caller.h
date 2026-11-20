@@ -26,7 +26,7 @@
 #include "v42.h"
 #include "pppc.h"
 #include "v34peer.h"
-#include "../../v32/v32.h"
+#include "v32.h"
 #include "v32call.h"
 #include "v92call.h"
 

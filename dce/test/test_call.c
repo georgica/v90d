@@ -404,7 +404,7 @@ static int p_cli_terminated(void) { return C.ppp.terminated; }
 static int want_rt = 1;
 static int p_retrained(void)
 {
-    return D.modem.retrains == want_rt && !D.modem.retraining && C.retrains == want_rt && C.stage == CALLER_ST_P34
+    return v90m__answer(D.modem)->retrains == want_rt && !v90m__answer(D.modem)->retraining && C.retrains == want_rt && C.stage == CALLER_ST_P34
         && C.p34.tx_ready && C.p34.rx_ready;
 }
 
@@ -514,7 +514,7 @@ static void show_rates2(const char *what, const long r[2], const dce_status_t *s
 static void v90_cfgs(dce_cfg_t *sc, caller_cfg_t *cc)
 {
     server_cfg(sc); client_cfg(cc);
-    sc->modes |= ANS_MODE_V90;
+    sc->modulations |= V90M_MOD_V90;
     cc->v90 = 1;
 }
 
@@ -732,13 +732,13 @@ static void test_v90_caller_hangs_up(void)
     CHECK(run_until(p_cli_p34, 30000) > 0);
     run_ms(1000);
     CHECK_EQ_I(status()->state, DCE_TRAINING);
-    CHECK_EQ_I(D.modem.phase, ANS_P3);
+    CHECK_EQ_I(v90m__answer(D.modem)->phase, ANS_P3);
     caller_hangup(&C);
     t = run_until(p_ended, 30000);
     CHECK(t > 0);
     s = status();
     printf("    during Phase 3: ended after %.1f s: %s (modem error %d)\n", t / 1000.0,
-           dce_end_name(s->end_reason), D.modem.p34.error);
+           dce_end_name(s->end_reason), v90m__answer(D.modem)->p34.error);
     CHECK_EQ_I(s->end_reason, DCE_END_NO_CARRIER);
     CHECK_EQ_I(s->modulation, ANS_MOD_NONE);
     CHECK_EQ_I(s->online_ms, 0);
@@ -841,7 +841,7 @@ static void test_v90_endings(void)
         printf("    caller retrains: data again after %d ms, state %d, %d bit/s down, %d up\n",
                t, (int)s->state, s->bitrate, s->rx_bitrate);
         CHECK(t > 0);
-        CHECK_EQ_I(D.modem.retrains, 1);
+        CHECK_EQ_I(v90m__answer(D.modem)->retrains, 1);
         CHECK_EQ_I(s->state, DCE_ONLINE);
         CHECK(traffic(TEXT, 20, 20, 60000, r) > 0);
         CHECK_EQ_I(status()->state, DCE_ONLINE);
@@ -852,7 +852,7 @@ static void test_v90_endings(void)
     CHECK(run_until(p_ip_up, 60000) > 0);
     {
         long r[2];
-        CHECK_EQ_I(answer_retrain(&D.modem), 0);
+        CHECK_EQ_I(answer_retrain(v90m__answer(D.modem)), 0);
         t = run_until(p_retrained, 30000);
         printf("    we retrain: data again after %d ms\n", t);
         CHECK(t > 0);
@@ -933,7 +933,7 @@ static void test_back_to_back(void)
 
     /* a V.22bis call, ended by us, ... */
     server_cfg(&sc); client_cfg(&cc);
-    sc.modes |= ANS_MODE_V90;
+    sc.modulations |= V90M_MOD_V90;
     call_begin(&sc, &cc, &line_clean);
     t = run_until(p_ip_up, 30000);
     CHECK(t > 0);
@@ -988,7 +988,7 @@ static void test_v90_disabled(void)
 
     printf("(m) V.90 caller, V.90 disabled in our configuration: V.22bis\n");
     v90_cfgs(&sc, &cc);
-    sc.modes &= ~ANS_MODE_V90;
+    sc.modulations &= ~V90M_MOD_V90;
     call_begin(&sc, &cc, &line_clean);
     t = run_until(p_ip_up, 40000);
     CHECK(t > 0);
@@ -1033,7 +1033,7 @@ static void test_v90_alaw(void)
         CHECK(traffic(RANDOM, 30, 15, 60000, r));
         CHECK_EQ_I(F[DN].n_bad + F[UP].n_bad, 0);
         show_rates2("incompressible, both ways at once:", r, s);
-        printf("    (frames damaged upstream: %lu; rate lowered %d times, now %d bit/s up; receiver error %d, limit %d, at connect SNR %d)\n", status()->lapm_rx_bad, D.modem.p34.rate_drops, D.modem.p34.up_rate, (int)D.modem.p34.rx.mse, (int)D.modem.p34.mse_limit, (int)D.modem.p34.snr_db10);
+        printf("    (frames damaged upstream: %lu; rate lowered %d times, now %d bit/s up; receiver error %d, limit %d, at connect SNR %d)\n", status()->lapm_rx_bad, v90m__answer(D.modem)->p34.rate_drops, v90m__answer(D.modem)->p34.up_rate, (int)v90m__answer(D.modem)->p34.rx.mse, (int)v90m__answer(D.modem)->p34.mse_limit, (int)v90m__answer(D.modem)->p34.snr_db10);
         CHECK(r[DN] * 800 / s->bitrate >= 88);
         caller_hangup(&C);
         CHECK(run_until(p_ended, 5000) > 0);
@@ -1048,7 +1048,7 @@ static void test_v90_alaw(void)
 static void v92_cfgs(dce_cfg_t *sc, caller_cfg_t *cc)
 {
     server_cfg(sc); client_cfg(cc);
-    sc->modes |= ANS_MODE_V90 | ANS_MODE_V92;
+    sc->modulations |= V90M_MOD_V90 | V90M_MOD_V92;
     sc->max_up = 48000;
     cc->v92 = 1;
 }
@@ -1056,7 +1056,7 @@ static void v92_cfgs(dce_cfg_t *sc, caller_cfg_t *cc)
 static int want_rt92 = 1;
 static int p_retrained92(void)
 {
-    return D.modem.retrains == want_rt92 && !D.modem.retraining && C.vc.retrains == want_rt92
+    return v90m__answer(D.modem)->retrains == want_rt92 && !v90m__answer(D.modem)->retraining && C.vc.retrains == want_rt92
         && !C.vc.retraining && v92call_data(&C.vc) && status()->modem_connected;
 }
 
@@ -1098,7 +1098,7 @@ static void test_v92_lapm(void)
     check_v92_online(s);
     /* V.92 9.3.1: the caller sent no ODP, and it is LAPM all the same */
     CHECK_EQ_I(C.odp_bypass, 1);
-    CHECK_EQ_I(answer_odp_bypass(&D.modem), 1);
+    CHECK_EQ_I(answer_odp_bypass(v90m__answer(D.modem)), 1);
     CHECK_EQ_I(s->v42_state, V42EC_CONNECTED);
     CHECK_EQ_I(s->error_control, 1);
     CHECK_EQ_I(s->comp_tx, 1);
@@ -1165,14 +1165,14 @@ static void test_v92_lapm(void)
     printf("    caller renegotiates: %d bit/s down, %d up, state %d\n", s->bitrate, s->rx_bitrate, (int)s->state);
     CHECK_EQ_I(s->state, DCE_ONLINE);
     CHECK_EQ_I(s->modulation, ANS_MOD_V92);
-    CHECK_EQ_I(D.modem.retrains, 0);
+    CHECK_EQ_I(v90m__answer(D.modem)->retrains, 0);
     CHECK(traffic(TEXT, 20, 20, 60000, r) > 0);
 
     /* our receiver asks for less (as its bad frame watch does): a rate
      * renegotiation of ours that changes the upstream rate alone, and the
      * status follows it */
-    D.modem.u.v92.cfg.max_up_rate = 30000;
-    CHECK_EQ_I(v92d_renegotiate(&D.modem.u.v92), 0);
+    v90m__answer(D.modem)->u.v92.cfg.max_up_rate = 30000;
+    CHECK_EQ_I(v92d_renegotiate(&v90m__answer(D.modem)->u.v92), 0);
     run_ms(9000);       /* the CPd design is paced for the unit's processor (V92_DESIGN_PACE) */
     s = status();
     printf("    we renegotiate with a ceiling of 30000: %d bit/s down, %d up, state %d\n", s->bitrate, s->rx_bitrate, (int)s->state);
@@ -1200,7 +1200,7 @@ static void test_v92_lapm(void)
 
     /* we retrain (9.7.1) */
     want_rt92 = 2;
-    CHECK_EQ_I(answer_retrain(&D.modem), 0);
+    CHECK_EQ_I(answer_retrain(v90m__answer(D.modem)), 0);
     t = run_until(p_retrained92, 40000);
     s = status();
     printf("    we retrain: data again after %d ms, state %d, %d bit/s down, %d up\n",
@@ -1315,7 +1315,7 @@ static void test_v92_other(void)
 
     /* V.92 not enabled here: the same caller gets V.90 and sends its ODP */
     v92_cfgs(&sc, &cc);
-    sc.modes &= ~ANS_MODE_V92;
+    sc.modulations &= ~V90M_MOD_V92;
     call_begin(&sc, &cc, &line_clean);
     t = run_until(p_ip_up, 80000);
     CHECK(t > 0);
@@ -1323,13 +1323,13 @@ static void test_v92_other(void)
     CHECK_EQ_I(s->modulation, ANS_MOD_V90);
     CHECK_EQ_I(C.vc.d_v92, 0);
     CHECK_EQ_I(C.odp_bypass, 0);
-    CHECK_EQ_I(answer_odp_bypass(&D.modem), 0);
+    CHECK_EQ_I(answer_odp_bypass(v90m__answer(D.modem)), 0);
     CHECK_EQ_I(s->error_control, 1);
 
     /* callers without V.92 against the V.92-enabled server: the V.90 modem
      * of the tests above, and a V.34 modem */
     v90_cfgs(&sc, &cc);
-    sc.modes |= ANS_MODE_V92; sc.max_up = 48000;
+    sc.modulations |= V90M_MOD_V92; sc.max_up = 48000;
     call_begin(&sc, &cc, &line_clean);
     t = run_until(p_ip_up, 60000);
     CHECK(t > 0);
@@ -1338,13 +1338,13 @@ static void test_v92_other(void)
     CHECK_EQ_I(s->modulation, ANS_MOD_V90);
     CHECK_EQ_I(s->bitrate, 50666);
     CHECK(s->rx_bitrate >= 19200 && s->rx_bitrate <= 33600);
-    CHECK_EQ_I(answer_odp_bypass(&D.modem), 0);
+    CHECK_EQ_I(answer_odp_bypass(v90m__answer(D.modem)), 0);
     CHECK_EQ_I(s->error_control, 1);
     CHECK(traffic(RANDOM, 20, 10, 60000, r));
     CHECK_EQ_I(F[DN].n_bad + F[UP].n_bad, 0);
 
     server_cfg(&sc); client_cfg(&cc);
-    sc.modes |= V8_MOD_V34 | ANS_MODE_V90 | ANS_MODE_V92; sc.max_up = 48000;
+    sc.modulations |= V90M_MOD_V34 | V90M_MOD_V90 | V90M_MOD_V92; sc.max_up = 48000;
     cc.v34 = 1;
     call_begin(&sc, &cc, &line_clean);
     t = run_until(p_ip_up, 60000);
@@ -1377,7 +1377,7 @@ static long ccp_call(int ppp_comp, int link_comp, int client, int n, unsigned wa
     v90_cfgs(&sc, &cc);
     sc.ppp.comp = ppp_comp ? (PPP_COMP_DEFLATE | PPP_COMP_MPPC) : 0;
     if (!link_comp) {
-        sc.v42.lapm.comp_tx = sc.v42.lapm.comp_rx = 0;
+        sc.v42.lapm.v42bis_tx = sc.v42.lapm.v42bis_rx = 0;
         sc.v42.lapm.v44_tx = sc.v42.lapm.v44_rx = 0;
     }
     cc.ppp.ccp = client;

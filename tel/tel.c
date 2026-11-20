@@ -1,7 +1,7 @@
 /* Telephony layer: see tel.h. */
 #include <string.h>
 #include "tel.h"
-#include "../modem/sintab.h"
+#include "sintab.h"   /* a copy of libv90modem's modem/sintab.h: the same table, the same tones */
 
 #define MS(x) ((int32_t)(x) * (TEL_FS / 1000))
 
@@ -290,6 +290,15 @@ int16_t tel_tick(tel_t *t, int offhook, int16_t rx)
     at = t->t;
     switch (t->state) {
     case TEL_DIALTONE:
+        if (t->cfg.originate) {
+            /* the box calls the modem that has just gone off hook */
+            if (at >= MS(TEL_ORIG_MS)) {
+                t->answered++; t->answered_this = 1;
+                t->call_s = t->idle_s = 0; t->sec = 0;
+                go(t, TEL_ANSWERED);
+            }
+            break;
+        }
         out = cadence(t, &tn[T_DIAL], at);
         if (at >= MS(DIALTONE_MAX_MS)) go(t, TEL_TIMEOUT);
         break;

@@ -11,12 +11,12 @@
  * a linear sample interface, without V.90). The tick is the only clock: it
  * also advances the millisecond timers of V.42 and PPP.
  *
- * V.90 (cfg.modes with ANS_MODE_V90): PCM downstream, V.34 upstream, so the
+ * V.90 (cfg.modulations with V90M_MOD_V90): PCM downstream, V.34 upstream, so the
  * two directions run at different rates (dce_status_t.bitrate towards the
  * caller, .rx_bitrate from it). V.42 and PPP sit on it exactly as on
  * V.22bis: the modem's data mode is a transparent synchronous bit stream.
  *
- * V.92 (ANS_MODE_V92 next to ANS_MODE_V90): PCM both ways when the caller
+ * V.92 (V90M_MOD_V92 next to V90M_MOD_V90): PCM both ways when the caller
  * asks for it in Phase 2; nothing changes above the modem, except that such
  * a caller skips the ODP / ADP exchange (V.92 9.3.1: both modems V.92 and
  * LAPM in V.8) and the detection timer is lengthened for it. Offer V.92
@@ -44,14 +44,14 @@
  * The V.42 endpoint is then put straight into its start-stop mode.
  *
  * Portable C99, integer only, no allocation, no globals, not reentrant per
- * object. Callbacks run inside the tick; from a callback only dce_send_ip
+ * object. The modem and the V.42 endpoint (libv90modem) live in the dce_t's
+ * own memory (v90m_init, v90m_ec_init). Callbacks run inside the tick; from a callback only dce_send_ip
  * and dce_get_status may be called. */
 #ifndef V90D_DCE_H
 #define V90D_DCE_H
 #include <stddef.h>
 #include <stdint.h>
-#include "answer.h"
-#include "v42.h"
+#include "v90modem.h"
 #include "ppp.h"
 
 typedef enum {
@@ -79,17 +79,17 @@ typedef enum {
 typedef struct {
     /* modem */
     int      tx_level;         /* transmit RMS, 16-bit sample units */
-    unsigned modes;            /* what we offer: V8_MOD_V34 | V8_MOD_V22 | V8_MOD_V21 | ANS_MODE_V90 | ANS_MODE_V92 */
+    unsigned modulations;      /* what we offer: V90M_MOD_* */
     int      alaw;             /* G.711 law of the codec: 0 = mu-law, 1 = A-law */
     int      echo_delay;       /* V.90: samples until the echo of a codeword we send
                                   starts to come back (line driver buffering);
                                   -1 = measured in every call (see p34d.h) */
     int      max_down, max_up; /* V.90: rate ceilings in bit/s, 0 = none (V.92 upstream: up to 48000) */
-    /* bench settings (answer.h); 0 = as it always was */
+    /* bench settings (v90modem.h); 0 = as it always was */
     int      rx_linear;        /* the codec receives in 16-bit linear: the owner uses dce_tick_lin */
     int      max_tx_code;      /* INFO0d maximum downstream power code, 1..31; 0 = 23 (-12 dBm0) */
     /* V.42: answerer settings (role is forced to answerer) */
-    v42ec_cfg_t v42;
+    v90m_ec_cfg v42;
     /* 0 = raise two timers whose defaults are too short for slow lines to
      * suit the line rates once they are known (they are never lowered):
      *   LAPM T401 to one maximum frame at the transmit rate plus two at the
@@ -110,6 +110,10 @@ typedef struct {
     /* with raw_rx: 1 = error control and compression stay as v42 says (a
      * terminal program calling a bulletin board, srv/bbs.h); 0 = none */
     int      raw_ec;
+    /* bench: the box calls (the modem on the port was told ATA): the
+     * modem in the calling role (V.34, V.32bis, V.22bis, V.22, V.21 so far) and V.42
+     * as the originator */
+    int      originate;
     /* closing sequence limits, ms; 0 = the defaults in brackets */
     uint32_t flush_ms;         /* wait for PPP's last frames to go out [5000] */
     uint32_t release_ms;       /* wait for the answer to DISC [3000] */
@@ -124,7 +128,7 @@ typedef struct {
     /* modem */
     int modem_connected;       /* carrier up, data mode */
     int used_v8;
-    int modulation;            /* ANS_MOD_* (kept after the call ends; V.92 and V.90 can
+    int modulation;            /* V90M_CONN_* (kept after the call ends; V.92 and V.90 can
                                   follow each other across a retrain) */
     /* line rates, bit/s (kept after the call ends). They differ on a V.90
      * call (for example 50666 and 28800) and are equal otherwise. */
@@ -135,11 +139,11 @@ typedef struct {
     uint32_t connect_ms;       /* call_ms when the modem connected (0 = it never did) */
 
     /* V.42 */
-    int v42_state;             /* V42EC_* */
-    int v42_reason;            /* V42LAPM_R_* / V42EC_R_* once disconnected */
+    int v42_state;             /* V90M_EC_* */
+    int v42_reason;            /* V90M_EC_R_* once disconnected */
     int error_control;         /* 1 = LAPM connection up, 0 = none / start-stop */
     int comp_tx, comp_rx;      /* compression in force towards / from the caller */
-    int comp_alg;              /* which: V42EC_COMP_V42BIS or V42EC_COMP_V44; 0 = none */
+    int comp_alg;              /* which: V90M_EC_COMP_V42BIS or V90M_EC_COMP_V44; 0 = none */
     unsigned long lapm_tx_i, lapm_rx_i;      /* I frames */
     unsigned long lapm_retx;                 /* I frames sent again */
     unsigned long lapm_rx_bad;               /* frames discarded by the HDLC receiver */
@@ -172,8 +176,8 @@ typedef struct dce {
     dce_cfg_t   cfg;
     dce_state_t state;
     dce_end_t   end_reason;
-    answer_t    modem;
-    v42ec_t     v42;
+    v90m_t     *modem;         /* in modem_mem */
+    v90m_ec_t  *v42;           /* in v42_mem */
     ppp_t       ppp;
     int         v42_on;        /* v42ec_init done */
     int         moving;        /* the modem carried data at the last sample */
@@ -193,10 +197,12 @@ typedef struct dce {
     unsigned long octets_down, octets_up;
     uint8_t     raw_q[DCE_RAW_QUEUE];  /* raw_rx set: octets waiting for the line */
     size_t      raw_head, raw_n;
+    union { v90m_align a; uint8_t b[V90M_MEM_SIZE]; } modem_mem;
+    union { v90m_align a; uint8_t b[V90M_EC_MEM_SIZE]; } v42_mem;
 } dce_t;
 
 /* Defaults: transmit level 3000, V.22bis and V.21 offered (V.90 is not: add
- * ANS_MODE_V90 to modes when the owner uses dce_tick_pcm), mu-law, V.42 defaults for
+ * V90M_MOD_V90 to modulations when the owner uses dce_tick_pcm), mu-law, V.42 defaults for
  * an answerer (detection, fallback to start-stop, V.42 bis both ways),
  * ppp_config_default(). Fill in cfg->ppp (auth, users, addresses, ip_rx). */
 void dce_cfg_default(dce_cfg_t *cfg);
@@ -223,7 +229,7 @@ int dce_tick_lin(dce_t *d, int16_t rx, uint8_t *tx);
 /* The same with linear samples, for everything but V.90: rx is the sample
  * received from the line, *tx receives the sample to transmit (0 once the
  * call has ended). Use one of the two tick functions for a call, not both.
- * Do not enable ANS_MODE_V90 with this one. */
+ * Do not enable V90M_MOD_V90 with this one. */
 int dce_tick(dce_t *d, int16_t rx, int16_t *tx);
 
 /* Queue an IP packet for the caller. Returns 0, or PPP_ERR_DOWN (IP is not

@@ -63,7 +63,7 @@ int  pump_write(pump_t *p, const uint8_t in[PUMP_BLOCK]); /* 0, or -1: full */
  * (2s + 33) * 2^(c + 2) - 132 with chord c and step s of the inverted
  * codeword, for A-law (2s + 1) * 8 in chord 0 and (2s + 33) * 2^(c + 2)
  * above (even bits inverted on the wire); bit 7 set is positive. The same
- * numbers as v90/v90_pcm.c (test_pump checks all 512). */
+ * numbers as libv90modem's v90/v90_pcm.c (test_pump checks all 512). */
 int16_t  pump_lin16(int alaw, uint8_t cw);
 void     pump_lin16_table(int alaw, int16_t t[256]);
 

@@ -5,6 +5,7 @@
 #ifndef V90D_DCE_TEST_HARNESS_H
 #define V90D_DCE_TEST_HARNESS_H
 #include "dce.h"
+#include "v90modem_priv.h"   /* the tests look at the modem's internals */
 #include "caller.h"
 
 #define FS       8000

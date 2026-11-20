@@ -8,6 +8,7 @@
 #include <string.h>
 #include "test.h"
 #include "srv.h"
+#include "v90modem_priv.h"   /* the tests look at the modem's internals */
 #include "line.h"
 #include "console.h"
 #include "dclist.h"
@@ -1504,7 +1505,7 @@ static void test_v92_call(void)
     CHECK(S.status.down_bps >= 40000); CHECK(S.status.up_bps > 33600 && S.status.up_bps <= 48000);
     CHECK_EQ_I(S.status.v42, ST_V42_LAPM);
     printf("    SNR %.1f dB, round trip %u ms, echo delay found %d samples\n", S.status.snr_x10 / 10.0,
-           (unsigned)S.status.rtd_ms, S.dce.modem.u.v92.ecd.delay);
+           (unsigned)S.status.rtd_ms, v90m__answer(S.dce.modem)->u.v92.ecd.delay);
     CHECK(S.status.snr_x10 > 200 && S.status.snr_x10 < 700);
     exchange(20);
     hang_up();
@@ -1546,7 +1547,7 @@ static void test_v92_call(void)
     place_call("5551234", 6000);
     start_modem(4, "alice", "wonderland");
     run_ms(12000);
-    CHECK_EQ_I(S.dce.modem.modulation, ANS_MOD_V90);
+    CHECK_EQ_I(v90m__answer(S.dce.modem)->modulation, ANS_MOD_V90);
     CHECK_EQ_I(C.vc.d_v92, 0);
     hang_up();
 }

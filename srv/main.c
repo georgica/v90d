@@ -303,11 +303,11 @@ static void log_last_call(int port)
           (unsigned)h->down_bps, (unsigned)h->up_bps, (unsigned)h->duration_s);
     if (h->modulation) {
         /* the call object is left as it ended: what the link layer did */
-        v42ec_status_t v;
+        v90m_ec_status v;
         char comp[96];
-        v42ec_get_status(&S[port].dce.v42, &v);
+        v90m_ec_get_status(S[port].dce.v42, &v);
         /* send/receive direction; V.44 has its values per direction */
-        if (v.comp_alg == V42EC_COMP_V44)
+        if (v.comp_alg == V90M_EC_COMP_V44)
             snprintf(comp, sizeof comp, "V.44 %s/%s %d/%d codewords, string %d/%d, history %d/%d",
                      v.comp_tx ? "on" : "off", v.comp_rx ? "on" : "off", v.v44_n2_tx, v.v44_n2_rx,
                      v.v44_n7_tx, v.v44_n7_rx, v.v44_n8_tx, v.v44_n8_rx);
@@ -332,7 +332,8 @@ static void raw_from_modem(void *ctx, const uint8_t *oct, size_t n)
 static void usage(void)
 {
     fprintf(stderr, "usage: v90d [-c FILE] -l LINE [-l LINE2] [-d N] [-i LAN-IF] [-t TUN] [-A GATEWAY] [-D FETCH-COMMAND] [-G REPORT-PROGRAM] [-E LEASE-COMMAND] [-v]\n       v90d [-c FILE] -p\n"
-                    "bench: [-R l|c per port, e.g. lc] [-P 1..31: maximum downstream power code] [-w|-W FILE: record port 1|2]\n");
+                    "bench: [-R l|c per port, e.g. lc] [-P 1..31: maximum downstream power code] [-w|-W FILE: record port 1|2]\n"
+                    "       [-o: the box calls a modem that goes off hook (told ATA): V.34, V.32bis, V.22bis, V.22, V.21]\n");
     exit(2);
 }
 
@@ -348,13 +349,13 @@ int main(int argc, char **argv)
     int16_t lin[LINE_BLOCK]; int is_lin = 0, blk_lin[PORTS] = { 0, 0 }, cap_lin = 0, max_tx_code = 0;
     const char *rx_formats = "";        /* -R */
     uint32_t seed = 0, now_ms = 0, listen_addr = 0, calls_seen[PORTS] = { 0, 0 };
-    int opt, print_net = 0, line_law[PORTS] = { 0, 0 }, r, offhook = 0, i, p, blocks = 0, echo_delay = -1, listen_warned = 0;
+    int opt, print_net = 0, line_law[PORTS] = { 0, 0 }, r, offhook = 0, i, p, blocks = 0, echo_delay = -1, listen_warned = 0, originate = 0;
     struct sigaction sa;
     const char *cap_path = NULL; int cap_fd = -1, cap_port = 0; long cap_n = 0;
     /* the telephone lights: <prefix><port>/brightness, lit while the port is off hook */
     const char *led_prefix = "/sys/class/leds/ht802:phone"; int led_fd[PORTS] = { -1, -1 }, led_on[PORTS] = { -1, -1 };
 
-    while ((opt = getopt(argc, argv, "c:l:d:i:t:vpw:W:L:A:N:R:P:D:G:E:O:V:M:S:XB:b:J:T:")) != -1) {
+    while ((opt = getopt(argc, argv, "c:l:d:i:t:vpow:W:L:A:N:R:P:D:G:E:O:V:M:S:XB:b:J:T:")) != -1) {
         switch (opt) {
         case 'c': cfg_path = optarg; break;
         case 'l': if (n_ports >= PORTS) usage(); line_spec[n_ports++] = optarg; break;
@@ -371,6 +372,7 @@ int main(int argc, char **argv)
         }
         case 'v': force_debug = 1; log_level = CFG_LOG_DEBUG; break;
         case 'p': print_net = 1; break;
+        case 'o': originate = 1; break;   /* bench: the box calls (srv_set_originate) */
         case 'L': led_prefix = optarg; break;
         case 'N': fw_tool = optarg; break;      /* the flash tool behind the Firmware page */
         case 'O': netsvc_set_vpnprog(optarg); break;  /* the OpenVPN program; "" = none */
@@ -430,6 +432,7 @@ int main(int argc, char **argv)
         srv_set_raw(&S[p], raw_from_modem);
         srv_set_echo_delay(&S[p], echo_delay);
         srv_set_max_tx_code(&S[p], max_tx_code);
+        srv_set_originate(&S[p], originate);
         if ((size_t)p < strlen(rx_formats)) {
             if (line_set_linear(&line[p], rx_formats[p] == 'l') < 0)
                 logf_(CFG_LOG_WARN, "line %s: cannot set the receive format: %s", line_spec[p], strerror(errno));

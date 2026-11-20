@@ -1,6 +1,6 @@
 # v90d/dce - one answered call end to end: modem + V.42 + PPP glued together.
-# Host tests and ARM cross tests under qemu. The sources of the three
-# libraries are compiled straight from their directories.
+# Host tests and ARM cross tests under qemu. dce.c and PPP are compiled from
+# their directories; the modem and V.42 come from libv90modem (../libv90m.mk).
 #
 #   make test       complete simulated calls on the host
 #   make test-arm   the same test cross-built (-static) and run under qemu-arm,
@@ -18,24 +18,19 @@ ARM_CC  ?= $(wildcard $(CURDIR)/../toolchain/*/bin/arm-linux-gcc)
 QEMU    ?= qemu-arm-static
 ARM_ARGS ?= quick
 
-INC     := -I. -Itest -I../test -I../modem -I../v90 -I../v92 -I../v34 -I../sim -I../v42 -I../ppp -I../ppp/test
+include ../libv90m.mk
 
-# every modem source: the answer modem keeps growing new parts (V.90 phases),
-# and with V.90 it needs the PCM transmitter (v90/) and the V.34 upstream
-# receiver (v34/) as well; with V.92 the PCM upstream receiver (v92/)
-MODEM_SRC := $(wildcard ../modem/*.c) $(wildcard ../v90/*.c) $(wildcard ../v34/*.c) $(wildcard ../v32/*.c) $(wildcard ../v92/*.c)
-V42_SRC := $(addprefix ../v42/,v42_hdlc.c v42_detect.c v42_comp.c v44_comp.c v42_lapm.c v42.c)
+INC     := -I. -Itest -I../test -I../ppp -I../ppp/test $(LIBV90M_DEV_INC)
+
 PPP_SRC := $(addprefix ../ppp/,ppp_md5.c ppp_hdlc.c ppp_fsm.c ppp_deflate.c ppp_mppc.c ppp.c)
-# the product: everything that would be linked into the daemon
-LIB_SRC := dce.c $(MODEM_SRC) $(V42_SRC) $(PPP_SRC)
-# test side only: channel simulator, calling modem, PPP client, calling DCE
-SIM_SRC := $(addprefix ../sim/,g711.c noise.c filt.c channel.c v8call.c callpeer.c \
-             p2a.c qammod.c p34a.c p2c.c v34peer.c v32call.c v32line.c resamp.c \
-             v92a.c v92chan.c v92call.c) ../v90/test/v90_dec.c
-SUP_SRC := test/harness.c test/caller.c ../ppp/test/pppc.c $(SIM_SRC)
-HDRS    := dce.h test/harness.h test/caller.h ../test/test.h ../ppp/test/pppc.h \
-           $(wildcard ../modem/*.h ../sim/*.h ../v42/*.h ../ppp/*.h ../v90/*.h ../v34/*.h ../v92/*.h ../v90/test/*.h)
-TESTS   := test_call
+# the product: everything that would be linked into the daemon (the modem
+# and V.42 come from libv90modem)
+LIB_SRC := dce.c $(PPP_SRC)
+# test side only: calling DCE and PPP client; the simulated line and
+# calling modem are in libv90modem's dev archive
+SUP_SRC := test/harness.c test/caller.c ../ppp/test/pppc.c
+HDRS    := dce.h test/harness.h test/caller.h ../test/test.h ../ppp/test/pppc.h $(wildcard ../ppp/*.h) $(LIBV90M)/include/v90modem.h
+TESTS   := test_call test_orig
 
 .PHONY: all test test-arm test-findings clean
 all: test
@@ -43,8 +38,8 @@ all: test
 $(BUILD):
 	@mkdir -p $(BUILD)
 
-$(BUILD)/test_%: test/test_%.c $(LIB_SRC) $(SUP_SRC) $(HDRS) | $(BUILD)
-	$(CC) $(CFLAGS) $(INC) -o $@ $< $(LIB_SRC) $(SUP_SRC) $(LDLIBS)
+$(BUILD)/test_%: test/test_%.c $(LIB_SRC) $(SUP_SRC) $(HDRS) $(LIBV90M_DEV) | $(BUILD)
+	$(CC) $(CFLAGS) $(INC) -o $@ $< $(LIB_SRC) $(SUP_SRC) $(LIBV90M_DEV) $(LDLIBS)
 
 test: $(addprefix $(BUILD)/,$(TESTS))
 	@echo "== running host tests =="
@@ -52,15 +47,15 @@ test: $(addprefix $(BUILD)/,$(TESTS))
 	 if [ $$fail -eq 0 ]; then echo "ALL TESTS PASS"; else echo "TESTS FAILED"; exit 1; fi
 
 # cross-build the same test for the ARM926 target and run it under qemu
-$(BUILD)/arm_test_%: test/test_%.c $(LIB_SRC) $(SUP_SRC) $(HDRS) | $(BUILD)
-	$(ARM_CC) $(CFLAGS) $(INC) -static -o $@ $< $(LIB_SRC) $(SUP_SRC) $(LDLIBS)
+$(BUILD)/arm_test_%: test/test_%.c $(LIB_SRC) $(SUP_SRC) $(HDRS) $(LIBV90M_DEV_ARM) | $(BUILD)
+	$(ARM_CC) $(CFLAGS) $(INC) -static -o $@ $< $(LIB_SRC) $(SUP_SRC) $(LIBV90M_DEV_ARM) $(LDLIBS)
 
 test-arm: $(addprefix $(BUILD)/arm_,$(TESTS))
 	@echo "== running ARM tests under $(QEMU) =="
 	@fail=0; for t in $(TESTS); do echo "[arm] $$t"; $(QEMU) ./$(BUILD)/arm_$$t $(ARM_ARGS) || fail=1; done; \
 	 if [ $$fail -eq 0 ]; then echo "ALL ARM TESTS PASS"; else echo "ARM TESTS FAILED"; exit 1; fi
 
-# not part of "test": documents open problems in ../modem ../v42 ../ppp
+# not part of "test": documents open problems in libv90modem and ../ppp
 test-findings: $(BUILD)/test_findings
 	@echo "== known problems (every FAIL below is an open finding) =="
 	./$(BUILD)/test_findings

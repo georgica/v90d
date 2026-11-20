@@ -1,6 +1,7 @@
 build/
 __pycache__/
 /toolchain/
+/libv90modem/
 /peers/
 /recon/
 /fw/dl/

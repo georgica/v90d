@@ -39,6 +39,7 @@ typedef struct {
     uint32_t   seed;
     int        echo_delay;
     int        rx_linear, max_tx_code;  /* bench settings: srv_set_rx_linear, srv_set_max_tx_code */
+    int        originate;               /* bench setting: srv_set_originate */
     int        in_call;         /* the call object is running */
     int        episode;         /* the line is off hook and not yet in the history */
     int        hangup_sent;
@@ -84,6 +85,11 @@ void    srv_set_echo_delay(srv_t *s, int samples);
  * 1..31; 0 = the default 23 (-12 dBm0). */
 void    srv_set_rx_linear(srv_t *s, int on);
 void    srv_set_max_tx_code(srv_t *s, int code);
+/* Bench: the box calls. A modem on the port that goes off hook (it was told
+ * ATA) is called at once by the library's calling modem (V.34, V.32bis,
+ * V.22bis, V.22, V.21 so far), with V.42 as the originator. Takes effect with the next
+ * call; the port takes no calls in this mode. */
+void    srv_set_originate(srv_t *s, int on);
 /* service = saturn (config.h, saturn.h). raw_out receives, with the ctx of
  * srv_init, what the caller's modem sends. srv_link() tells about the call
  * in progress: SATURN_WAIT, SATURN_CALL with the address dialled in *addr,
