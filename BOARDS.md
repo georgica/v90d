@@ -173,6 +173,34 @@ NAND/mtd partition map. A NAND dump (for the real images and the stock device
 tree) now means an external programmer on the `XT26Q01`, not MaskROM, since
 MaskROM is signature-gated once OTP is burned.
 
+### What the first UART log shows
+
+A power-on capture from `J404` (115200 8N1) gives the Rockchip boot chain up to
+U-Boot: the DDR init blob (64 MB DDR2), ARM Trusted Firmware (`BL31 v1.3`, built
+Oct 2021, no OP-TEE), then the hand-off to U-Boot at `0x600000`. Two facts fall
+out of it:
+
+- **The normal world is 32-bit.** The log says `Next images boot on AArch32
+  mode` and `SPSR = 0x1d3` (AArch32, SVC, ARM state, little-endian), and
+  `0x600000` is the usual RK3308 32-bit U-Boot base. So U-Boot and the kernel
+  are built ARMv7, not ARM64. v90d's userspace is already 32-bit ARM, so a port
+  keeps the same ABI for the daemon, modem, PPP and web stack: it is a new
+  kernel, device tree and SLIC driver, not a word-size change.
+- **U-Boot is silent.** Every stage up to BL31 prints on the pad, then U-Boot
+  (now running at `0x600000`) prints nothing: no banner, no autoboot prompt. The
+  Rockchip stages share one debug UART, so this is almost certainly a suppressed
+  production console (`silent=1` / `CONFIG_SILENT_CONSOLE`), not a different
+  port. A silenced console usually still reads the line, so it may still be
+  interruptible.
+
+So Q1 and Q2 are still open, and the **RX line is the next thing to confirm**: a
+working RX lets us try to break into the console as BL31 hands off, and, if the
+console is silent end to end, lets us read whether the kernel prints a command
+line and mtd map later. The ATF vintage (v1.3, Oct 2021) pins this to the RK3308
+Linux SDK whose U-Boot is 2017.09, which verifies the kernel only when a signed
+FIT image was shipped with `FIT_SIGNATURE` turned on; a plain kernel boot is not
+verified. That leans toward Q2 being favourable, but it is unproven.
+
 ## The HT801, from two flash dumps
 
 Two complete flash dumps of HT801 units are public
