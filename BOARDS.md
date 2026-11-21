@@ -201,6 +201,29 @@ Linux SDK whose U-Boot is 2017.09, which verifies the kernel only when a signed
 FIT image was shipped with `FIT_SIGNATURE` turned on; a plain kernel boot is not
 verified. That leans toward Q2 being favourable, but it is unproven.
 
+A later test settled both questions, and closed the on-device route. RX works,
+the console does not break in (tried repeatedly), and nothing prints for five
+minutes after `SPSR = 0x1d3`. So the signed U-Boot is silent end to end and
+gives no console and no kernel output: RAM-boot and writing kernel and rootfs
+under the signed U-Boot are both out, short of an external SPI-NAND programmer.
+
+### The practical path: v90d off the box, over a SIP ATA
+
+Because the modem is SoC-agnostic DSP on 8 kHz samples, it does not have to run
+on the box at all. The HT802V2 stays on stock firmware as a plain SIP ATA; a PBX
+(Asterisk) bridges the call to the v90d modem over its AudioSocket interface, and
+v90d answers on Linux. The caller's hardware modem dials the ATA as before. This
+runs today, on any ATA or PBX, and sidesteps the signed firmware entirely.
+
+The target is **V.34**, not V.90: V.90 and V.92 need the answering side to place
+exact PCM codewords on a clean digital path, which a transcoding SIP leg does not
+give; V.34 (up to 33600 both ways) is analogue and survives. It needs G.711 end
+to end (no lossy codec such as G.729 or Opus), echo cancellation and any
+fax/modem DSP off, and a fixed or absent jitter buffer (an adaptive one forces
+retrains). AudioSocket carries 8 kHz 16-bit linear, which libv90modem already
+accepts (`rx_linear`), so no G.711 round-trip is needed on our side. First tried
+by willsowerbutts against the HT802V2 on stock firmware, and it works.
+
 ## The HT801, from two flash dumps
 
 Two complete flash dumps of HT801 units are public
