@@ -116,6 +116,20 @@ static void test_wrong_part(void)
     CHECK(C.frames < 40);
 }
 
+/* a Si3226x rev C (ID revision code 3, e.g. 0xB3): accepted as its own family
+ * and brought up with the Si3226x general values, no Si3217x balance reload */
+static void test_si3226x(void)
+{
+    slic_info i;
+    fresh(); C.reg[0] = 0xB3;
+    CHECK_EQ_I(slic_init(&B, &CFG, &i), SLIC_OK);
+    CHECK_EQ_I(i.id, 0xB3);
+    CHECK_EQ_I(i.family, SLIC_FAM_3226X);
+    CHECK(i.vbat_mv > 55000 && i.vbat_mv < 62000);          /* talk battery up */
+    CHECK_EQ_I((long)C.ram[1547], 0x00500000);              /* DCDC_OVTHRESH: the Si3226x value, not the Si3217x 0x01300000 */
+    CHECK_EQ_I((long)C.ram[768], 0x051EB82A);               /* VBATR_EXPECT: 80 V, the Si3226x value */
+}
+
 /* an empty footprint: the bus floats and reads whatever it was left at */
 static void floats(chipsim *c, uint8_t reg, uint8_t v) { (void)v; c->reg[reg] = 0xB2; }
 static void test_present(void)
@@ -226,6 +240,7 @@ int main(void)
     test_healthy();
     test_companded_second_port();
     test_wrong_part();
+    test_si3226x();
     test_present();
     test_dead_ram();
     test_short_circuit();

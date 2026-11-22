@@ -61,6 +61,31 @@ static const ram_val general2[] = {
     { R_CM_SPEEDUP_TIMER, 0x000F0000 }, { R_VCM_HYST, 0x00206280 },
 };
 
+/* Si3226x LCQCUK general parameters (refs/si3226x-facts.md and the Silicon
+ * Labs Si3226x LCQCUK constants, our own code): the same fields the Si3217x
+ * `general` table sets, at the shared rev-C RAM addresses, carrying the
+ * Si3226x values where they differ (line-driver power, battery hysteresis,
+ * ringing battery, and the DC-DC error, over/under-voltage and over-current
+ * thresholds). The VOV overhead and AC-ADC gain are left to the part's
+ * defaults and the ring preset, as the Si3226x general configuration does.
+ * Experimental, patch-free like the Si3217x; to be confirmed on hardware. */
+static const ram_val general_3226x[] = {
+    { R_P_TH_HVIC, 0x005B05B2 }, { R_COEF_P_HVIC, 0x07FEB800 }, { R_BAT_HYST, 0x000AD000 },
+    { R_VBATH_EXPECT, 0x03D70A20 },                 /* 60 V talk battery (same as Si3217x) */
+    { R_VBATR_EXPECT, 0x051EB82A },                 /* 80 V ringing battery */
+    { R_PWRSAVE_TIMER, 0x0FFF0000 }, { R_OFFHOOK_THRESH, 0x01999A00 },
+    { R_VBAT_TRACK_MIN, 0x00F00000 }, { R_VBAT_TRACK_MIN_RNG, 0x00F00000 },
+    { R_THERM_DBI, 0x00800000 }, { R_DCDC_VERR, 0x00F18900 }, { R_DCDC_VERR_HYST, 0x00809D80 },
+    { R_PD_UVLO, 0x00400000 }, { R_PD_OVLO, 0x00400000 }, { R_PD_OCLO, 0x00200000 }, { R_PD_SWDRV, 0x00400000 },
+    { R_DCDC_UVPOL, 0 }, { R_DCDC_RNGTYPE, 0x00200000 },
+    { R_DCDC_ANA_TOFF, 0x00300000 }, { R_DCDC_ANA_TONMIN, 0x00100000 }, { R_DCDC_ANA_TONMAX, 0x00FFC000 },
+    { R_DCDC_OITHRESH, 0x00800000 },
+    { R_DCDC_OITHRESH_LO, 0x00000000 }, { R_DCDC_OITHRESH_HI, 0x01C00000 },
+    { R_DCDC_OVTHRESH, 0x00500000 },
+    { R_DCDC_UVTHRESH, 0x00000000 }, { R_DCDC_UVHYST, 0x00500000 },
+    { R_SCALE_KAUDIO, 0x03A2E8BA },
+};
+
 /* Longitudinal balance trim. These are the results the stock firmware holds
  * for THIS unit (it reloads them instead of calibrating at every start); a
  * different unit should run the calibration instead. User-mode locations. */
@@ -230,8 +255,14 @@ int slic_init(const ps_bus *b, const slic_cfg *cfg, slic_info *info)
 
     info->stage = 0; info->vbat_mv = 0;
     info->id = ps_rd(b, PS_ID);
-    /* a ProSLIC (bit 7), not a line-side device, revision C */
-    if (info->id == 0xFF || !(info->id & 0x80) || (info->id & 0x07) != 2) return SLIC_E_ID;
+    /* a ProSLIC (bit 7), not a line-side device; the revision code names the
+     * family at rev C: 2 = Si3217x, 3 = Si3226x (refs/si3226x-facts.md). They
+     * share the rev-C RAM map, so only the general values and a couple of
+     * bring-up steps differ. */
+    if (info->id == 0xFF || !(info->id & 0x80)) return SLIC_E_ID;
+    if ((info->id & 0x07) == 2) info->family = SLIC_FAM_3217X;
+    else if ((info->id & 0x07) == 3) info->family = SLIC_FAM_3226X;
+    else return SLIC_E_ID;
     ps_wr(b, PS_PCMRXLO, 0x5A);
     if (ps_rd(b, PS_PCMRXLO) != 0x5A) return SLIC_E_BUS;
     ps_wr(b, PS_PCMRXLO, 0);
@@ -242,7 +273,8 @@ int slic_init(const ps_bus *b, const slic_cfg *cfg, slic_info *info)
     info->stage = 1;
     ps_wr(b, PS_ENHANCE, 0x00);
     ps_wr(b, PS_AUTO, 0x2F);
-    if ((r = load(b, general, N(general))) != 0) return r;
+    if (info->family == SLIC_FAM_3226X) { if ((r = load(b, general_3226x, N(general_3226x))) != 0) return r; }
+    else if ((r = load(b, general, N(general))) != 0) return r;
     ps_wr(b, 68, (uint8_t)((ps_rd(b, 68) & 0xF9) | 0x60));    /* GPIO1/2: analogue sense inputs */
     ps_wr(b, PS_PDN, 0x80);                                    /* monitor ADC stays on with the line open */
     if ((r = load(b, general2, N(general2))) != 0) return r;
@@ -268,7 +300,12 @@ int slic_init(const ps_bus *b, const slic_cfg *cfg, slic_info *info)
     /* 5: line parameters, with the line open */
     info->stage = 5;
     ps_wr(b, PS_LINEFEED, 0);
-    if ((r = load(b, balance, N(balance))) != 0 || (r = load(b, dcfeed, N(dcfeed))) != 0 ||
+    /* balance[] are the Si3217x reference unit's own longitudinal-balance
+     * calibration results, reloaded in place of calibrating. They do not
+     * apply to the Si3226x (a different part and board), which calibrates
+     * instead (the stage-5 calibrate below). */
+    if (info->family == SLIC_FAM_3217X && (r = load(b, balance, N(balance))) != 0) { converter_off(b, DCDC_OFF); return r; }
+    if ((r = load(b, dcfeed, N(dcfeed))) != 0 ||
         (r = load(b, impedance, N(impedance))) != 0) { converter_off(b, DCDC_OFF); return r; }
     ps_wr(b, 45, IMPEDANCE_RA);
     if ((r = load(b, impedance2, N(impedance2))) != 0) { converter_off(b, DCDC_OFF); return r; }
