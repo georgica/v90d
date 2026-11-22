@@ -694,6 +694,7 @@ static void lcp_down(ppp_fsm_t *f)
     p->auth_proto = PPP_AUTH_NONE;
     p->auth_done = p->auth_ok = 0;
     p->mppe_have = 0;
+    p->mppe_started = 0;
     /* back to the default framing */
     p->peer_mru = PPP_MAX_MRU;
     p->tx_accm = 0xffffffffu;
@@ -1433,7 +1434,17 @@ static void ccp_up(ppp_fsm_t *f)
      * are in hand) do we encrypt, keying both from the MS-CHAPv2 master keys.
      * Otherwise the option-18 result is MPPC, settled below. */
     if (p->cw_mppe && p->cpend_mppe && p->mppe_have) {
+        /* Re-keying MPPE from the master key restarts the RC4 key schedule at
+         * coherency 0 -- the same keystream over new data. So key it only on
+         * the first CCP open of an authentication; if CCP re-opens after MPPE
+         * has run, end the link rather than reuse the keystream. */
+        if (p->mppe_started) {
+            p->tx_alg = p->rx_alg = PPP_COMP_NONE;
+            request_close(p, PPP_END_ENCRYPT_REQUIRED);
+            return;
+        }
         ppp_mppe_begin(&p->mppe, p->mppe_send, p->mppe_recv, 16, PPP_MPPE_FORCE_NONE);
+        p->mppe_started = 1;
         p->tx_alg = p->rx_alg = PPP_COMP_MPPE;
         p->tx_seq = p->rx_seq = 0;
         p->rx_wait = 0;
@@ -1695,7 +1706,11 @@ static void comp_input(ppp_t *p, const uint8_t *info, size_t n)
          * wait-for-reset state here. */
         r = ppp_mppe_decrypt(&p->mppe, info, n, p->cbuf_rx, sizeof p->cbuf_rx);
         if (r < 1) {
-            comp_rx_error(p);
+            /* a bad coherency count or header: drop it and count it. The
+             * stateless cipher resynchronises on the next good packet, so we
+             * do NOT send a CCP Reset-Request -- a CCP renegotiation would
+             * re-key MPPE and reuse the keystream. */
+            p->cnt.comp_rx_errors++;
             return;
         }
         d = p->cbuf_rx;

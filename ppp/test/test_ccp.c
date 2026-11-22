@@ -1647,6 +1647,18 @@ static void test_mppe(void)
     CHECK_EQ_I(ip_count, 1);
     CHECK_EQ_I((int)ip_len, (int)sizeof ip);
     CHECK(memcmp(ip_got, ip, sizeof ip) == 0);
+
+    /* a CCP re-open must not re-key MPPE (that would reuse the RC4
+     * keystream over new data): the link ends instead. A Configure-Request
+     * in Opened makes CCP renegotiate; completing it drives ccp_up again. */
+    push_cp(P_CCP, PPP_CONF_REQ, 40, ompe, 6);
+    pull();
+    if (scr_new)
+        push_cp(P_CCP, PPP_CONF_ACK, scr.d[1], scr.d + 4, scr.n - 4);
+    pull();
+    ppp_tick(&S, 10);
+    pull();
+    CHECK_EQ_I(status()->end_reason, PPP_END_ENCRYPT_REQUIRED);
 }
 
 /* MPPE fails closed: with encryption required, no cleartext datagram is sent

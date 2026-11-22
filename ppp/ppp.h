@@ -302,6 +302,8 @@ typedef struct ppp {
     uint8_t  cpend_opt, cpend_wbits, cchosen;
     uint8_t  tx_alg, rx_alg;   /* PPP_COMP_* */
     uint8_t  cw_mppe, cpend_mppe;  /* our request / the peer's offers MPPE on option 18 */
+    uint8_t  mppe_started;     /* MPPE was keyed once this authentication; a CCP
+                                  re-open must not re-key it (RC4 keystream reuse) */
     ppp_mppe_t mppe;           /* the encryption session, keyed at ccp_up */
     uint16_t tx_seq, rx_seq;   /* Deflate sequence number / MPPC coherency count */
     uint8_t  rx_wait;          /* out of step: waiting for the peer to start afresh */
