@@ -272,6 +272,30 @@ Whoever can should make the first start on an HT801 from RAM
 attached. Installing from the stock web page is expected to be safe as
 well, for the reason in point 1, with the network cable plugged in.
 
+## Flash chips and Ethernet PHYs
+
+HT80x boards ship with different parts for the 16 MiB QSPI flash and the
+Ethernet PHY. The loader and kernel now handle the ones the stock firmware
+does (its chip table and PHY set, studied from the vendor GPL kernel; our own
+clean code, `refs/qspi-chips.md`):
+
+- **Flash (16 MiB, the only size the A/B layout fits):** EON EN25QX128A
+  (the reference unit, tested), Winbond W25Q128FV (`ef4018`/`ef6018`),
+  GigaDevice GD25Q128 (`c84018`), Micron N25Q128 (`20ba18`). The loader reads
+  the JEDEC id and drives each one's quad mode; a flash chip it does not know
+  is handled like an unknown board (hands back to stock, no brick).
+- **Ethernet PHY:** the stock kernel uses the generic/fixed PHY path, so most
+  IEEE PHYs work without a chip-specific driver; we keep that and also build
+  the drivers for the parts seen in the field (Motorcomm YT8512H on the HT802
+  V2.5A, Micrel KSZ8081 on V1.x) plus a few common 10/100 parts.
+
+The **SLIC** is the exception: the vendor's line bring-up and its RAM patch are
+in closed userspace, not in the GPL, so v90d's SLIC support is written from the
+Silicon Labs Si3217x documentation and confirmed on the bench, per revision. It
+drives Si3217x **rev C** (patch-free, the reference unit). Another revision is a
+separate bring-up: it needs that revision's data and a unit to measure battery
+and ring voltage on, and it fails safe until then (the port stays dead, logged).
+
 ## Adding a board
 
 The code that is specific to a board is small and in three places, so

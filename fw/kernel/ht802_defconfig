@@ -59,7 +59,17 @@ CONFIG_TUN=y
 CONFIG_STMMAC_ETH=y
 CONFIG_STMMAC_PLATFORM=y
 CONFIG_DWMAC_GENERIC=y
+# Ethernet PHY drivers for the chips HT80x boards carry. The stock kernel
+# drives them through the generic/fixed PHY path (no chip-specific driver);
+# we keep that (genphy is always in phylib) and add the proper drivers as a
+# safety net: Motorcomm YT8512H (HT802 V2.5A), Micrel KSZ8081 (V1.x, issue
+# #4), and a few common 10/100 parts in case another revision differs.
 CONFIG_MOTORCOMM_PHY=y
+CONFIG_MICREL_PHY=y
+CONFIG_REALTEK_PHY=y
+CONFIG_SMSC_PHY=y
+CONFIG_DAVICOM_PHY=y
+CONFIG_FIXED_PHY=y
 # CONFIG_WLAN is not set
 # CONFIG_INPUT is not set
 # CONFIG_SERIO is not set
