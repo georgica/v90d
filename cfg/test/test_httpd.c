@@ -2013,7 +2013,7 @@ static void test_login(void)
     strcpy(sid, sid_of(resp));
     CHECK_EQ_I((int)strlen(sid), 32);
     for (i = 0; i < 32; i++) CHECK((sid[i] >= '0' && sid[i] <= '9') || (sid[i] >= 'a' && sid[i] <= 'f'));
-    snprintf(hdr, sizeof hdr, "\r\nSet-Cookie: sid=%s; Path=/; HttpOnly; SameSite=Strict\r\n", sid);
+    snprintf(hdr, sizeof hdr, "\r\nSet-Cookie: sid=%s; Path=/; HttpOnly; SameSite=Lax\r\n", sid);
     CHECK(strstr(resp, hdr) != NULL);
     CHECK(strstr(resp, "s3cret") == NULL);
 

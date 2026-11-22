@@ -477,7 +477,13 @@ static void login_done(httpd_t *h, httpd_conn_t *c, uint32_t now)
     if (session_new(h, now)) { respond_text(h, c, 500, NULL, NULL, 0, now); return; }
     sb_init(&s, extra, sizeof extra);
     sb_puts(&s, "Location: /\r\nSet-Cookie: sid="); sb_puts(&s, h->sid);
-    sb_puts(&s, "; Path=/; HttpOnly; SameSite=Strict\r\n");
+    /* Lax, not Strict: the session cookie is carried by ordinary top-level
+     * navigations, including the server's own redirects between / and /login.
+     * With Strict some browsers (Firefox) withhold it on a redirected GET, so
+     * / -> /login -> / loops forever on a blank page. Lax still keeps the
+     * cookie off cross-site POSTs and subresources, and the Host/Origin check
+     * above guards the forms, so CSRF stays covered. */
+    sb_puts(&s, "; Path=/; HttpOnly; SameSite=Lax\r\n");
     sb_end(&s);
     respond_text(h, c, 303, extra, NULL, 0, now);
 }
