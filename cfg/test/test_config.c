@@ -120,8 +120,8 @@ static void test_port2(void)
     CHECK(cfg_write(&c, 1, text, sizeof text) > 0);
     CHECK(strstr(text, "\nppp_peer = 10.64.64.2\nppp_peer2 = 10.64.64.9\n") != NULL);
     CHECK(strstr(text, "\n[modem2]\nmodulations = v22bis\nmax_downstream = 2400\nmax_upstream = 1200\n"
-                       "tx_level = -15\nv42 = on\nv42bis = off\nv92 = off\nrings = 3\nlaw = alaw\n") != NULL);
-    CHECK(strstr(text, "\nv42bis = on\nv92 = on\nrings = 2\n") != NULL);          /* port 1 */
+                       "tx_level = -15\nv42 = on\nv42bis = off\nv92 = off\nx2 = off\nk56 = off\nrings = 3\nlaw = alaw\n") != NULL);
+    CHECK(strstr(text, "\nv42bis = on\nv92 = on\nx2 = off\nk56 = off\nrings = 2\n") != NULL);          /* port 1 */
     CHECK(strstr(text, "\n[line2]\nnumber = 5559999\ntones = eu\nbusy_chance = 10\ndrop_mean = 5\n"
                        "session_limit = 60\nidle_timeout = 7\n") != NULL);
     CHECK(strstr(text, "\n[line]\nnumber = 5551111\n") != NULL);
@@ -196,6 +196,8 @@ static void test_defaults(void)
     CHECK_EQ_I(c.v42, 1);
     CHECK_EQ_I(c.v42bis, 1);
     CHECK_EQ_I(c.v92, 1);            /* V.92 is offered unless switched off */
+    CHECK_EQ_I(c.x2, 0);             /* x2 is off unless switched on */
+    CHECK_EQ_I(c.k56, 0);            /* K56flex is off unless switched on */
     CHECK_EQ_I(c.rings, 1);
     CHECK_EQ_I(c.law, CFG_LAW_ULAW);
     CHECK_EQ_I(c.status_listen, CFG_LISTEN_LAN);
@@ -221,6 +223,36 @@ static void test_defaults(void)
     CHECK(memcmp(&c, &d, sizeof c) == 0);
     CHECK_EQ_I(parse(&d, "# nothing\n\n  ; here\n[modem]\n"), CFG_OK);
     CHECK(memcmp(&c, &d, sizeof c) == 0);
+
+    /* x2 on for one line: accepted, written as on, survives a round trip */
+    {
+        static char t2[CFG_TEXT_MAX];
+        CHECK_EQ_I(parse(&c, "[modem]\nx2 = on\n"), CFG_OK);   /* default modulations carry v34 */
+        CHECK_EQ_I(c.x2, 1); CHECK_EQ_I(c.port2.x2, 0);
+        CHECK(cfg_write(&c, 1, t2, sizeof t2) > 0);
+        CHECK(strstr(t2, "\nv92 = on\nx2 = on\nk56 = off\nrings = 1\n") != NULL);
+        CHECK_EQ_I(cfg_parse(&d, "t", t2, strlen(t2), err, sizeof err), CFG_OK);
+        CHECK(memcmp(&c, &d, sizeof c) == 0);
+        /* x2 may be on for both ports: the daemon serves one heavy call at a time */
+        CHECK_EQ_I(parse(&c, "[modem]\nx2 = on\n[modem2]\nx2 = on\n"), CFG_OK);
+        CHECK_EQ_I(c.x2, 1); CHECK_EQ_I(c.port2.x2, 1);
+    }
+
+    /* K56flex on for one line: accepted, written as on, survives a round trip */
+    {
+        static char t2[CFG_TEXT_MAX];
+        CHECK_EQ_I(parse(&c, "[modem]\nk56 = on\n"), CFG_OK);   /* default modulations carry v34 */
+        CHECK_EQ_I(c.k56, 1); CHECK_EQ_I(c.port2.k56, 0);
+        CHECK(cfg_write(&c, 1, t2, sizeof t2) > 0);
+        CHECK(strstr(t2, "\nv92 = on\nx2 = off\nk56 = on\nrings = 1\n") != NULL);
+        CHECK_EQ_I(cfg_parse(&d, "t", t2, strlen(t2), err, sizeof err), CFG_OK);
+        CHECK(memcmp(&c, &d, sizeof c) == 0);
+        /* x2 and K56flex may both be on, on both ports: the daemon serves one
+         * heavy call at a time */
+        CHECK_EQ_I(parse(&c, "[modem]\nx2 = on\nk56 = on\n[modem2]\nx2 = on\nk56 = on\n"), CFG_OK);
+        CHECK_EQ_I(c.k56, 1); CHECK_EQ_I(c.port2.k56, 1);
+        CHECK_EQ_I(c.x2, 1); CHECK_EQ_I(c.port2.x2, 1);
+    }
 }
 
 static const char full[] =
@@ -410,6 +442,12 @@ static const struct { const char *text; int line; const char *what; } bad[] = {
     { "[ppp]\n\n\nauth = chap\n", 4, "auth: chap needs at least one user" },
     { "[modem]\nv42 = off\n", 2, "v42bis = on needs v42 = on" },
     { "[modem]\nv42 = off\nv42bis = on\n", 3, "v42bis = on needs v42 = on" },
+    { "[modem]\nx2 = yes\n", 2, "x2: 'yes' is not one of: on, off" },
+    { "[modem]\nmodulations = v90\nx2 = on\n", 3, "[modem] x2 = on needs v34 in modulations" },
+    { "[modem2]\nmodulations = v90\nx2 = on\n", 3, "[modem2] x2 = on needs v34 in modulations" },
+    { "[modem]\nk56 = yes\n", 2, "k56: 'yes' is not one of: on, off" },
+    { "[modem]\nmodulations = v90\nk56 = on\n", 3, "[modem] k56 = on needs v34 in modulations" },
+    { "[modem2]\nmodulations = v90\nk56 = on\n", 3, "[modem2] k56 = on needs v34 in modulations" },
     /* users */
     { "[ppp]\nuser = alice\n", 2, "user: missing secret" },
     { "[ppp]\nuser = alice s3cret extra\n", 2, "user: unexpected text after the secret" },
@@ -678,9 +716,9 @@ static void test_write(void)
     CHECK(strstr(a, "modulations = v90, v34, v32bis, v22bis, v22, v21\n") != NULL);
     CHECK(strstr(a, "tx_level = -12\n") != NULL);
     CHECK(strstr(a, "\n[modem]\nmodulations = v90, v34, v32bis, v22bis, v22, v21\nmax_downstream = 56000\n"
-                    "max_upstream = 33600\ntx_level = -12\nv42 = on\nv42bis = on\nv92 = on\nrings = 1\n") != NULL);
+                    "max_upstream = 33600\ntx_level = -12\nv42 = on\nv42bis = on\nv92 = on\nx2 = off\nk56 = off\nrings = 1\n") != NULL);
     CHECK(strstr(a, "\n[modem2]\nmodulations = v90, v34, v32bis, v22bis, v22, v21\nmax_downstream = 56000\n"
-                    "max_upstream = 33600\ntx_level = -12\nv42 = on\nv42bis = on\nv92 = on\nrings = 1\n") != NULL);
+                    "max_upstream = 33600\ntx_level = -12\nv42 = on\nv42bis = on\nv92 = on\nx2 = off\nk56 = off\nrings = 1\n") != NULL);
     CHECK(strstr(a, "\n[log]\nlevel = info\n") != NULL);
     CHECK(strstr(a, "\n[line]\nnumber = any\ntones = us\nbusy_chance = 0\ndrop_mean = 0\n"
                     "session_limit = 0\nidle_timeout = 0\nservice = internet\ndreamcast_now = off\ndreamcast_lan = off\ndreamcast_upnp = off\ndreamcast_iwango = off\nsaturn_matchmaking = off\n\n[modem2]\n") != NULL);
@@ -700,13 +738,13 @@ static void test_write(void)
     n = cfg_write(&c, 1, a, sizeof a);
     CHECK(n > 0);
     CHECK(strstr(a, "dns2 = none\n") != NULL);
-    CHECK(strstr(a, "\nv42bis = off\nv92 = on\nrings = 10\n") != NULL);
+    CHECK(strstr(a, "\nv42bis = off\nv92 = on\nx2 = off\nk56 = off\nrings = 10\n") != NULL);
     /* PPP compression is written with the rest of [ppp] */
     CHECK(strstr(a, "\necho_interval = 0\ncompression = off\nuser = ") != NULL);
     /* V.92 upstream rates: up to 48000 goes through a write and a parse */
     c.max_up = 48000; c.v92 = 0;
     CHECK(cfg_write(&c, 1, a, sizeof a) > 0);
-    CHECK(strstr(a, "\nmax_upstream = 48000\n") != NULL && strstr(a, "\nv92 = off\nrings = 10\n") != NULL);
+    CHECK(strstr(a, "\nmax_upstream = 48000\n") != NULL && strstr(a, "\nv92 = off\nx2 = off\nk56 = off\nrings = 10\n") != NULL);
     CHECK_EQ_I(parse(&d, a), CFG_OK);
     CHECK_EQ_I(d.max_up, 48000); CHECK_EQ_I(d.v92, 0);
     CHECK_EQ_I(parse(&c, full), CFG_OK);

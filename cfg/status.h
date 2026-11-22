@@ -36,7 +36,9 @@ typedef enum {
     ST_MOD_NONE = 0, ST_MOD_V90, ST_MOD_V34, ST_MOD_V32BIS, ST_MOD_V22BIS,
     ST_MOD_V22, ST_MOD_V21,
     ST_MOD_V92,         /* appended: the values above stay as they were */
-    ST_MOD_BELL103, ST_MOD_BELL212A
+    ST_MOD_BELL103, ST_MOD_BELL212A,
+    ST_MOD_X2,          /* appended: x2 (U.S. Robotics' 56k of 1997) */
+    ST_MOD_K56FLEX      /* appended: K56flex (the 1996 56k, experimental) */
 } st_mod_t;
 
 typedef enum {
@@ -63,7 +65,8 @@ typedef enum {
     ST_END_PPP_CLOSED,      /* peer sent Terminate-Request */
     ST_END_ECHO_TIMEOUT,
     ST_END_LOCAL,           /* daemon shut down or cleared the call */
-    ST_END_ERROR
+    ST_END_ERROR,
+    ST_END_RETRAIN_FAILED   /* a retrain or rate renegotiation could not complete */
 } st_end_t;
 
 /* How a call ended at the telephone level, before or apart from what the

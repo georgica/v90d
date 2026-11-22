@@ -60,6 +60,18 @@
  *   v92 = on                  on | off: offer V.92 PCM upstream to callers
  *                             whose modem asks for it. Has an effect only
  *                             with v90 in modulations.
+ *   x2 = off                  on | off (default off): offer x2 (U.S.
+ *                             Robotics' 56k of 1997) to a caller whose modem
+ *                             does it. Answering only, needs v34 in
+ *                             modulations. May be on for both ports; the
+ *                             daemon still serves only one heavy call (x2 or
+ *                             k56) at a time (x2 data mode takes most of the
+ *                             CPU).
+ *   k56 = off                 on | off (default off): offer K56flex (the
+ *                             1996 56k, experimental) to a caller whose modem
+ *                             does it. Answering only, needs v34 in
+ *                             modulations. Shares the one heavy call at a
+ *                             time with x2.
  *   rings = 1                 rings before answer, 1..10
  *   law = ulaw                ulaw | alaw
  *
@@ -168,7 +180,7 @@ typedef struct {
 typedef struct {
     uint32_t   ppp_peer;
     unsigned   modulations;
-    int        max_down, max_up, tx_level, v42, v42bis, v92, rings, law;
+    int        max_down, max_up, tx_level, v42, v42bis, v92, x2, k56, rings, law;
     char       line_number[CFG_NUMBER_MAX + 1];
     int        line_tones, busy_chance, drop_mean_min, session_limit_min, idle_timeout_min;
     int        service;
@@ -206,6 +218,8 @@ typedef struct {
     int        v42;
     int        v42bis;
     int        v92;             /* 1 = offer V.92 PCM upstream to V.92 callers (needs v90 in modulations to matter) */
+    int        x2;              /* 1 = offer x2 (U.S. Robotics' 56k of 1997) to callers whose modem does it (answering only, needs v34 in modulations; may be on for both ports, but the daemon serves one heavy call at a time) */
+    int        k56;             /* 1 = offer K56flex (the 1996 56k, experimental) to callers whose modem does it (answering only, needs v34 in modulations; shares the one heavy call at a time with x2) */
     int        rings;
     int        law;             /* CFG_LAW_* */
     /* [line] */

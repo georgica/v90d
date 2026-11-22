@@ -77,6 +77,7 @@
 #define PORTS CFG_PORTS
 srv_t           S[PORTS];
 int             n_ports;
+int             heavy_inflight; /* shared heavy-call arbiter: calls now offering x2 or K56flex (one at a time) */
 static httpd_t  H;
 static cfg_t    live;               /* what the settings page shows and edits */
 static const char *cfg_path = "/etc/v90d.conf";
@@ -486,6 +487,7 @@ int main(int argc, char **argv)
         srv_set_echo_delay(&S[p], echo_delay);
         srv_set_max_tx_code(&S[p], max_tx_code);
         srv_set_originate(&S[p], originate);
+        srv_set_heavy_slot(&S[p], &heavy_inflight);   /* one heavy call (x2 or K56flex) at a time across the ports */
         if ((size_t)p < strlen(rx_formats)) {
             if (line_set_linear(&line[p], rx_formats[p] == 'l') < 0)
                 logf_(CFG_LOG_WARN, "line %s: cannot set the receive format: %s", line_spec[p], strerror(errno));

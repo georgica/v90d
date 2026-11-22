@@ -73,7 +73,13 @@ typedef enum {
     DCE_END_PEER_CLOSED,       /* PPP: peer sent Terminate-Request */
     DCE_END_PPP_FAILED,        /* PPP: negotiation, keepalive, loop: see ppp_end */
     DCE_END_LOCAL,             /* dce_hangup() */
-    DCE_END_CLEARDOWN          /* the calling modem cleared down (V.90 9.7): its user hung up */
+    DCE_END_CLEARDOWN,         /* the calling modem cleared down (V.90 9.7): its user hung up */
+    DCE_END_X2_FAILED,         /* x2: the client took it up and its start-up or a rate change failed */
+    DCE_END_RETRAIN_FAILED,    /* a retrain or rate renegotiation could not complete (V.90/V.92
+                                  past the retrain limit; or an x2 client's Tone A retrain in data
+                                  mode, which x2 cannot serve) */
+    DCE_END_K56_FAILED         /* K56flex: the client took it up and its start-up, a renegotiation
+                                  or a retrain did not complete */
 } dce_end_t;
 
 typedef struct {

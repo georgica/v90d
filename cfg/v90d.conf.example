@@ -42,6 +42,15 @@ v42bis = on
 # on: offer V.92 PCM upstream to V.92 callers (then max_upstream may go up
 # to 48000). off (default): V.90, upstream is V.34.
 v92 = on
+# on: offer x2 (U.S. Robotics' 56k of 1997) to a caller whose modem does it.
+# Answering only, needs v34 in modulations, mu-law only. May be on for both
+# ports; the daemon still serves only one heavy call (x2 or k56) at a time
+# (x2 data mode takes most of the CPU). off (default).
+x2 = off
+# on: offer K56flex (the 1996 56k) to a caller whose modem does it.
+# Experimental. Answering only, needs v34 in modulations, mu-law only. Shares
+# the one heavy call at a time with x2. off (default).
+k56 = off
 # rings before answer
 rings = 1
 # ulaw (default) or alaw

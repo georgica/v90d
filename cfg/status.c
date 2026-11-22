@@ -11,18 +11,18 @@ int page_consoles_tab;      /* page.h */
 
 /* names: machine form for JSON, display form for HTML */
 static const char *const line_names[]  = { "idle", "ringing", "negotiating", "connected", "hanging up" };
-static const char *const mod_json[]    = { "none", "v90", "v34", "v32bis", "v22bis", "v22", "v21", "v92", "bell103", "bell212a" };
-static const char *const mod_html[]    = { "none", "V.90", "V.34", "V.32bis", "V.22bis", "V.22", "V.21", "V.92", "Bell 103", "Bell 212A" };
+static const char *const mod_json[]    = { "none", "v90", "v34", "v32bis", "v22bis", "v22", "v21", "v92", "bell103", "bell212a", "x2", "k56flex" };
+static const char *const mod_html[]    = { "none", "V.90", "V.34", "V.32bis", "V.22bis", "V.22", "V.21", "V.92", "Bell 103", "Bell 212A", "x2", "K56flex" };
 static const char *const v42_json[]    = { "off", "detect", "lapm", "async" };
 static const char *const v42_html[]    = { "off", "detecting", "LAPM", "async fallback" };
 static const char *const ppp_names[]   = { "dead", "establish", "authenticate", "network",
                                            "running", "terminate" };
 static const char *const end_json[]    = { "none", "caller_hangup", "carrier_lost", "train_failed",
                                            "auth_failed", "ppp_closed", "echo_timeout", "local",
-                                           "error" };
+                                           "error", "retrain_failed" };
 static const char *const end_html[]    = { "-", "caller hung up", "carrier lost", "negotiation failed",
                                            "authentication failed", "closed by peer",
-                                           "echo timeout", "cleared locally", "error" };
+                                           "echo timeout", "cleared locally", "error", "retrain failed" };
 static const char *const tel_json[]    = { "answered", "busy", "wrong_number", "abandoned",
                                            "dropped", "session_limit", "idle" };
 static const char *const tel_html[]    = { "answered", "busy", "wrong number", "abandoned",

@@ -158,6 +158,16 @@ void srv_set_originate(srv_t *s, int on)
     tel_reconfigure(&s->tel, &t);
 }
 void srv_set_max_tx_code(srv_t *s, int code) { s->max_tx_code = code >= 1 && code <= 31 ? code : 0; }
+void srv_set_heavy_slot(srv_t *s, int *slot) { s->heavy_slot = slot; }
+
+/* give back the heavy-call slot this call reserved (see srv_set_heavy_slot) */
+static void heavy_release(srv_t *s)
+{
+    if (s->heavy_held) {
+        if (s->heavy_slot && *s->heavy_slot > 0) (*s->heavy_slot)--;
+        s->heavy_held = 0;
+    }
+}
 
 void srv_set_clock(srv_t *s, uint32_t utc_seconds) { s->clock = utc_seconds; }
 
@@ -213,6 +223,25 @@ static void call_start(srv_t *s)
     if (c->modulations & (CFG_MOD_V22BIS | CFG_MOD_V22)) d.modulations |= V90M_MOD_V22 | V90M_MOD_BELL212A;
     /* 300 bit/s: V.21 and, for a caller that turns out to be one, Bell 103 */
     if (c->modulations & CFG_MOD_V21) d.modulations |= V90M_MOD_V21 | V90M_MOD_BELL103;
+    /* x2 (U.S. Robotics' 56k of 1997) and K56flex (the 1996 56k, experimental):
+     * each offered alongside V.34 when the owner turned it on for this line.
+     * The library needs V.34 with either (without it V90M_ENOTSUP), offers
+     * neither on an A-law line, and never in the calling role (both are
+     * answering only). Either may be on for both ports, but only one heavy
+     * call runs at a time: two heavy data-mode calls do not fit the CPU, so a
+     * line offers x2 or K56flex only while the shared slot is free, and holds
+     * it for this call. Only one modulation can connect per call, so a call
+     * that offers both still needs just one slot. Reserved here (before the
+     * originate strip below) only when we really will offer one, so the slot
+     * never leaks. */
+    if ((c->x2 || c->k56) && (c->modulations & CFG_MOD_V34) && !s->originate
+        && (bbs || (!for_console(c) && !for_link(c)))
+        && (!s->heavy_slot || *s->heavy_slot == 0)) {
+        if (c->x2)  d.modulations |= V90M_MOD_X2;
+        if (c->k56) d.modulations |= V90M_MOD_K56;
+        s->heavy_held = 1;
+        if (s->heavy_slot) (*s->heavy_slot)++;
+    }
     d.alaw = c->law == CFG_LAW_ALAW;
     d.echo_delay = s->echo_delay;
     d.rx_linear = s->rx_linear; d.max_tx_code = s->max_tx_code;
@@ -262,6 +291,8 @@ static st_mod_t mod_of(int m)
     switch (m) {
     case V90M_CONN_V90: return ST_MOD_V90;
     case V90M_CONN_V92: return ST_MOD_V92;
+    case V90M_CONN_X2: return ST_MOD_X2;
+    case V90M_CONN_K56FLEX: return ST_MOD_K56FLEX;
     case V90M_CONN_V34: return ST_MOD_V34;
     case V90M_CONN_V32BIS: return ST_MOD_V32BIS;
     case V90M_CONN_V22BIS: return ST_MOD_V22BIS;
@@ -344,6 +375,7 @@ static void episode_end(srv_t *s)
             switch (d->end_reason) {
             case DCE_END_NO_CARRIER: h.end = ST_END_TRAIN_FAILED; break;
             case DCE_END_CARRIER_LOST: h.end = ST_END_CARRIER_LOST; break;
+            case DCE_END_RETRAIN_FAILED: h.end = ST_END_RETRAIN_FAILED; break;
             case DCE_END_AUTH_FAILED: h.end = ST_END_AUTH_FAILED; break;
             case DCE_END_PEER_CLOSED: case DCE_END_V42_RELEASED: h.end = ST_END_PPP_CLOSED; break;
             case DCE_END_PPP_FAILED: h.end = d->ppp_end == PPP_END_KEEPALIVE ? ST_END_ECHO_TIMEOUT : ST_END_ERROR; break;
@@ -378,6 +410,7 @@ uint8_t srv_tick_lin(srv_t *s, int offhook, int16_t lin)
         else if (s->last_tel == TEL_ANSWERED && s->in_call) {
             /* dropped, or the caller hung up: the call object is abandoned as it is */
             dce_get_status(&s->dce, &s->ds);
+            heavy_release(s);
             s->in_call = 0;
         }
         if (ts != TEL_ONHOOK) s->episode = 1;
@@ -394,6 +427,7 @@ uint8_t srv_tick_lin(srv_t *s, int offhook, int16_t lin)
         if (s->tel.want_hangup && !s->hangup_sent) { dce_hangup(&s->dce); s->hangup_sent = 1; }
         if (!dce_tick_lin(&s->dce, lin, &out)) {
             dce_get_status(&s->dce, &s->ds);
+            heavy_release(s);
             s->in_call = 0;
             tel_call_ended(&s->tel);
             s->last_tel = s->tel.state;

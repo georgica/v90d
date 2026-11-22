@@ -459,16 +459,22 @@ static int after_sample(dce_t *d)
     v90m_state ms;
     v90m_get_state(d->modem, &ms);
     if (ms.end != V90M_END_NONE) {
-        end_now(d, d->state == DCE_TRAINING ? DCE_END_NO_CARRIER
+        end_now(d, ms.end == V90M_END_X2_FAILED ? DCE_END_X2_FAILED
+                 : ms.end == V90M_END_K56_FAILED ? DCE_END_K56_FAILED
+                 : ms.end == V90M_END_RETRAIN_FAILED ? DCE_END_RETRAIN_FAILED
+                 : d->state == DCE_TRAINING ? DCE_END_NO_CARRIER
                  : ms.end == V90M_END_CLEARDOWN_FAR ? DCE_END_CLEARDOWN : DCE_END_CARRIER_LOST);
         return 0;
     }
     {
-        /* data stopped for a retrain or a rate renegotiation and is back:
-         * the link layer asks at once where the caller stands */
+        /* data stops for a retrain or a rate renegotiation and comes back:
+         * tell error control at both edges so it holds the frame the stop
+         * cut and reopens with whole flags, then LAPM asks at once where the
+         * caller stands */
         /* (V.90 and V.92: both directions out of a rate renegotiation,
          * which leaves the modem "connected" and not "retraining") */
         if (ms.moving && !d->moving && d->v42_on) v90m_ec_line_restored(d->v42);
+        else if (!ms.moving && d->moving && d->v42_on) v90m_ec_line_stopped(d->v42);
         d->moving = ms.moving;
     }
     if (d->state != DCE_TRAINING && ms.connected
@@ -620,6 +626,9 @@ const char *dce_end_name(dce_end_t why)
     case DCE_END_PPP_FAILED:   return "PPP failed";
     case DCE_END_LOCAL:        return "local hangup";
     case DCE_END_CLEARDOWN:    return "caller cleared down";
+    case DCE_END_X2_FAILED:    return "x2 failed";
+    case DCE_END_RETRAIN_FAILED: return "retrain failed";
+    case DCE_END_K56_FAILED:   return "k56flex failed";
     }
     return "?";
 }

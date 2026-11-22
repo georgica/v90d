@@ -1767,6 +1767,70 @@ static void test_lin_scale(void)
     CHECK_EQ_I(line_lin_sample(-32768), -32767);
 }
 
+/* the heavy-call slot: a call reserves it when x2 or K56flex is offered and
+ * gives it back at the end; while another line holds it, this line offers
+ * neither (srv.c). x2 and K56flex share the one slot. */
+static void test_heavy_guard(void)
+{
+    cfg_t c; int slot = 0;
+    base_cfg(&c);
+    c.modulations |= CFG_MOD_V34;       /* x2/K56flex are offered only alongside V.34 */
+    c.x2 = 1;
+    line_init();
+    srv_init(&S, &c, 31, lan_rx, NULL);
+    srv_set_heavy_slot(&S, &slot);
+    srv_set_clock(&S, 1000000000u);
+    run_ms(300);
+    CHECK_EQ_I(S.heavy_held, 0); CHECK_EQ_I(slot, 0);
+
+    /* a call with x2 on: the slot is reserved for the life of the call, even
+     * though this caller connects V.22bis and does not take x2 up */
+    place_call("5551234", 9000);
+    CHECK_EQ_I(S.tel.state, TEL_ANSWERED);
+    CHECK_EQ_I(S.heavy_held, 1); CHECK_EQ_I(slot, 1);
+    start_modem(0, "alice", "wonderland");
+    CHECK(wait_ip(20000) > 0);
+    CHECK_EQ_I(S.heavy_held, 1); CHECK_EQ_I(slot, 1);
+    hang_up();
+    CHECK_EQ_I(S.heavy_held, 0); CHECK_EQ_I(slot, 0);     /* given back at the end */
+
+    /* the guard: the other line already holds the one heavy slot, so this call
+     * offers neither x2 nor K56flex and does not touch the slot */
+    slot = 1;
+    place_call("5551234", 9000);
+    CHECK_EQ_I(S.tel.state, TEL_ANSWERED);
+    CHECK_EQ_I(S.heavy_held, 0); CHECK_EQ_I(slot, 1);
+    start_modem(0, "alice", "wonderland");
+    CHECK(wait_ip(20000) > 0);
+    CHECK_EQ_I(S.heavy_held, 0); CHECK_EQ_I(slot, 1);     /* not ours to hold or free */
+    hang_up();
+    CHECK_EQ_I(slot, 1);
+
+    /* K56flex shares the same slot: x2 off, k56 on reserves it too */
+    slot = 0;
+    c.x2 = 0; c.k56 = 1;
+    srv_init(&S, &c, 31, lan_rx, NULL);
+    srv_set_heavy_slot(&S, &slot);
+    srv_set_clock(&S, 1000000000u);
+    run_ms(300);
+    place_call("5551234", 9000);
+    CHECK_EQ_I(S.tel.state, TEL_ANSWERED);
+    CHECK_EQ_I(S.heavy_held, 1); CHECK_EQ_I(slot, 1);
+    hang_up();
+    CHECK_EQ_I(S.heavy_held, 0); CHECK_EQ_I(slot, 0);
+
+    /* both off: nothing reserved */
+    c.x2 = 0; c.k56 = 0;
+    srv_init(&S, &c, 31, lan_rx, NULL);
+    srv_set_heavy_slot(&S, &slot);
+    srv_set_clock(&S, 1000000000u);
+    run_ms(300);
+    place_call("5551234", 9000);
+    CHECK_EQ_I(S.tel.state, TEL_ANSWERED);
+    CHECK_EQ_I(S.heavy_held, 0); CHECK_EQ_I(slot, 0);
+    hang_up();
+}
+
 int main(void)
 {
     test_lin_scale();
@@ -1797,6 +1861,7 @@ int main(void)
     test_bbsdial_self();
     test_v34_call();
     test_v32bis_call();
+    test_heavy_guard();
     /* the same server on a line with linear receive (srv_tick_lin): whole
      * calls of each kind, with the same expectations */
     printf("  with linear receive:\n");

@@ -40,6 +40,8 @@ typedef struct {
     int        echo_delay;
     int        rx_linear, max_tx_code;  /* bench settings: srv_set_rx_linear, srv_set_max_tx_code */
     int        originate;               /* bench setting: srv_set_originate */
+    int       *heavy_slot;      /* shared across ports: calls now offering a heavy modulation, x2 or K56flex (NULL = no guard) */
+    int        heavy_held;      /* 1 = this call reserved the heavy slot */
     int        in_call;         /* the call object is running */
     int        episode;         /* the line is off hook and not yet in the history */
     int        hangup_sent;
@@ -90,6 +92,13 @@ void    srv_set_max_tx_code(srv_t *s, int code);
  * V.22bis, V.22, V.21 so far), with V.42 as the originator. Takes effect with the next
  * call; the port takes no calls in this mode. */
 void    srv_set_originate(srv_t *s, int on);
+/* Share a heavy-call arbiter across the ports: *slot counts the calls that
+ * currently offer a heavy modulation (x2 or K56flex). A line offers x2 or
+ * K56flex only while the count is 0, so at most one heavy call runs at a time
+ * (each is about two thirds of the CPU in data mode, so two do not fit). NULL
+ * (the default) means no guard: a single-port build or a test offers them
+ * whenever the configuration allows. Set once, before the first call. */
+void    srv_set_heavy_slot(srv_t *s, int *slot);
 /* service = saturn (config.h, saturn.h). raw_out receives, with the ctx of
  * srv_init, what the caller's modem sends. srv_link() tells about the call
  * in progress: SATURN_WAIT, SATURN_CALL with the address dialled in *addr,

@@ -365,7 +365,7 @@ static void test_enums(void)
     CHECK(has(html, "<p class=\"sum\">V.92 &middot; 52000 / 44000 bit/s</p>"));
     /* the upstream bar is scaled to 48000 for V.92: 44000 is 91% of it */
     CHECK(has(html, "<small>Upstream</small><b>44000</b> bit/s<div class=\"m\"><i style=\"width:91%\"></i></div></div>"));
-    s.modulation = (st_mod_t)10;
+    s.modulation = (st_mod_t)12;
     CHECK(status_render_json(&s, json, sizeof json) > 0);
     CHECK(has(json, "\"modulation\":\"unknown\""));
     status_init(&s); s.line = ST_LINE_CONNECTED; s.modulation = ST_MOD_V34;
@@ -533,7 +533,7 @@ static void test_calls(void)
             { 4294967295u, "2106-02-07T06:28:15Z" },
         };
         static const char *const ends[] = { "none", "caller_hangup", "carrier_lost", "train_failed",
-            "auth_failed", "ppp_closed", "echo_timeout", "local", "error", "unknown" };
+            "auth_failed", "ppp_closed", "echo_timeout", "local", "error", "retrain_failed", "unknown" };
         char want[64];
         for (i = 0; i < sizeof d / sizeof d[0]; i++) {
             status_init(&s);
@@ -545,11 +545,11 @@ static void test_calls(void)
             CHECK(has(json, want));
             if (!has(json, want)) printf("  want %s\n", want);
         }
-        for (i = 0; i < 10; i++) {
+        for (i = 0; i < 11; i++) {
             status_init(&s);
             memset(&c, 0, sizeof c);
             c.end = (st_end_t)i;
-            c.modulation = (st_mod_t)(i == 9 ? 99 : 0);
+            c.modulation = (st_mod_t)(i == 10 ? 99 : 0);
             status_add_call(&s, &c);
             CHECK(status_render_json(&s, json, sizeof json) > 0);
             CHECK(json_ok(json));

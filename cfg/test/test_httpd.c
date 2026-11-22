@@ -886,7 +886,7 @@ static void test_settings_post(void)
     CHECK(strstr(resp, "SECRET") == NULL);
     CHECK_EQ_I(code_of("GET /config HTTP/1.0\r\n\r\n"), 200);
     CHECK(strstr(resp, "\nnumber = 5550000\n") != NULL && strstr(resp, "\nbusy_chance = 40\n") != NULL);
-    CHECK(strstr(resp, "\nmax_upstream = 48000\n") != NULL && strstr(resp, "\nv42bis = on\nv92 = on\nrings = 1\n") != NULL);
+    CHECK(strstr(resp, "\nmax_upstream = 48000\n") != NULL && strstr(resp, "\nv42bis = on\nv92 = on\nx2 = off\nk56 = off\nrings = 1\n") != NULL);
     CHECK(strstr(resp, "SECRET") == NULL);
 
     /* a value that is not acceptable: the form again with the reason, 400,

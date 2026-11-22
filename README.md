@@ -21,6 +21,9 @@ the stock firmware stays in the box, one click away.
 - Answers a modem on either phone port: V.92, V.90, V.34, V.32bis, V.22bis,
   V.22, V.21, Bell 212A and Bell 103, with V.42 error correction and V.42bis / V.44
   compression.
+- Can also offer the two pre-V.90 56k schemes to a modem that speaks one:
+  x2 (U.S. Robotics, 1997) and K56flex (1996, experimental). Both are
+  answering only, off by default, and share one call at a time; see "Modems".
 - PPP server with users and passwords, MPPC compression for Windows
   callers, NAT to the network on the Ethernet port, DNS handed to the
   caller.
@@ -119,9 +122,9 @@ binary in the image and no closed blob.
 
 The modem is [libv90modem](https://github.com/georgica/libv90modem)
 (GPL-2.0-only), a library in a repository of its own that v90d builds
-against. `fw/setup.sh` fetches a pinned release of it (checked by SHA-256,
-like the other dependencies) and unpacks it next to this tree; to build
-against a working copy instead, say where it is with `LIBV90M=`
+against. `fw/setup.sh` fetches a pinned release of it (0.5.0, checked by
+SHA-256, like the other dependencies) and unpacks it next to this tree; to
+build against a working copy instead, say where it is with `LIBV90M=`
 (`libv90m.mk`).
 
 `DESIGN.md` says how it is built and why, `HARDWARE.md` what was learned
@@ -152,7 +155,7 @@ Tested with three modems:
 |---|---|
 | Conexant CX93001 (USB) | every modulation in the list; V.90 about 50666 down / 28800 up; V.92 about 50666 / 25333 (`AT+PIG=0`) |
 | U.S. Robotics 5686 (external, V.92) | V.90 54666 / 26400; V.92 54666 / 40000 (it asks for PCM upstream by itself) |
-| U.S. Robotics 56K of 1998 (x2 with the V.90 upgrade) | V.90 54666 to 56000 / 28800 |
+| U.S. Robotics 56K of 1998 (x2 with the V.90 upgrade) | V.90 54666 to 56000 / 28800; x2 56000 / 28800 when x2 is offered |
 
 From Linux pppd and from Dial-Up Networking in Windows 98 SE and Windows XP
 with MPPC compression: V.90 in both, V.92 in Windows 98 SE with the 5686.
@@ -163,11 +166,23 @@ caller's modem asks for PCM upstream; a caller that does not ask gets V.90,
 and so does a V.92 call whose start-up does not succeed (with the Conexant
 about one call in seven). An upgraded box keeps the setting it had.
 
-The two 56k schemes from before V.90, x2 and K56flex, are not spoken; a
-modem that has nothing newer is left with V.34 (the 1998 modem above
-connected at V.34, 28800, when its V.90 start-up did not go through; no
-modem without V.90 has been tried). Neither scheme was ever published; see
-libv90modem/DESIGN.md, 4.2b.
+The two 56k schemes from before V.90, x2 (U.S. Robotics, 1997) and K56flex
+(1996), can be offered to a modem that speaks one. Both are answering only,
+need V.34 in the modulation list, are mu-law only, and are off by default;
+turn either on per port on the Modem page (`x2 = on`, `k56 = on`). They are
+heavy in data mode, so the box serves only one such call at a time across
+both ports, whichever scheme it is.
+
+x2 is tested: the U.S. Robotics 56K of 1998 above connected at x2 56000 /
+28800 with a PPP session that held for 3:50 (the caller hung up), clean,
+once libv90modem 0.5.0's error-control fixes were in. A caller that does not
+take x2 up is left with V.90 or V.34 as before.
+
+K56flex is experimental and has not been tried on a real K56flex modem yet
+(a Zoom 2948 is on the way); it has only been proven against Motorola's SM56
+soft modem run under emulation, which connects at 32000 to 52000 down and
+28800 up. Leave it off unless you are testing it. Neither scheme was ever
+published; see libv90modem/DESIGN.md, 4.2b.
 
 The bulletin board calls were made with the Conexant: a board's own
 number from Linux (227 835 3422 reached Telehack), and 1 800 BBS DIAL from

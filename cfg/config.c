@@ -16,13 +16,13 @@ static const char *const sec_names[S_COUNT] = { "network", "ppp", "modem", "line
 enum {
     K_LAN, K_ADDRESS, K_NETMASK, K_GATEWAY, K_PPP_LOCAL, K_PPP_PEER, K_DNS1, K_DNS2, K_NAT,
     K_AUTH, K_MRU, K_ECHO, K_USER,
-    K_MODS, K_MAXDOWN, K_MAXUP, K_TXLEVEL, K_V42, K_V42BIS, K_V92, K_RINGS, K_LAW,
+    K_MODS, K_MAXDOWN, K_MAXUP, K_TXLEVEL, K_V42, K_V42BIS, K_V92, K_X2, K_K56, K_RINGS, K_LAW,
     K_NUMBER, K_TONES, K_BUSY, K_DROP, K_SESSION, K_IDLE, K_SERVICE, K_DCNOW, K_DCLAN, K_DCUPNP, K_DCIWANGO, K_SATMATCH,
     K_LISTEN, K_PORT, K_ADMINPW,
     K_LEVEL,
     K_PPP_PEER2, K_ARCHIVE, K_COMPRESSION, K_UPDATE_CHECK,
     /* port 2: the keys of [modem] and [line] again, in the same order */
-    K2_MODS, K2_MAXDOWN, K2_MAXUP, K2_TXLEVEL, K2_V42, K2_V42BIS, K2_V92, K2_RINGS, K2_LAW,
+    K2_MODS, K2_MAXDOWN, K2_MAXUP, K2_TXLEVEL, K2_V42, K2_V42BIS, K2_V92, K2_X2, K2_K56, K2_RINGS, K2_LAW,
     K2_NUMBER, K2_TONES, K2_BUSY, K2_DROP, K2_SESSION, K2_IDLE, K2_SERVICE, K2_DCNOW, K2_DCLAN, K2_DCUPNP, K2_DCIWANGO, K2_SATMATCH,
     K_COUNT
 };
@@ -33,7 +33,7 @@ static const struct { int sec; const char *name; } keydefs[K_COUNT] = {
     { S_NETWORK, "dns1" }, { S_NETWORK, "dns2" }, { S_NETWORK, "nat" },
     { S_PPP, "auth" }, { S_PPP, "mru" }, { S_PPP, "echo_interval" }, { S_PPP, "user" },
     { S_MODEM, "modulations" }, { S_MODEM, "max_downstream" }, { S_MODEM, "max_upstream" },
-    { S_MODEM, "tx_level" }, { S_MODEM, "v42" }, { S_MODEM, "v42bis" }, { S_MODEM, "v92" },
+    { S_MODEM, "tx_level" }, { S_MODEM, "v42" }, { S_MODEM, "v42bis" }, { S_MODEM, "v92" }, { S_MODEM, "x2" }, { S_MODEM, "k56" },
     { S_MODEM, "rings" }, { S_MODEM, "law" },
     { S_LINE, "number" }, { S_LINE, "tones" }, { S_LINE, "busy_chance" },
     { S_LINE, "drop_mean" }, { S_LINE, "session_limit" }, { S_LINE, "idle_timeout" },
@@ -42,7 +42,7 @@ static const struct { int sec; const char *name; } keydefs[K_COUNT] = {
     { S_LOG, "level" },
     { S_NETWORK, "ppp_peer2" }, { S_NETWORK, "archive" }, { S_PPP, "compression" }, { S_SYSTEM, "update_check" },
     { S_MODEM2, "modulations" }, { S_MODEM2, "max_downstream" }, { S_MODEM2, "max_upstream" },
-    { S_MODEM2, "tx_level" }, { S_MODEM2, "v42" }, { S_MODEM2, "v42bis" }, { S_MODEM2, "v92" },
+    { S_MODEM2, "tx_level" }, { S_MODEM2, "v42" }, { S_MODEM2, "v42bis" }, { S_MODEM2, "v92" }, { S_MODEM2, "x2" }, { S_MODEM2, "k56" },
     { S_MODEM2, "rings" }, { S_MODEM2, "law" },
     { S_LINE2, "number" }, { S_LINE2, "tones" }, { S_LINE2, "busy_chance" },
     { S_LINE2, "drop_mean" }, { S_LINE2, "session_limit" }, { S_LINE2, "idle_timeout" },
@@ -75,7 +75,7 @@ static void port_take(cfg_port_t *p, const cfg_t *c)
 {
     p->ppp_peer = c->ppp_peer;
     p->modulations = c->modulations; p->max_down = c->max_down; p->max_up = c->max_up;
-    p->tx_level = c->tx_level; p->v42 = c->v42; p->v42bis = c->v42bis; p->v92 = c->v92;
+    p->tx_level = c->tx_level; p->v42 = c->v42; p->v42bis = c->v42bis; p->v92 = c->v92; p->x2 = c->x2; p->k56 = c->k56;
     p->rings = c->rings; p->law = c->law;
     memcpy(p->line_number, c->line_number, sizeof p->line_number);
     p->line_tones = c->line_tones; p->busy_chance = c->busy_chance; p->drop_mean_min = c->drop_mean_min;
@@ -87,7 +87,7 @@ static void port_give(const cfg_port_t *p, cfg_t *c)
 {
     c->ppp_peer = p->ppp_peer;
     c->modulations = p->modulations; c->max_down = p->max_down; c->max_up = p->max_up;
-    c->tx_level = p->tx_level; c->v42 = p->v42; c->v42bis = p->v42bis; c->v92 = p->v92;
+    c->tx_level = p->tx_level; c->v42 = p->v42; c->v42bis = p->v42bis; c->v92 = p->v92; c->x2 = p->x2; c->k56 = p->k56;
     c->rings = p->rings; c->law = p->law;
     memcpy(c->line_number, p->line_number, sizeof c->line_number);
     c->line_tones = p->line_tones; c->busy_chance = p->busy_chance; c->drop_mean_min = p->drop_mean_min;
@@ -219,6 +219,8 @@ static int validate_port(const cfg_t *c, int o, char *msg, int *k1)
     *k1 = K_V42 + o;       if (en(msg, K_V42 + o, c->v42, 2)) return -1;
     *k1 = K_V42BIS + o;    if (en(msg, K_V42BIS + o, c->v42bis, 2)) return -1;
     *k1 = K_V92 + o;       if (en(msg, K_V92 + o, c->v92, 2)) return -1;
+    *k1 = K_X2 + o;        if (en(msg, K_X2 + o, c->x2, 2)) return -1;
+    *k1 = K_K56 + o;       if (en(msg, K_K56 + o, c->k56, 2)) return -1;
     *k1 = K_RINGS + o;     if (rng(msg, K_RINGS + o, c->rings, 1, 10)) return -1;
     *k1 = K_LAW + o;       if (en(msg, K_LAW + o, c->law, 2)) return -1;
     *k1 = K_NUMBER + o;
@@ -329,6 +331,16 @@ static int validate(const cfg_t *c, char *msg, int *k1, int *k2)
         snprintf(msg, MSG_MAX, "[modem] v42bis = on needs v42 = on (set v42bis = off)");
         return -1;
     }
+    if (c->x2 && !(c->modulations & CFG_MOD_V34)) {
+        *k1 = K_X2; *k2 = K_MODS;
+        snprintf(msg, MSG_MAX, "[modem] x2 = on needs v34 in modulations");
+        return -1;
+    }
+    if (c->k56 && !(c->modulations & CFG_MOD_V34)) {
+        *k1 = K_K56; *k2 = K_MODS;
+        snprintf(msg, MSG_MAX, "[modem] k56 = on needs v34 in modulations");
+        return -1;
+    }
 
     /* port 2 */
     {
@@ -341,6 +353,19 @@ static int validate(const cfg_t *c, char *msg, int *k1, int *k2)
             snprintf(msg, MSG_MAX, "[modem2] v42bis = on needs v42 = on (set v42bis = off)");
             return -1;
         }
+        if (two.x2 && !(two.modulations & CFG_MOD_V34)) {
+            *k1 = K2_X2; *k2 = K2_MODS;
+            snprintf(msg, MSG_MAX, "[modem2] x2 = on needs v34 in modulations");
+            return -1;
+        }
+        if (two.k56 && !(two.modulations & CFG_MOD_V34)) {
+            *k1 = K2_K56; *k2 = K2_MODS;
+            snprintf(msg, MSG_MAX, "[modem2] k56 = on needs v34 in modulations");
+            return -1;
+        }
+        /* x2 and k56 may be on for both ports: the daemon serves only one heavy
+         * call at a time (srv.c, the shared heavy slot), so no config rule
+         * limits it. */
         *k1 = K_PPP_PEER2; *k2 = -1;
         if (host(msg, K_PPP_PEER2, two.ppp_peer)) return -1;
         *k2 = K_PPP_LOCAL;
@@ -653,6 +678,8 @@ static int set_value(cfg_t *c, pctx_t *px, int k, int mk, int line, const char *
     case K_V42:       return set_enum(&c->v42, mk, v, n_onoff, 2, l_onoff, msg);
     case K_V42BIS:    return set_enum(&c->v42bis, mk, v, n_onoff, 2, l_onoff, msg);
     case K_V92:       return set_enum(&c->v92, mk, v, n_onoff, 2, l_onoff, msg);
+    case K_X2:        return set_enum(&c->x2, mk, v, n_onoff, 2, l_onoff, msg);
+    case K_K56:       return set_enum(&c->k56, mk, v, n_onoff, 2, l_onoff, msg);
     case K_RINGS:     return set_int(&c->rings, mk, v, msg);
     case K_LAW:       return set_enum(&c->law, mk, v, n_law, 2, l_law, msg);
     case K_NUMBER:    return set_number(c, mk, v, msg);
@@ -901,6 +928,8 @@ static void w_port(sbuf_t *s, const cfg_t *c, int o)
     w_str(s, K_V42 + o, nm(n_onoff, 2, c->v42));
     w_str(s, K_V42BIS + o, nm(n_onoff, 2, c->v42bis));
     w_str(s, K_V92 + o, nm(n_onoff, 2, c->v92));
+    w_str(s, K_X2 + o, nm(n_onoff, 2, c->x2));
+    w_str(s, K_K56 + o, nm(n_onoff, 2, c->k56));
     w_int(s, K_RINGS + o, c->rings);
     w_str(s, K_LAW + o, nm(n_law, 2, c->law));
 
