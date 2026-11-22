@@ -55,7 +55,7 @@ static void fresh(void)
     C.ram[1538] = 0x900000; C.ram[1575] = 0x1EC3FDBC; C.ram[767] = 0x03958100;
 }
 
-static const slic_cfg CFG = { SLIC_PCM_LINEAR, 0 };
+static const slic_cfg CFG = { SLIC_PCM_LINEAR, 0, 0 };
 
 static void test_healthy(void)
 {
@@ -95,7 +95,7 @@ static void test_healthy(void)
 
 static void test_companded_second_port(void)
 {
-    slic_info i; slic_cfg c = { SLIC_PCM_ULAW, 16 };
+    slic_info i; slic_cfg c = { SLIC_PCM_ULAW, 16, 0 };
     fresh();
     CHECK_EQ_I(slic_init(&B, &c, &i), SLIC_OK);
     CHECK_EQ_I(C.reg[11], 0x11);
@@ -128,6 +128,21 @@ static void test_si3226x(void)
     CHECK(i.vbat_mv > 55000 && i.vbat_mv < 62000);          /* talk battery up */
     CHECK_EQ_I((long)C.ram[1547], 0x00500000);              /* DCDC_OVTHRESH: the Si3226x value, not the Si3217x 0x01300000 */
     CHECK_EQ_I((long)C.ram[768], 0x051EB82A);               /* VBATR_EXPECT: 80 V, the Si3226x value */
+}
+
+/* With defer_service the line is left open at the end of slic_init (so both
+ * channels of a dual part can be calibrated before either is in service), and
+ * slic_service() puts it in service afterwards. */
+static void test_deferred_service(void)
+{
+    slic_cfg c = { SLIC_PCM_LINEAR, 0, 1 };
+    slic_info i;
+    fresh();
+    CHECK_EQ_I(slic_init(&B, &c, &i), SLIC_OK);
+    CHECK(i.vbat_mv > 55000 && i.vbat_mv < 62000);      /* converter + calibration done */
+    CHECK_EQ_I(C.reg[30], 0);                           /* LINEFEED: line still open */
+    slic_service(&B);
+    CHECK_EQ_I(C.reg[30], 1);                           /* now forward active */
 }
 
 /* The second channel of a dual part is addressed with the CID in the control
@@ -277,6 +292,7 @@ int main(void)
     test_companded_second_port();
     test_wrong_part();
     test_si3226x();
+    test_deferred_service();
     test_second_channel_cid();
     test_second_channel_shares_converter();
     test_present();

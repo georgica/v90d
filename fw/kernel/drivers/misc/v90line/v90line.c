@@ -142,6 +142,8 @@ struct v90port {
 	int lin, want_lin;		/* 1: the codec runs 16-bit linear */
 	pump_meter meter;		/* received level, linear values */
 	int up;				/* the SLIC is initialised */
+	int slic_ready;			/* a shared second channel: set by the owner once it has
+					   brought this channel's SLIC up and in service */
 
 	/* bench access to the part, carried out by the port's thread */
 	struct mutex dbg_lock;
@@ -438,21 +440,15 @@ static void slic_debug(struct v90port *p)
 	complete(&p->dbg_done);
 }
 
-static int slic_up(struct v90port *p)
+/* Bring one channel's SLIC through calibration and configuration. With defer
+ * the line is left open (slic_service() puts it in service later); otherwise
+ * it goes straight into service. */
+static int chan_up(struct v90port *p, int defer)
 {
-	slic_cfg cfg = { pcmmode_of(p->law, p->lin), (uint16_t)(16 * p->idx) };
+	slic_cfg cfg = { pcmmode_of(p->law, p->lin), (uint16_t)(16 * p->idx), defer };
 	slic_info info = { 0 };
 	int r;
 
-	/* A shared second channel must not touch the reset line: that would reset
-	 * the whole part and drop the channel already in service. Its chip is
-	 * reset and running by the time it gets here (it waits for the owner). */
-	if (!p->shares) {
-		gpiod_set_raw_value(p->l->rst[p->cs_idx], 0);
-		msleep(10);
-		gpiod_set_raw_value(p->l->rst[p->cs_idx], 1);
-		msleep(250);
-	}
 	p->spi_phase = 0;
 	r = slic_init(&p->bus, &cfg, &info);
 	p->inits++;
@@ -462,13 +458,55 @@ static int slic_up(struct v90port *p)
 	if (r) {
 		dev_err(p->l->dev, "port %d: SLIC start failed: %d at stage %d (id %02x, battery %ld mV)\n",
 			p->idx + 1, r, info.stage, info.id, info.vbat_mv);
-		if (!p->shares)
-			gpiod_set_raw_value(p->l->rst[p->cs_idx], 0);	/* converter off (own chip only) */
 		return r;
 	}
 	dev_info(p->l->dev, "port %d: SLIC id %02x up, battery %ld mV, %s, %s receive\n", p->idx + 1, info.id,
 		 info.vbat_mv, p->law ? "A-law" : "mu-law", p->lin ? "linear" : "companded");
 	return 0;
+}
+
+static int slic_up(struct v90port *p)
+{
+	struct v90line *l = p->l;
+	int r;
+
+	/* Reset the part. A shared second channel never does this: it would reset
+	 * the whole part and drop the other channel. (Only the owner reaches here
+	 * on a dual board; the shared channel is brought up inside this call.) */
+	if (!p->shares) {
+		gpiod_set_raw_value(l->rst[p->cs_idx], 0);
+		msleep(10);
+		gpiod_set_raw_value(l->rst[p->cs_idx], 1);
+		msleep(250);
+	}
+
+	if (l->dual && p->idx == 0) {
+		/* One dual part: two channels on this chip select. Calibrate BOTH
+		 * with their lines open, THEN put both in service -- a channel's
+		 * calibration disturbs the other if that other line is already live,
+		 * so neither goes in until both are calibrated (vendor init order). */
+		struct v90port *p2 = &l->port[1];
+
+		WRITE_ONCE(p2->slic_ready, 0);
+		r = chan_up(p, 1);				/* channel 0, line left open */
+		if (r) {
+			gpiod_set_raw_value(l->rst[0], 0);	/* converter off */
+			return r;
+		}
+		if (chan_up(p2, 1) == 0) {			/* channel 1, line left open */
+			slic_service(&p->bus);			/* now both in service */
+			slic_service(&p2->bus);
+			WRITE_ONCE(p2->slic_ready, 1);
+		} else {
+			slic_service(&p->bus);			/* channel 1 failed: run channel 0 alone */
+		}
+		return 0;
+	}
+
+	r = chan_up(p, 0);					/* single channel, straight into service */
+	if (r && !p->shares)
+		gpiod_set_raw_value(l->rst[p->cs_idx], 0);	/* converter off (own chip only) */
+	return r;
 }
 
 /* Is there a part on this port's chip select? The one-port board (HT801)
@@ -498,17 +536,23 @@ static int line_thread(void *data)
 	while (!kthread_should_stop()) {
 		int h, want, want_lin;
 
-		/* A shared second channel lives on the owner's chip: it can only
-		 * come up once the owner has reset the part and started the
-		 * converter, and it must fall with the owner so it re-initialises
-		 * if the owner ever resets the part. */
-		if (p->shares && !READ_ONCE(p->l->port[p->cs_idx].up)) {
-			p->up = 0;
-			msleep_interruptible(200);
-			continue;
-		}
-
-		if (!p->up) {
+		/* A shared second channel does not drive its own SLIC: the owner
+		 * (same chip) brings both channels up together, in the right order.
+		 * This thread only runs its own PCM/hook loop, mirroring the owner --
+		 * it comes up once the owner has readied this channel and falls with
+		 * the owner so it re-initialises if the owner resets the part. */
+		if (p->shares) {
+			if (!READ_ONCE(p->l->port[p->cs_idx].up) || !READ_ONCE(p->slic_ready)) {
+				p->up = 0;
+				msleep_interruptible(200);
+				continue;
+			}
+			if (!p->up) {
+				p->up = 1;
+				seen = run = 0;
+				pump_restart(p, 0);
+			}
+		} else if (!p->up) {
 			if (slic_up(p)) {
 				/* a shorted or missing line: try again, slowly */
 				fails++;

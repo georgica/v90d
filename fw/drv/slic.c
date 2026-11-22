@@ -338,11 +338,20 @@ int slic_init(const ps_bus *b, const slic_cfg *cfg, slic_info *info)
     ps_wr(b, PS_PCMMODE, (uint8_t)((cfg->pcm_format & 0x03) | 0x10));
 
     /* 7: no interrupts (the driver polls the hook state), clear what is
-     * latched, and put the line in service */
+     * latched. The line is put in service here unless the caller is bringing
+     * up a dual part and wants both channels calibrated first (defer_service):
+     * calibrating one channel's line disturbs the other channel if that other
+     * line is already in service, so on a dual part both lines stay open until
+     * both are calibrated, then slic_service() puts each in service. */
     info->stage = 7;
     ps_wr(b, PS_IRQEN1, 0); ps_wr(b, PS_IRQEN1 + 1, 0); ps_wr(b, PS_IRQEN1 + 2, 0); ps_wr(b, PS_IRQEN1 + 3, 0);
     (void)ps_rd(b, PS_IRQ1); (void)ps_rd(b, PS_IRQ1 + 1); (void)ps_rd(b, PS_IRQ1 + 2); (void)ps_rd(b, PS_IRQ1 + 3);
-    ps_wr(b, PS_LINEFEED, 1);
+    if (!cfg->defer_service) ps_wr(b, PS_LINEFEED, 1);
     info->vbat_mv = slic_vbat_mv(b);
     return SLIC_OK;
+}
+
+void slic_service(const ps_bus *b)
+{
+    ps_wr(b, PS_LINEFEED, 1);       /* forward active */
 }

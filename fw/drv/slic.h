@@ -28,6 +28,12 @@ enum { SLIC_FAM_3217X = 0, SLIC_FAM_3226X = 1 };
 typedef struct {
     uint8_t  pcm_format;        /* SLIC_PCM_* */
     uint16_t slot;              /* start of our samples, in bit clocks from frame sync */
+    int      defer_service;     /* 1: leave the line open at the end of slic_init,
+                                   to be put in service later with slic_service().
+                                   On a dual part both channels must be calibrated
+                                   with their lines open before either goes in
+                                   service, or the second channel's calibration
+                                   disturbs the first. 0: in service as before. */
 } slic_cfg;
 
 enum {
@@ -55,6 +61,9 @@ int  slic_present(const ps_bus *b);
  * (Si3226x, two ports on one chip select) from the single-channel boards. */
 int  slic_family(const ps_bus *b);
 int  slic_init(const ps_bus *b, const slic_cfg *cfg, slic_info *info);
+/* Put a line that was brought up with cfg->defer_service into service (forward
+ * active). The converter and calibration are already done by slic_init. */
+void slic_service(const ps_bus *b);
 int  slic_offhook(const ps_bus *b);             /* 1 off hook, 0 on hook */
 long slic_vbat_mv(const ps_bus *b);
 void slic_shutdown(const ps_bus *b);            /* line open, converter off */
