@@ -22,7 +22,7 @@ include ../libv90m.mk
 
 INC     := -I. -Itest -I../test -I../ppp -I../ppp/test $(LIBV90M_DEV_INC)
 
-PPP_SRC := $(addprefix ../ppp/,ppp_md5.c ppp_hdlc.c ppp_fsm.c ppp_deflate.c ppp_mppc.c ppp.c)
+PPP_SRC := $(addprefix ../ppp/,ppp_md5.c ppp_crypto.c ppp_hdlc.c ppp_fsm.c ppp_deflate.c ppp_mppc.c ppp.c)
 # the product: everything that would be linked into the daemon (the modem
 # and V.42 come from libv90modem)
 LIB_SRC := dce.c $(PPP_SRC)
