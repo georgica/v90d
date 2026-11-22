@@ -266,7 +266,10 @@ int slic_present(const ps_bus *b)
     return ok;
 }
 
-int slic_init(const ps_bus *b, const slic_cfg *cfg, slic_info *info)
+/* Stages 1-2: identify the part, load the general parameters, calibrate the
+ * monitor ADC. The converter is left off and the line open. On a dual part
+ * this runs for both channels before either converter is started. */
+int slic_setup(const ps_bus *b, slic_info *info)
 {
     uint32_t w; int r;
 
@@ -300,12 +303,30 @@ int slic_init(const ps_bus *b, const slic_cfg *cfg, slic_info *info)
     /* 2: monitor ADC offset calibration */
     info->stage = 2;
     if ((r = calibrate(b, 0x00, 0x00, 0x01, 10, 1000)) != 0) return r;
+    return SLIC_OK;
+}
 
-    /* 3: battery */
+/* Stage 3: start the battery converter. slic_setup must have run. On a dual
+ * part the converters of both channels are started back to back, between the
+ * setup of both and any line calibration, so the second converter's start-up
+ * inrush does not trip the first off the shared VDC input (the parts have a
+ * converter each, but they share the board's DC input). */
+int slic_converter(const ps_bus *b, slic_info *info)
+{
+    int r;
     info->stage = 3;
     r = converter_up(b);
     info->vbat_mv = slic_vbat_mv(b);
-    if (r) return r;
+    return r;
+}
+
+/* Stages 4-7: the remaining calibrations, line parameters, PCM, and (unless
+ * cfg->defer_service) the line in service. slic_setup and slic_converter must
+ * have run. On a dual part both lines are left open (defer_service) until both
+ * channels have finished, then slic_service() puts each in service. */
+int slic_finish(const ps_bus *b, const slic_cfg *cfg, slic_info *info)
+{
+    int r;
 
     /* 4: the remaining calibrations */
     info->stage = 4;
@@ -337,18 +358,21 @@ int slic_init(const ps_bus *b, const slic_cfg *cfg, slic_info *info)
     ps_wr(b, PS_PCMRXLO, (uint8_t)cfg->slot); ps_wr(b, PS_PCMRXHI, (uint8_t)((cfg->slot >> 8) & 0x03));
     ps_wr(b, PS_PCMMODE, (uint8_t)((cfg->pcm_format & 0x03) | 0x10));
 
-    /* 7: no interrupts (the driver polls the hook state), clear what is
-     * latched. The line is put in service here unless the caller is bringing
-     * up a dual part and wants both channels calibrated first (defer_service):
-     * calibrating one channel's line disturbs the other channel if that other
-     * line is already in service, so on a dual part both lines stay open until
-     * both are calibrated, then slic_service() puts each in service. */
+    /* 7: no interrupts (the driver polls the hook state), clear what is latched */
     info->stage = 7;
     ps_wr(b, PS_IRQEN1, 0); ps_wr(b, PS_IRQEN1 + 1, 0); ps_wr(b, PS_IRQEN1 + 2, 0); ps_wr(b, PS_IRQEN1 + 3, 0);
     (void)ps_rd(b, PS_IRQ1); (void)ps_rd(b, PS_IRQ1 + 1); (void)ps_rd(b, PS_IRQ1 + 2); (void)ps_rd(b, PS_IRQ1 + 3);
     if (!cfg->defer_service) ps_wr(b, PS_LINEFEED, 1);
     info->vbat_mv = slic_vbat_mv(b);
     return SLIC_OK;
+}
+
+int slic_init(const ps_bus *b, const slic_cfg *cfg, slic_info *info)
+{
+    int r;
+    if ((r = slic_setup(b, info)) != 0) return r;
+    if ((r = slic_converter(b, info)) != 0) return r;
+    return slic_finish(b, cfg, info);
 }
 
 void slic_service(const ps_bus *b)

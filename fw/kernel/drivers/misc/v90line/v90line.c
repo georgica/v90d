@@ -440,29 +440,63 @@ static void slic_debug(struct v90port *p)
 	complete(&p->dbg_done);
 }
 
-/* Bring one channel's SLIC through calibration and configuration. With defer
- * the line is left open (slic_service() puts it in service later); otherwise
- * it goes straight into service. */
+/* record a channel's bring-up result: stats and a log line */
+static int chan_report(struct v90port *p, int r, const slic_info *info)
+{
+	p->inits++;
+	p->last_err = r;
+	p->last_stage = info->stage;
+	p->vbat_mv = info->vbat_mv;
+	if (r)
+		dev_err(p->l->dev, "port %d: SLIC start failed: %d at stage %d (id %02x, battery %ld mV)\n",
+			p->idx + 1, r, info->stage, info->id, info->vbat_mv);
+	else
+		dev_info(p->l->dev, "port %d: SLIC id %02x up, battery %ld mV, %s, %s receive\n", p->idx + 1,
+			 info->id, info->vbat_mv, p->law ? "A-law" : "mu-law", p->lin ? "linear" : "companded");
+	return r;
+}
+
+/* a single-channel part, straight through to in service (defer = 0) */
 static int chan_up(struct v90port *p, int defer)
 {
 	slic_cfg cfg = { pcmmode_of(p->law, p->lin), (uint16_t)(16 * p->idx), defer };
 	slic_info info = { 0 };
-	int r;
 
 	p->spi_phase = 0;
-	r = slic_init(&p->bus, &cfg, &info);
-	p->inits++;
-	p->last_err = r;
-	p->last_stage = info.stage;
-	p->vbat_mv = info.vbat_mv;
-	if (r) {
-		dev_err(p->l->dev, "port %d: SLIC start failed: %d at stage %d (id %02x, battery %ld mV)\n",
-			p->idx + 1, r, info.stage, info.id, info.vbat_mv);
-		return r;
-	}
-	dev_info(p->l->dev, "port %d: SLIC id %02x up, battery %ld mV, %s, %s receive\n", p->idx + 1, info.id,
-		 info.vbat_mv, p->law ? "A-law" : "mu-law", p->lin ? "linear" : "companded");
-	return 0;
+	return chan_report(p, slic_init(&p->bus, &cfg, &info), &info);
+}
+
+/* Both channels of a dual part, in the chip's order: set up both, start both
+ * converters back to back, calibrate/configure both, then put both lines in
+ * service. Starting the converters together -- before either channel draws
+ * line current or runs its line calibrations -- keeps the second converter's
+ * start-up inrush from tripping the first off the shared VDC input. Returns
+ * the owner channel's result (channel 0); channel 1 comes up on its own
+ * result, flagged in p2->slic_ready for its thread. */
+static int dual_up(struct v90port *p, struct v90port *p2)
+{
+	slic_cfg c0 = { pcmmode_of(p->law, p->lin), 0, 1 };
+	slic_cfg c1 = { pcmmode_of(p2->law, p2->lin), 16, 1 };
+	slic_info i0 = { 0 }, i1 = { 0 };
+	int r0, r1;
+
+	WRITE_ONCE(p2->slic_ready, 0);
+	p->spi_phase = 0;
+	p2->spi_phase = 0;
+
+	r0 = slic_setup(&p->bus, &i0);
+	r1 = slic_setup(&p2->bus, &i1);
+	if (!r0) r0 = slic_converter(&p->bus, &i0);
+	if (!r1) r1 = slic_converter(&p2->bus, &i1);
+	if (!r0) r0 = slic_finish(&p->bus, &c0, &i0);
+	if (!r1) r1 = slic_finish(&p2->bus, &c1, &i1);
+	if (!r0) slic_service(&p->bus);
+	if (!r1) slic_service(&p2->bus);
+
+	chan_report(p, r0, &i0);
+	chan_report(p2, r1, &i1);
+	WRITE_ONCE(p2->slic_ready, r1 == 0);
+	return r0;
 }
 
 static int slic_up(struct v90port *p)
@@ -481,26 +515,10 @@ static int slic_up(struct v90port *p)
 	}
 
 	if (l->dual && p->idx == 0) {
-		/* One dual part: two channels on this chip select. Calibrate BOTH
-		 * with their lines open, THEN put both in service -- a channel's
-		 * calibration disturbs the other if that other line is already live,
-		 * so neither goes in until both are calibrated (vendor init order). */
-		struct v90port *p2 = &l->port[1];
-
-		WRITE_ONCE(p2->slic_ready, 0);
-		r = chan_up(p, 1);				/* channel 0, line left open */
-		if (r) {
-			gpiod_set_raw_value(l->rst[0], 0);	/* converter off */
-			return r;
-		}
-		if (chan_up(p2, 1) == 0) {			/* channel 1, line left open */
-			slic_service(&p->bus);			/* now both in service */
-			slic_service(&p2->bus);
-			WRITE_ONCE(p2->slic_ready, 1);
-		} else {
-			slic_service(&p->bus);			/* channel 1 failed: run channel 0 alone */
-		}
-		return 0;
+		r = dual_up(p, &l->port[1]);
+		if (r)
+			gpiod_set_raw_value(l->rst[0], 0);	/* owner failed: converter off, retry */
+		return r;
 	}
 
 	r = chan_up(p, 0);					/* single channel, straight into service */

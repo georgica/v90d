@@ -61,8 +61,16 @@ int  slic_present(const ps_bus *b);
  * (Si3226x, two ports on one chip select) from the single-channel boards. */
 int  slic_family(const ps_bus *b);
 int  slic_init(const ps_bus *b, const slic_cfg *cfg, slic_info *info);
+/* The three phases of slic_init, for bringing up the two channels of a dual
+ * part in the right order: set up both, start both converters, then finish
+ * (calibrate / line / PCM) both -- so the second converter's start-up does not
+ * trip the first. slic_init runs all three in turn for a single channel.
+ * slic_setup must run before slic_converter, and both before slic_finish. */
+int  slic_setup(const ps_bus *b, slic_info *info);
+int  slic_converter(const ps_bus *b, slic_info *info);
+int  slic_finish(const ps_bus *b, const slic_cfg *cfg, slic_info *info);
 /* Put a line that was brought up with cfg->defer_service into service (forward
- * active). The converter and calibration are already done by slic_init. */
+ * active). The converter and calibration are already done by slic_finish. */
 void slic_service(const ps_bus *b);
 int  slic_offhook(const ps_bus *b);             /* 1 off hook, 0 on hook */
 long slic_vbat_mv(const ps_bus *b);
