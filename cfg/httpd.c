@@ -929,7 +929,12 @@ static void handle(httpd_t *h, httpd_conn_t *c, size_t n, uint32_t now)
         return;
     }
     else { respond(h, c, 404, V_ERROR, head_only, now); return; }
-    if (view == V_CONFIG && !h->cfg->admin_password[0] && !host_is_address(c->rx, n)) {
+    /* /config and /log carry the box's own detail (settings, logs, dmesg).
+     * With no admin password set they are served only to a request that named
+     * the box by its address, not by a host name: a name can be pointed at the
+     * box by a hostile page (DNS rebinding) to read them from a browser on the
+     * LAN. */
+    if ((view == V_CONFIG || view == V_LOG) && !h->cfg->admin_password[0] && !host_is_address(c->rx, n)) {
         respond_text(h, c, 403, NULL, BY_ADDRESS, head_only, now);
         return;
     }

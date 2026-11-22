@@ -1275,8 +1275,10 @@ static void test_settings_origin(void)
     CHECK_EQ_I(post("Host: 192.168.1.2:x\r\n", "rings=2"), 403);
     CHECK_EQ_I(code_of("GET /settings HTTP/1.1\r\nHost: evil.example\r\n\r\n"), 403);
     CHECK_EQ_I(code_of("GET /config HTTP/1.1\r\nHost: evil.example\r\n\r\n"), 403);
+    CHECK_EQ_I(code_of("GET /log HTTP/1.1\r\nHost: evil.example\r\n\r\n"), 403);     /* same gate as /config */
     CHECK_EQ_I(code_of("GET /settings HTTP/1.1\r\nHost: 10.0.0.7:8080\r\n\r\n"), 200);
     CHECK_EQ_I(code_of("GET /config HTTP/1.1\r\nHost: 10.0.0.7\r\n\r\n"), 200);
+    CHECK_EQ_I(code_of("GET /log HTTP/1.1\r\nHost: 10.0.0.7\r\n\r\n"), 200);
     CHECK_EQ_I(code_of("GET / HTTP/1.1\r\nHost: evil.example\r\n\r\n"), 200);     /* the status page tells no secrets */
     CHECK_EQ_I(sv.calls, calls);
     /* with an admin password a name is fine: the hostile page has no credentials */
