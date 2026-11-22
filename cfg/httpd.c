@@ -29,7 +29,7 @@
 #include "vpn.h"
 
 enum { HC_FREE = 0, HC_RECV, HC_BODY, HC_SEND, HC_LINGER };
-enum { V_ERROR = 0, V_HTML, V_JSON, V_CONFIG, V_HTML2, V_JSON2 /* port 2 */, V_CALLS, V_BBS };
+enum { V_ERROR = 0, V_HTML, V_JSON, V_CONFIG, V_HTML2, V_JSON2 /* port 2 */, V_CALLS, V_BBS, V_LOG };
 enum { M_GET, M_HEAD, M_POST, M_OTHER };
 
 #define CRED_MAX (6 + CFG_SECRET_MAX)   /* "admin:" and the longest password */
@@ -199,6 +199,12 @@ static void respond(httpd_t *h, httpd_conn_t *c, int code, int view, int head_on
         break;
     case V_CONFIG:
         finish(h, c, code, CT_TEXT, NULL, cfg_write(h->cfg, 0, body, HTTPD_BODY_MAX), head_only, now);
+        break;
+    case V_LOG:
+        if (h->diag)
+            finish(h, c, code, CT_TEXT, NULL, (size_t)h->diag(h->diag_ctx, body, HTTPD_BODY_MAX), head_only, now);
+        else
+            respond_text(h, c, code, NULL, "no diagnostics source\n", head_only, now);
         break;
     default:
         respond_text(h, c, code, code == 405 ? ALLOW_READ : NULL, NULL, head_only, now);
@@ -911,6 +917,7 @@ static void handle(httpd_t *h, httpd_conn_t *c, size_t n, uint32_t now)
         view = V_BBS; h->bbs_query = q ? q + 1 : NULL; h->bbs_qlen = q ? ulen - plen - 1 : 0;
     }
     else if (plen == 7 && memcmp(uri, "/config", 7) == 0) view = V_CONFIG;
+    else if (plen == 4 && memcmp(uri, "/log", 4) == 0) view = V_LOG;
     else if (plen == 7 && memcmp(uri, "/logout", 7) == 0) {
         { int j = session_find(h, c->rx, n, now); if (j >= 0) h->sess[j].on = 0; }
         respond_text(h, c, 303, "Location: /\r\nSet-Cookie: sid=; Path=/; Max-Age=0\r\n", NULL, head_only, now);
@@ -1008,6 +1015,12 @@ void httpd_on_save(httpd_t *h, int (*save)(void *ctx, const cfg_t *newcfg), void
 {
     h->save = save;
     h->save_ctx = ctx;
+}
+
+void httpd_on_diag(httpd_t *h, int (*diag)(void *ctx, char *buf, size_t cap), void *ctx)
+{
+    h->diag = diag;
+    h->diag_ctx = ctx;
 }
 
 static int set_nonblock_cloexec(int fd)

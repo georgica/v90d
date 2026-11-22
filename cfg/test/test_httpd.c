@@ -143,6 +143,17 @@ static void fixture(void)
 
 /* ---- tests ----------------------------------------------------------------- */
 
+static int diag_stub(void *ctx, char *buf, size_t cap)
+{
+    const char *s = "DIAGTEST line one\nDIAGTEST line two\n";
+    size_t len = strlen(s);
+    (void)ctx;
+    if (len > cap - 1) len = cap - 1;
+    memcpy(buf, s, len);
+    buf[len] = 0;
+    return (int)len;
+}
+
 static void test_views(void)
 {
     resp_t r;
@@ -191,6 +202,21 @@ static void test_views(void)
     CHECK(strstr(resp, "TOPSECRET") == NULL);
     CHECK(strstr(resp, "user = \"alice\" <redacted>\n") != NULL);
 
+    /* /log: nothing until a diagnostics source is registered, then its text */
+    len = exchange("GET /log HTTP/1.0\r\n\r\n", resp, sizeof resp);
+    CHECK(parse_resp(resp, len, &r));
+    CHECK_EQ_I(r.code, 200);
+    CHECK(strstr(resp, "\r\nContent-Type: text/plain; charset=us-ascii\r\n") != NULL);
+    CHECK(strstr(resp, "no diagnostics source") != NULL);
+    httpd_on_diag(&H, diag_stub, NULL);
+    len = exchange("GET /log HTTP/1.0\r\n\r\n", resp, sizeof resp);
+    CHECK(parse_resp(resp, len, &r));
+    CHECK_EQ_I(r.code, 200);
+    CHECK(strstr(resp, "\r\nContent-Type: text/plain; charset=us-ascii\r\n") != NULL);
+    CHECK_EQ_I(r.clen, (int)strlen("DIAGTEST line one\nDIAGTEST line two\n"));
+    CHECK(strstr(resp, "DIAGTEST line one\nDIAGTEST line two\n") != NULL);
+    httpd_on_diag(&H, NULL, NULL);
+
     /* The stock firmware of the box sent browsers from / to /cgi-bin/login
      * for good; a browser that remembers is sent back. */
     len = exchange("GET /cgi-bin/login HTTP/1.0\r\n\r\n", resp, sizeof resp);
@@ -235,7 +261,7 @@ static void test_views(void)
     CHECK_EQ_I(code_of("GET /status.json?pretty=1&x=/../ HTTP/1.0\r\n\r\n"), 200);
     CHECK_EQ_I(code_of("GET /? HTTP/1.0\r\n\r\n"), 200);
     CHECK_EQ_I(code_of("GET /config?x HTTP/1.0\r\nX-Bin: \xff\xfe\r\n\r\n"), 200);
-    CHECK_EQ_I(H.stats.ok, 14);
+    CHECK_EQ_I(H.stats.ok, 16);     /* the two GET /log above are in this count */
 }
 
 static void test_refusals(void)
