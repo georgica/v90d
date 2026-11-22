@@ -130,6 +130,42 @@ static void test_si3226x(void)
     CHECK_EQ_I((long)C.ram[768], 0x051EB82A);               /* VBATR_EXPECT: 80 V, the Si3226x value */
 }
 
+/* The second channel of a dual part is addressed with the CID in the control
+ * octet (channel 1 = 0x30 write / 0x70 read); the bus must reach it with no
+ * protocol error. */
+static void test_second_channel_cid(void)
+{
+    fresh();
+    B.cid = 1;
+    ps_wr(&B, PS_PCMRXLO, 0x5A);
+    CHECK_EQ_I(C.ch, 1);
+    CHECK_EQ_I(ps_rd(&B, PS_PCMRXLO), 0x5A);
+    CHECK_EQ_I(C.ch, 1);
+    CHECK_EQ_I((int)C.bad, 0);
+    B.cid = 0;
+    ps_wr(&B, PS_PCMRXLO, 0xA5);
+    CHECK_EQ_I(C.ch, 0);
+}
+
+/* Bringing up channel 1 of a dual part while its shared converter is already
+ * running (channel 0 started it): slic_init must leave the converter alone,
+ * not re-arm it, and still bring the channel into service. */
+static void test_second_channel_shares_converter(void)
+{
+    slic_info i;
+    fresh(); C.reg[0] = 0xB3; B.cid = 1;
+    C.ram[1538] = 0x400000;             /* PD_DCDC: converter already running (bit 20 clear) */
+    C.ram[3] = MV(59000);               /* battery already up */
+    M.running = 1; M.conv_ms = 1000;    /* so the model holds the battery there through the cal sleeps */
+    CHECK_EQ_I(slic_init(&B, &CFG, &i), SLIC_OK);
+    CHECK_EQ_I(i.family, SLIC_FAM_3226X);
+    CHECK(i.vbat_mv > 55000 && i.vbat_mv < 62000);
+    CHECK_EQ_I(M.linefeed_at_start, -1);        /* never (re)started the converter */
+    CHECK_EQ_I((long)C.ram[1538], 0x400000);    /* left running, not re-armed */
+    CHECK_EQ_I((int)C.bad, 0);
+    B.cid = 0;
+}
+
 /* an empty footprint: the bus floats and reads whatever it was left at */
 static void floats(chipsim *c, uint8_t reg, uint8_t v) { (void)v; c->reg[reg] = 0xB2; }
 static void test_present(void)
@@ -241,6 +277,8 @@ int main(void)
     test_companded_second_port();
     test_wrong_part();
     test_si3226x();
+    test_second_channel_cid();
+    test_second_channel_shares_converter();
     test_present();
     test_dead_ram();
     test_short_circuit();

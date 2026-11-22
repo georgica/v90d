@@ -50,6 +50,10 @@ typedef struct {
  * 0 if nothing does: the second port of a one-port board. Changes nothing
  * in the part. */
 int  slic_present(const ps_bus *b);
+/* the ProSLIC family on this bus from its ID (SLIC_FAM_*), or -1 if none/not
+ * one we know; the part must be out of reset. Used to tell a dual part
+ * (Si3226x, two ports on one chip select) from the single-channel boards. */
+int  slic_family(const ps_bus *b);
 int  slic_init(const ps_bus *b, const slic_cfg *cfg, slic_info *info);
 int  slic_offhook(const ps_bus *b);             /* 1 off hook, 0 on hook */
 long slic_vbat_mv(const ps_bus *b);

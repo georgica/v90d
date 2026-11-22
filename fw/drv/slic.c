@@ -196,7 +196,15 @@ static void converter_off(const ps_bus *b, uint32_t how)
  * If it is not within 5 V of the target after 2 s: stop. */
 static int converter_up(const ps_bus *b)
 {
-    uint32_t target; long v; uint8_t enhance; unsigned t;
+    uint32_t target, pd; long v; uint8_t enhance; unsigned t;
+
+    /* On a dual part (Si3226x) the two channels share one converter: whichever
+     * channel starts it first brings it up, and the other finds PD_DCDC bit 20
+     * already clear and leaves it running rather than re-arming it, which would
+     * disturb the channel already in service (refs/si3226x-facts.md section 4
+     * step 9). A part with a converter of its own per channel reads its own
+     * bit 20 still set here and starts it, so this is right for both. */
+    if (!ps_ram_rd(b, R_PD_DCDC, &pd) && !(pd & 0x100000)) return 0;
 
     ps_wr(b, PS_LINEFEED, 0);
     enhance = ps_rd(b, PS_ENHANCE);
@@ -232,6 +240,15 @@ void slic_shutdown(const ps_bus *b)
     ps_wr(b, PS_LINEFEED, 0);
     b->msleep(b->ctx, 50);
     ps_ram_wr(b, R_PD_DCDC, DCDC_OFF);
+}
+
+int slic_family(const ps_bus *b)
+{
+    uint8_t id = ps_rd(b, PS_ID);
+    if (id == 0xFF || !(id & 0x80)) return -1;
+    if ((id & 0x07) == 2) return SLIC_FAM_3217X;
+    if ((id & 0x07) == 3) return SLIC_FAM_3226X;
+    return -1;
 }
 
 int slic_present(const ps_bus *b)
