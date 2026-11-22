@@ -2046,6 +2046,12 @@ static void test_login(void)
         CHECK_EQ_I(code_of(hdr), 303);
         snprintf(hdr, sizeof hdr, "GET /settings HTTP/1.0\r\nCookie: sid=%s\r\nCookie: sid=%s\r\n\r\n", sid, sid);
         CHECK_EQ_I(code_of(hdr), 303);
+        /* a stale sid beside the live one in one header, either order: the
+         * live one is still found (a browser carrying an old session cookie) */
+        snprintf(hdr, sizeof hdr, "GET /settings HTTP/1.0\r\nCookie: sid=%s; sid=%s\r\n\r\n", bad, sid);
+        CHECK_EQ_I(code_of(hdr), 200);
+        snprintf(hdr, sizeof hdr, "GET /settings HTTP/1.0\r\nCookie: sid=%s; sid=%s\r\n\r\n", sid, bad);
+        CHECK_EQ_I(code_of(hdr), 200);
         CHECK_EQ_I(code_of("GET /settings HTTP/1.0\r\nCookie: sid=\r\n\r\n"), 303);
         CHECK_EQ_I(code_of("GET /settings HTTP/1.0\r\nCookie: sid=00000000000000000000000000000000\r\n\r\n"), 303);
     }

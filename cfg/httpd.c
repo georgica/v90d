@@ -383,8 +383,10 @@ static int session_find(httpd_t *h, const char *p, size_t n, uint32_t now)
                 for (k = 0; k < SID_LEN; k++) diff |= (unsigned)(unsigned char)(ck.v[b + 4 + k] ^ h->sess[j].sid[k]);
                 if (!diff && h->sess[j].on) hit = j;
             }
-            if (hit >= 0) h->sess[hit].seen = now;
-            return hit;
+            /* keep looking on no match: a browser may send more than one
+             * sid cookie (a stale one from an earlier session alongside the
+             * live one), and the stale one often comes first */
+            if (hit >= 0) { h->sess[hit].seen = now; return hit; }
         }
     }
     return -1;
