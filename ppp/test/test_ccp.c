@@ -18,6 +18,11 @@
 
 static ppp_t S;
 
+/* MPPE keys injected after ppp_init (this harness authenticates with PAP,
+ * which does not derive them; MS-CHAPv2 would). inject_mppe turns it on. */
+static int inject_mppe;
+static uint8_t inj_s[16], inj_r[16];
+
 /* test data: IP packets with a moving 40-octet header in front of the
  * payload; the random kind is random throughout (it must not compress) */
 static uint32_t pk_seq;
@@ -151,6 +156,11 @@ static void up_mru(const ppp_config_t *c, unsigned mru)
     frame_t *cr;
 
     ppp_init(&S, c);
+    if (inject_mppe) {
+        S.mppe_have = 1;
+        memcpy(S.mppe_send, inj_s, 16);
+        memcpy(S.mppe_recv, inj_r, 16);
+    }
     ppp_hdlc_rx_init(&dec, PPP_HDLC_BUF);
     dec.rx_accm = 0;
     ip_count = 0;
@@ -1576,9 +1586,117 @@ static void test_fuzz(void)
     }
 }
 
+/* MPPE (issue #6): the server offers and accepts 128-bit stateless MPPE in
+ * CCP, encrypts what it sends and decrypts what it receives. The far end is
+ * modelled with ppp_mppe directly (its keys are the server's, swapped). */
+static void test_mppe(void)
+{
+    ppp_config_t cfg;
+    ppp_mppe_t peer;
+    frame_t *f;
+    static const uint8_t ompe[6] = { 18, 6, 0x01, 0x00, 0x00, 0x40 };  /* 128-bit stateless */
+    static const uint8_t ip[60] = { 0x45, 0x00, 0x00, 0x3c, 0x12, 0x34 };
+    uint8_t enc[128], pt[128], plain[2 + 60];
+    unsigned i;
+    size_t n;
+    int d;
+
+    for (i = 0; i < 16; i++) { inj_s[i] = (uint8_t)(i + 1); inj_r[i] = (uint8_t)(i + 101); }
+    base_cfg(&cfg);
+    cfg.comp = 0;              /* encryption only */
+    cfg.encrypt = 1;
+    inject_mppe = 1;
+    up(&cfg);
+    inject_mppe = 0;
+
+    /* the server's own CCP request is 128-bit stateless MPPE on option 18 */
+    CHECK(scr_new && same(&scr, ompe, 6));
+    /* the peer requests the same: Ack (our transmit direction) */
+    push_cp(P_CCP, PPP_CONF_REQ, 20, ompe, 6);
+    pull();
+    f = find(P_CCP, PPP_CONF_ACK);
+    CHECK(f && same(f, ompe, 6));
+    /* the peer Acks the server's request (our receive); CCP opens */
+    push_cp(P_CCP, PPP_CONF_ACK, scr.d[1], scr.d + 4, scr.n - 4);
+    pull();
+    CHECK(status()->ccp_state == PPP_FSM_OPENED);
+    CHECK_EQ_I(status()->comp_tx, PPP_COMP_MPPE);
+    CHECK_EQ_I(status()->comp_rx, PPP_COMP_MPPE);
+
+    /* far end: its receive key is the server's send key, and vice versa */
+    ppp_mppe_begin(&peer, inj_r, inj_s, 16, PPP_MPPE_FORCE_NONE);
+
+    /* server -> peer: the datagram goes out MPPE-encrypted (0x00FD) */
+    CHECK_EQ_I(ppp_send_ip(&S, ip, sizeof ip), 0);
+    pull();
+    f = find(P_COMP, 0);
+    CHECK(f != NULL);
+    if (f) {
+        d = ppp_mppe_decrypt(&peer, f->d, f->n, pt, sizeof pt);
+        CHECK_EQ_I(d, (int)sizeof ip + 2);
+        CHECK(d == (int)sizeof ip + 2 && pt[0] == 0x00 && pt[1] == 0x21 &&
+              memcmp(pt + 2, ip, sizeof ip) == 0);
+    }
+
+    /* peer -> server: an MPPE frame is decrypted and delivered as IP */
+    plain[0] = 0x00; plain[1] = 0x21;
+    memcpy(plain + 2, ip, sizeof ip);
+    n = ppp_mppe_encrypt(&peer, plain, sizeof plain, enc, sizeof enc);
+    ip_count = 0;
+    push(P_COMP, enc, n);
+    CHECK_EQ_I(ip_count, 1);
+    CHECK_EQ_I((int)ip_len, (int)sizeof ip);
+    CHECK(memcmp(ip_got, ip, sizeof ip) == 0);
+}
+
+/* MPPE fails closed: with encryption required, no cleartext datagram is sent
+ * or accepted, and if the peer will not do MPPE the link is ended. */
+static void test_mppe_required(void)
+{
+    ppp_config_t cfg;
+    unsigned i;
+    uint32_t disc;
+
+    for (i = 0; i < 16; i++) { inj_s[i] = (uint8_t)(i + 1); inj_r[i] = (uint8_t)(i + 101); }
+    base_cfg(&cfg);
+    cfg.comp = 0;
+    cfg.encrypt = 1;
+    inject_mppe = 1;
+    up(&cfg);
+    inject_mppe = 0;
+
+    /* IPCP is up but MPPE is not yet: no cleartext datagram out... */
+    CHECK_EQ_I(ppp_send_ip(&S, (const uint8_t *)"abcd", 4), PPP_ERR_DOWN);
+    /* ...nor in */
+    disc = status()->counters.rx_discards;
+    ip_count = 0;
+    push(PPP_PROTO_IP, (const uint8_t *)"abcd", 4);
+    CHECK_EQ_I(ip_count, 0);
+    CHECK(status()->counters.rx_discards > disc);
+
+    /* the peer refuses MPPE and offers nothing of its own: the link ends
+     * rather than carry traffic in the clear */
+    CHECK(scr_new);
+    push_cp(P_CCP, PPP_CONF_REJ, scr.d[1], scr.d + 4, scr.n - 4);
+    pull();
+    if (scr_new)                                   /* the server's follow-up (empty) request */
+        push_cp(P_CCP, PPP_CONF_ACK, scr.d[1], scr.d + 4, scr.n - 4);
+    push_cp(P_CCP, PPP_CONF_REQ, 30, NULL, 0);     /* peer requests no compression/encryption */
+    pull();
+    ppp_tick(&S, 10);
+    pull();
+    /* the link is ending/ended because encryption could not be established */
+    CHECK_EQ_I(status()->end_reason, PPP_END_ENCRYPT_REQUIRED);
+    CHECK(status()->phase == PPP_PHASE_TERMINATE || status()->phase == PPP_PHASE_DEAD);
+    /* and still no cleartext datagram may be sent */
+    CHECK_EQ_I(ppp_send_ip(&S, (const uint8_t *)"abcd", 4), PPP_ERR_DOWN);
+}
+
 int main(void)
 {
     test_negotiation();
+    test_mppe();
+    test_mppe_required();
     test_deflate_data();
     test_only_ip_is_compressed();
     test_deflate_reset();

@@ -43,6 +43,7 @@
 #include "ppp_deflate.h"
 #include "ppp_mppc.h"
 #include "ppp_crypto.h"
+#include "ppp_mppe.h"
 
 /* Transmit buffer size in octets (stuffed wire form). One worst-case IP
  * frame is 2 * (1500 + 6) + 2 = 3014 octets. */
@@ -100,7 +101,8 @@ typedef enum {
     PPP_END_AUTH_TIMEOUT,      /* peer never authenticated */
     PPP_END_KEEPALIVE,         /* echo requests went unanswered */
     PPP_END_LOOPBACK,          /* we are hearing ourselves */
-    PPP_END_IPCP_FAILED        /* IPCP did not converge or was closed */
+    PPP_END_IPCP_FAILED,       /* IPCP did not converge or was closed */
+    PPP_END_ENCRYPT_REQUIRED   /* encryption is required but MPPE was not agreed */
 } ppp_end_t;
 
 typedef struct {
@@ -113,6 +115,8 @@ typedef struct {
 #define PPP_COMP_NONE     0u
 #define PPP_COMP_DEFLATE  1u   /* RFC 1979 */
 #define PPP_COMP_MPPC     2u   /* RFC 2118 */
+#define PPP_COMP_MPPE     4u   /* RFC 3078 encryption; not a cfg.comp bit, a
+                                  marker for the data path and status */
 /* Octets per millisecond the compressor is given at the most when
  * ppp_config_t.comp_rate is 0. It bounds the processor time compression
  * can take: ppp_send_ip answers PPP_ERR_FULL while the allowance is used
@@ -159,6 +163,11 @@ typedef struct {
     /* --- packet compression (CCP) --- */
     unsigned comp;             /* PPP_COMP_* mask; 0 = CCP is not spoken
                                   (Protocol-Reject). Default: both */
+    uint8_t  encrypt;          /* nonzero: offer and accept MPPE encryption
+                                  (RFC 3078) in CCP, keyed from MS-CHAPv2
+                                  (needs cfg.auth & PPP_AUTH_MSCHAPV2). When
+                                  on, option 18 carries the 128-bit stateless
+                                  MPPE bits in place of MPPC. Default off. */
     uint8_t  comp_no_rx;       /* nonzero: compress what we send only; ask
                                   the peer for nothing */
     uint8_t  deflate_wbits;    /* Deflate window we ask the peer to use
@@ -292,6 +301,8 @@ typedef struct ppp {
     uint8_t  cw_wbits, cw_tried, cw_naks;
     uint8_t  cpend_opt, cpend_wbits, cchosen;
     uint8_t  tx_alg, rx_alg;   /* PPP_COMP_* */
+    uint8_t  cw_mppe, cpend_mppe;  /* our request / the peer's offers MPPE on option 18 */
+    ppp_mppe_t mppe;           /* the encryption session, keyed at ccp_up */
     uint16_t tx_seq, rx_seq;   /* Deflate sequence number / MPPC coherency count */
     uint8_t  rx_wait;          /* out of step: waiting for the peer to start afresh */
     uint8_t  rr_id, rr_tries;

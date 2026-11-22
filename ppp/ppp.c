@@ -41,7 +41,13 @@
 #define CCP_OPT_DEFLATE_DRAFT 24
 #define CCP_OPT_DEFLATE  26
 #define DEFLATE_METHOD   8   /* RFC 1979 section 3 */
-#define MPPC_BIT         1u  /* RFC 2118 section 2: the only bit we take */
+#define MPPC_BIT         1u  /* RFC 2118 section 2 */
+/* RFC 3078 MPPE bits in the same option 18. We offer/accept 128-bit keys,
+ * stateless (historyless) mode -- the combination Windows uses and the one
+ * that suits a link with no error control. */
+#define MPPE_BIT_S       0x00000040u  /* 128-bit session keys */
+#define MPPE_BIT_H       0x01000000u  /* stateless */
+#define MPPE_OFFER       (MPPE_BIT_S | MPPE_BIT_H)
 #define RESET_TRIES      3   /* Reset-Requests before CCP is negotiated anew */
 #define CW_NAK_LIMIT     3   /* Naks of one of our options before we drop it */
 
@@ -1218,6 +1224,13 @@ static unsigned comp_of(unsigned opt)
     return opt == CCP_OPT_MPPC ? PPP_COMP_MPPC : opt ? PPP_COMP_DEFLATE : PPP_COMP_NONE;
 }
 
+/* whether CCP is spoken at all: for compression, or for MPPE once the keys
+ * are in hand (MPPE is negotiated inside CCP) */
+static int ccp_wanted(const ppp_t *p)
+{
+    return p->cfg.comp != 0 || (p->cfg.encrypt && p->mppe_have);
+}
+
 static unsigned cw_bit(unsigned opt)
 {
     return opt == CCP_OPT_DEFLATE ? 1u : opt == CCP_OPT_DEFLATE_DRAFT ? 2u : 4u;
@@ -1234,8 +1247,13 @@ static void ccp_pick(ppp_t *p)
     if (p->cfg.comp_no_rx)
         return;
     for (i = 0; i < 3; i++) {
-        if ((p->cfg.comp & comp_of(order[i])) && !(p->cw_tried & cw_bit(order[i]))) {
-            p->cw_opt = order[i];
+        unsigned opt = order[i];
+        int want = (p->cfg.comp & comp_of(opt)) != 0;
+        /* option 18 is also wanted for encryption, even with no MPPC */
+        if (opt == CCP_OPT_MPPC && p->cfg.encrypt && p->mppe_have)
+            want = 1;
+        if (want && !(p->cw_tried & cw_bit(opt))) {
+            p->cw_opt = opt;
             return;
         }
     }
@@ -1254,6 +1272,7 @@ static void ccp_reset(ppp_fsm_t *f)
 
     /* what the peer refused earlier in this session stays refused */
     p->cw_wbits = p->cfg.deflate_wbits;
+    p->cw_mppe = p->cpend_mppe = 0;
     ccp_pick(p);
 }
 
@@ -1263,10 +1282,12 @@ static size_t ccp_build_cr(ppp_fsm_t *f, uint8_t *o, size_t max)
 
     (void)max;
     if (p->cw_opt == CCP_OPT_MPPC) {
-        /* RFC 2118 section 2 */
+        /* option 18: MPPE 128-bit stateless when we encrypt and have keys
+         * (RFC 3078), otherwise MPPC (RFC 2118 section 2) */
         o[0] = CCP_OPT_MPPC;
         o[1] = 6;
-        put32(o + 2, MPPC_BIT);
+        p->cw_mppe = (uint8_t)(p->cfg.encrypt && p->mppe_have);
+        put32(o + 2, p->cw_mppe ? MPPE_OFFER : MPPC_BIT);
         return 6;
     }
     if (p->cw_opt) {
@@ -1290,15 +1311,26 @@ static int ccp_judge(ppp_t *p, uint8_t type, const uint8_t *val, size_t vlen,
     if (type != p->cchosen)
         return PPP_CONF_REJ;
     if (type == CCP_OPT_MPPC) {
-        /* vlen is 4 (checked when it was chosen). RFC 2118 section 2: all
-         * other bits MUST be 0. Windows sets its encryption bits (RFC
-         * 3078) here as well: the Nak says compression only. */
-        if (get32(val) == MPPC_BIT) {
+        /* vlen is 4 (checked when it was chosen). Option 18 carries MPPC
+         * (RFC 2118) and/or the MPPE encryption bits (RFC 3078). We accept
+         * exactly 128-bit stateless MPPE (when we encrypt and have keys), or
+         * plain MPPC; anything else is Nak'd toward what we do. */
+        uint32_t v = get32(val);
+        if (p->cfg.encrypt && p->mppe_have && v == MPPE_OFFER) {
             p->cpend_opt = type;
             p->cpend_wbits = 0;
+            p->cpend_mppe = 1;
             return PPP_CONF_ACK;
         }
-        put32(sugg, MPPC_BIT);
+        /* plain MPPC is a downgrade when encryption is required: only when
+         * we are not encrypting do we accept compression alone */
+        if (!p->cfg.encrypt && (p->cfg.comp & PPP_COMP_MPPC) && v == MPPC_BIT) {
+            p->cpend_opt = type;
+            p->cpend_wbits = 0;
+            p->cpend_mppe = 0;
+            return PPP_CONF_ACK;
+        }
+        put32(sugg, (p->cfg.encrypt && p->mppe_have) ? MPPE_OFFER : MPPC_BIT);
         *slen = 4;
         return PPP_CONF_NAK;
     }
@@ -1329,13 +1361,15 @@ static int ccp_recv_cr(ppp_fsm_t *f, const uint8_t *opts, size_t len,
 
     p->cpend_opt = 0;
     p->cpend_wbits = 0;
+    p->cpend_mppe = 0;
     p->cchosen = 0;
     while (ppp_fsm_next_option(opts, len, &pos, &type, &val, &vlen)) {
         int r = 0;
 
         if (type == CCP_OPT_DEFLATE && (p->cfg.comp & PPP_COMP_DEFLATE)) r = 3;
         else if (type == CCP_OPT_DEFLATE_DRAFT && (p->cfg.comp & PPP_COMP_DEFLATE)) r = 2;
-        else if (type == CCP_OPT_MPPC && (p->cfg.comp & PPP_COMP_MPPC) && vlen == 4) r = 1;
+        else if (type == CCP_OPT_MPPC && vlen == 4 &&
+                 ((p->cfg.comp & PPP_COMP_MPPC) || (p->cfg.encrypt && p->mppe_have))) r = 1;
         if (r > rank) {
             rank = r;
             p->cchosen = type;
@@ -1395,6 +1429,28 @@ static void ccp_up(ppp_fsm_t *f)
 {
     ppp_t *p = (ppp_t *)f->ctx;
 
+    /* MPPE is symmetric: only when both directions agreed it (and the keys
+     * are in hand) do we encrypt, keying both from the MS-CHAPv2 master keys.
+     * Otherwise the option-18 result is MPPC, settled below. */
+    if (p->cw_mppe && p->cpend_mppe && p->mppe_have) {
+        ppp_mppe_begin(&p->mppe, p->mppe_send, p->mppe_recv, 16, PPP_MPPE_FORCE_NONE);
+        p->tx_alg = p->rx_alg = PPP_COMP_MPPE;
+        p->tx_seq = p->rx_seq = 0;
+        p->rx_wait = 0;
+        p->comp_credit = PPP_MAX_MRU;
+        p->cnt.ccp_opens++;
+        p->cnt.comp_tx = p->cnt.comp_rx = PPP_COMP_MPPE;
+        p->cnt.comp_tx_wbits = p->cnt.comp_rx_wbits = 0;
+        return;
+    }
+    if (p->cfg.encrypt) {
+        /* encryption is required but MPPE was not agreed both ways: fail
+         * closed. Never fall back to compression or cleartext -- end the
+         * link instead of carrying the caller's traffic unencrypted. */
+        p->tx_alg = p->rx_alg = PPP_COMP_NONE;
+        request_close(p, PPP_END_ENCRYPT_REQUIRED);
+        return;
+    }
     p->tx_alg = (uint8_t)comp_of(p->cpend_opt);
     p->rx_alg = (uint8_t)comp_of(p->cw_opt);
     /* RFC 1979 2.1 / RFC 2118 3.1: both counts start at 0 with an empty history */
@@ -1427,6 +1483,7 @@ static void ccp_down(ppp_fsm_t *f)
     /* RFC 1962 2.1: compressed datagrams only while CCP is Opened */
     p->tx_alg = p->rx_alg = PPP_COMP_NONE;
     p->rx_wait = 0;
+    ppp_mppe_reset(&p->mppe);
 }
 
 /* Negotiate CCP anew from the Opened state (RFC 1979 section 2 allows
@@ -1553,7 +1610,7 @@ static void network_start(ppp_t *p)
     ppp_fsm_up(&p->ipcp);
     /* RFC 1962 section 2: CCP belongs to the Network-Layer Protocol phase */
     p->cw_tried = 0;
-    if (p->cfg.comp) {
+    if (ccp_wanted(p)) {
         ppp_fsm_open(&p->ccp);
         ppp_fsm_up(&p->ccp);
     }
@@ -1590,14 +1647,18 @@ static void protocol_reject(ppp_t *p, uint16_t proto,
 }
 
 /* a network-layer packet, as it arrived or after decompression */
-static void net_input(ppp_t *p, uint16_t proto, const uint8_t *info, size_t n)
+static void net_input(ppp_t *p, uint16_t proto, const uint8_t *info, size_t n, int encrypted)
 {
     switch (proto) {
     case PPP_PROTO_IPCP:
         ppp_fsm_input(&p->ipcp, info, n);
         break;
     case PPP_PROTO_IP:
-        if (p->ipcp.state == PPP_FSM_OPENED) {
+        /* fail closed: with encryption required, IP only via MPPE, never a
+         * cleartext datagram slipped past the negotiation */
+        if (p->cfg.encrypt && !encrypted) {
+            p->cnt.rx_discards++;
+        } else if (p->ipcp.state == PPP_FSM_OPENED) {
             p->cnt.rx_ip++;
             if (p->cfg.ip_rx)
                 p->cfg.ip_rx(p->cfg.ctx, info, n);
@@ -1627,7 +1688,18 @@ static void comp_input(ppp_t *p, const uint8_t *info, size_t n)
         return;
     }
     hdr = (unsigned)info[0] << 8 | info[1];
-    if (p->rx_alg == PPP_COMP_DEFLATE) {
+    if (p->rx_alg == PPP_COMP_MPPE) {
+        /* RFC 3078: decrypt; the plaintext begins with the PPP protocol
+         * field, parsed below as for the compressors. The stateless cipher
+         * resynchronises itself from the coherency count, so there is no
+         * wait-for-reset state here. */
+        r = ppp_mppe_decrypt(&p->mppe, info, n, p->cbuf_rx, sizeof p->cbuf_rx);
+        if (r < 1) {
+            comp_rx_error(p);
+            return;
+        }
+        d = p->cbuf_rx;
+    } else if (p->rx_alg == PPP_COMP_DEFLATE) {
         /* RFC 1979 section 2: everything is discarded between an error
          * and the Reset-Ack; the sequence number is checked before the
          * packet is decoded */
@@ -1698,7 +1770,7 @@ static void comp_input(ppp_t *p, const uint8_t *info, size_t n)
         p->cnt.rx_bad_header++;
         return;
     }
-    net_input(p, proto, d + off, (size_t)r - off);
+    net_input(p, proto, d + off, (size_t)r - off, 1);   /* came decrypted/decompressed */
 }
 
 static void handle_frame(ppp_t *p)
@@ -1773,7 +1845,7 @@ static void handle_frame(ppp_t *p)
     }
     switch (proto) {
     case PPP_PROTO_CCP:
-        if (p->cfg.comp)
+        if (ccp_wanted(p))
             ppp_fsm_input(&p->ccp, info, n);
         else
             protocol_reject(p, proto, info, n);
@@ -1781,13 +1853,13 @@ static void handle_frame(ppp_t *p)
     case PPP_PROTO_COMP:
         if (p->rx_alg != PPP_COMP_NONE)
             comp_input(p, info, n);
-        else if (p->cfg.comp)
+        else if (ccp_wanted(p))
             p->cnt.rx_discards++;       /* RFC 1962 2.1: not before CCP is Opened */
         else
             protocol_reject(p, proto, info, n);
         break;
     default:
-        net_input(p, proto, info, n);
+        net_input(p, proto, info, n, 0);        /* cleartext off the wire */
         break;
     }
 }
@@ -1936,7 +2008,20 @@ static int send_compressed(ppp_t *p, const uint8_t *pkt, size_t len)
         return PPP_ERR_FULL;
     p->comp_credit -= (int32_t)len;
 
-    if (p->tx_alg == PPP_COMP_DEFLATE) {
+    if (p->tx_alg == PPP_COMP_MPPE) {
+        /* RFC 3078: encrypt the PPP protocol (two octets) and the packet;
+         * the 2-octet MPPE header (flags + coherency count) is the frame's
+         * header, the ciphertext its information field. */
+        uint8_t plain[PPP_MAX_MRU + 2];
+        size_t en;
+
+        plain[0] = 0x00; plain[1] = PPP_PROTO_IP;
+        memcpy(plain + 2, pkt, len);
+        en = ppp_mppe_encrypt(&p->mppe, plain, len + 2, p->cbuf_tx, sizeof p->cbuf_tx);
+        if (!en) { p->cnt.tx_dropped++; return PPP_ERR_FULL; }
+        r = tx_frame(p, PPP_PROTO_COMP, p->cbuf_tx, 2, p->cbuf_tx + 2, en - 2, NULL, 0, PPP_TX_RESERVE);
+        sent = en;
+    } else if (p->tx_alg == PPP_COMP_DEFLATE) {
         /* RFC 1979 2.1: the Protocol field in one octet, then the packet.
          * The sequence number counts every packet, sent compressed or not. */
         static const uint8_t proto1[1] = { PPP_PROTO_IP };
@@ -2010,6 +2095,10 @@ void ppp_set_comp_queue(ppp_t *p, size_t octets)
 int ppp_send_ip(ppp_t *p, const uint8_t *pkt, size_t len)
 {
     if (p->phase != PPP_PHASE_NETWORK || p->ipcp.state != PPP_FSM_OPENED)
+        return PPP_ERR_DOWN;
+    /* fail closed: with encryption required, never put a datagram on the wire
+     * until MPPE is up (IPCP can open before CCP does) */
+    if (p->cfg.encrypt && p->tx_alg != PPP_COMP_MPPE)
         return PPP_ERR_DOWN;
     if (len > p->peer_mru)
         return PPP_ERR_SIZE;
