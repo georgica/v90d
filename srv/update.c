@@ -99,7 +99,7 @@ static void consider(const char *tmp)
         int ln = snprintf(line, sizeof line, "version=%s\n", latest);
         (void)unlink(state_path);
         if (ln > 0 && (fd = open(state_path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0600)) >= 0) {
-            (void)write(fd, line, (size_t)ln);
+            (void)!write(fd, line, (size_t)ln);       /* a note only: nothing to do if it fails */
             close(fd);
         }
         logf_(CFG_LOG_INFO, "update: %s is available (this box runs %s)", latest, running);

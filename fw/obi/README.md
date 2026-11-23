@@ -25,10 +25,16 @@ inferred, not yet seen on the unit.
 
 ## What you need
 
-- An OBi200 running the **community firmware** (arrynrob13, from
-  obifirmware.com, following its instructions). Its update page accepts
-  firmware files that the maker did not sign; the stock firmware does not.
-- That same firmware file (`OBi2xx-3-2-2-8680EX-arrynrob13.fw`, md5
+- An OBi200 that accepts firmware the maker did not sign. `v90d-obi200.fw`
+  is the community firmware arrynrob13 (obifirmware.com) with v90d in it, so
+  it goes on wherever that firmware goes, by the same route: follow the
+  community install instructions and upload `v90d-obi200.fw` where they say
+  arrynrob13. In short: stock before build 5853, directly; 5853 to 6258,
+  after `bypass-uboot-mod`; 6259 and later, after stock 5921EX and then
+  `bypass-uboot-mod` (that one straight from 6259 or later ends in recovery
+  mode). A box already on the community firmware is ready; that is the path
+  tested here, the stock routes have not been tried with v90d.
+- The community firmware file (`OBi2xx-3-2-2-8680EX-arrynrob13.fw`, md5
   `b438e5161220e1e7c161e005de1d6bb6`): it is your way back.
 
 ## Build it yourself (optional)

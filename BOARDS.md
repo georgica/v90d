@@ -79,9 +79,12 @@ about a quarter). How to build, install, update and go back is in
 
 What that means for an owner:
 
-- **It needs the community firmware** (arrynrob13 at the time of writing,
-  from obifirmware.com) on the box first. The maker's own firmware takes only
-  files it signed; the community firmware's update page takes others.
+- **It installs wherever the community firmware does** (arrynrob13 at the
+  time of writing, from obifirmware.com): `v90d-obi200.fw` is that firmware
+  with v90d in it, so the box must take files the maker did not sign, by the
+  community's route (directly on stock before build 5853, after its
+  `bypass-uboot-mod` on later ones). Tested from the community firmware;
+  the stock routes not yet with v90d.
 - **Each release carries `v90d-obi200.fw`**, built by the release CI from
   the community firmware file (it is that file with our `/obi`). The builder
   is there too, for anyone who wants to make it themselves.

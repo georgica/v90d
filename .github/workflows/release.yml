@@ -13,6 +13,9 @@
 name: release
 
 on:
+  # every push to main: the whole build and its tests, nothing attached
+  push:
+    branches: [main]
   release:
     types: [published]
   workflow_dispatch:
@@ -34,7 +37,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.TAG }}
+          ref: ${{ env.TAG || github.sha }}
 
       - name: Host packages
         run: |
@@ -61,6 +64,7 @@ jobs:
           make -C srv test
 
       - name: The version is the tag
+        if: env.TAG != ''
         run: |
           v=$(cat fw/VERSION)
           [ "v$v" = "$TAG" ] || { echo "fw/VERSION says $v, the tag is $TAG"; exit 1; }
@@ -77,12 +81,14 @@ jobs:
           cp fw/obi/build/v90d-obi200.fw .
 
       - name: Attach to the release
+        if: env.TAG != ''
         run: |
           sha256sum v90d-ht802fw.bin v90d-obi200.fw > SHA256SUMS
           cat SHA256SUMS
           gh release upload "$TAG" v90d-ht802fw.bin v90d-obi200.fw SHA256SUMS --clobber
 
       - name: Download links in the release notes
+        if: env.TAG != ''
         run: |
           # a "Downloads" block between markers, replaced on a run again
           u="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}"
