@@ -2590,3 +2590,141 @@ Proof (host, and ARM under qemu):
 Not done: no real-client interop; stateful MPPE and 40/56-bit are not offered
 (the engine does 40/56, the negotiation offers 128 only); no opportunistic
 ("allow") mode - the switch is off or require. Not put on a unit yet.
+
+## 0.8.0: the encryption audited, and made to interoperate (2026-11-22, later)
+
+Before the release, the MS-CHAPv2/MPPE work above was audited by two
+independent reviewers (one on `ppp/` against RFC 2759/3078/3079 with a
+hostile peer in mind, one on the config, settings and daemon wiring), and
+in parallel the Netstalgia/nsdiald session, which builds `ppp/` from a
+pinned copy, compared it with the Linux kernel's `ppp_mppe`. Both found the
+same thing first, and it was serious: **the MPPE key schedule did not match
+what real peers do**, so encryption would have authenticated and then
+carried nothing. The self-consistent tests could not see it, since both ends
+of every test used our own `ppp_mppe`. What the entry above calls the
+session key was right only as the *initial* key.
+
+Fixed (ppp/):
+
+- Key schedule as the kernel (and so pppd and Windows) has it: initial key
+  GetNewKeyFromSHA(start, start) with no RC4; every key change is
+  GetNewKeyFromSHA(start, current) RC4-encrypted under itself (RFC 3078 7.3);
+  stateless mode changes the key before every packet including the first
+  (count starts at 4095). `ppp_mppe_new_key` is now
+  `ppp_mppe_initial_key` and `ppp_mppe_change_key`.
+- Receive window 2047 (the kernel's), replays dropped; was 256 and stuck for
+  good after a longer loss.
+- Fail closed everywhere, not only at CCP open: `comp` cleared when
+  encrypting (CCP had asked for Deflate first); the link ends if the peer
+  Protocol-Rejects CCP, if the login gave no keys, or if MPPE is not up
+  within CCP's retry span; a refused MS-CHAPv2 ends the link at once when
+  encrypting instead of falling back to PAP; `cw_mppe` no longer survives a
+  refused MPPE request (could key MPPE toward a peer that never agreed);
+  option 18 length checked on every copy; MPPE frames must fit the peer's
+  MRU with their 4 octets; short MPPE frames dropped without a Reset-Request.
+- A regression of 0.7.8's MS-CHAPv2 code, for unencrypted calls: a Nak
+  toward MS-CHAP v1 now falls back to CHAP-MD5 before PAP.
+- Failure carries `C=` (RFC 2759 6); passwords decoded from UTF-8 to UTF-16
+  for the NT hash; unknown users hashed too (same timing); keys and
+  intermediates wiped with a store the compiler cannot drop.
+- Test client: MS-CHAPv2 responses were resent as 17 octets; its buffers are
+  no longer shared between clients.
+
+Fixed (daemon, config): a Dreamcast port with encryption on was asked for
+MS-CHAPv2 (the console could not log in) -- one `full_options()` rule now
+decides V.92, x2/K56flex, compression and encryption for every service; the
+status said compression was on while encryption had turned it off; an
+encrypting port's TUN MTU is 4 lower; settings errors on the Port 2 tab name
+`encryption2`; the duplicated [modem]/[modem2] cross-checks are one function.
+
+Proof:
+
+- **Against a peer not written here:** `srv/test/ns_pppd.c` gained a sixth
+  call: the daemon, switched to "PPP encryption: on" through its own
+  settings page, answers pppd 2.5.1 with `require-mppe-128`. pppd accepts
+  our MS-CHAPv2 authenticator response, both sides agree
+  `<mppe +H -M +S -L -D -C>`, pppd logs "MPPE 128-bit stateless compression
+  enabled", and 100000 octets down and 30000 up cross the kernel's
+  `ppp_mppe` and ours over TCP, both files whole. ns_pppd 127 checks, 0
+  failures; the five compression calls unchanged.
+- Per-packet vectors from a separate Python reference (hashlib SHA-1, its
+  own RC4) that first reproduces RFC 3079's own samples: test_crypto 28,
+  test_mppe 1837 (window, replay), test_ppp 1839 (fallback order,
+  encryption with a refused or keyless login, Failure format), test_ccp 84820
+  (MRU, short frames, the stale request, Protocol-Reject, the deadline).
+- srv 1180 (the Dreamcast-with-encryption call, shown to fail on the old
+  code), cfg 645/773/623.
+
+Still not done: a real Windows client (pppd + kernel stand in for it); no
+opportunistic mode; 40/56-bit not offered.
+
+## Issue #4 (HT802 V1.6A) audited, before 0.8.0 (2026-11-22, later)
+
+The V1.6A work of 0.7.1-0.7.8 (board gate, flash chips and PHYs, the Si3226x
+and both its channels) was audited by two independent reviewers, one on the
+SLIC bring-up and line driver, one on the flash, loader gate and kernel
+config. Each finding was checked against the code before anything changed.
+Nobody here can run the V1.6A again, so the rule was: the success-path order
+and timing on the chip stay exactly as the owner confirmed them; fixes go to
+failure paths, to coordination, and to tests that pin the order down.
+
+Fixed, SLIC and line driver:
+
+- **The two ports interleaved SPI on the dual part.** An access is three
+  octets, each its own chip-select frame; only an octet was atomic, and on
+  the V1.6A both port threads talk to one chip on one select (with
+  preemption on). A per-select lock now spans the three octets; never
+  contended on the V2.5A.
+- **Port 2 never recovered.** If its channel lost its settings, its thread
+  went down and straight back up on the next pass without anything being
+  started again, warning every second forever; and a channel 1 that failed
+  to start was never retried unless channel 0 also reset. Port 2 now asks
+  port 1's thread to start the whole part again (5 s then 60 s back-off, as
+  a single-channel port retries itself); restarting channel 1 alone would be
+  the order that trips the other converter. The owner never resets the part
+  under the other port's call. A channel 0 failure no longer holds the part
+  in reset when channel 1 is in service, so a bad port 1 line no longer
+  takes port 2 with it.
+- **The converter could be left starting.** After arming, four bus-error
+  returns skipped turning it off and four writes (the RUN write among them)
+  were unchecked; all now go through `converter_off`.
+- Dual detection reads the family twice, up to three tries (one spoiled
+  read made a dual board look like a one-port one).
+- The dual order moved from the kernel into `fw/drv/slic.c`
+  (`slic_dual_init`), so it is host-tested: two simulated channels on one
+  clock and one log; the test fails on the naive order (shown) and checks
+  each failure policy. Family decode shared; the stale "shared converter"
+  comments (the first, wrong theory) corrected; `slicpoke`'s limit on the
+  dual part documented.
+
+Fixed, flash and loader:
+
+- **A flash timeout during start-up gave a reset loop.** Only an unknown chip
+  ID handed the box back to stock; a chip or controller that did not come
+  ready (new with 0.7.2's quad-enable writes) returned with nothing erased,
+  so the stock loader would start our core forever. Any start-up failure now
+  hands back, and the raw hand-back first waits for a busy chip (it would
+  have ignored the write enable). Test: a GD chip whose status write outlasts
+  the driver's 4 s; fails on the old code (shown).
+- Every erased sector is read back: a block-protected sector is not erased
+  and the chip does not say so.
+- The kernel config built the Motorcomm PHY driver for the V2.5A's YT8512H,
+  which that driver does not match (the generic driver always ran it):
+  dropped. Its comment, and the stated reason for dropping Micrel (a path
+  that does not run without an "rmii-ref" clock), rewritten to what is known.
+- BOARDS.md called the V1.6A "Tested", whose definition is a dial-up call on
+  a unit; it is now "Confirmed by its owner", and the loader keeps it under
+  the untried rule (start confirmed only once the network is heard).
+
+Looked at and left, with reasons: the RAM pre-ready check (it is what
+recovers after a lost write), finer sleeps, the double reset at probe,
+overlapping calibrations (timing proven on the unit), merging the two
+families' general tables (most values differ), GD's SR2 write (the vendor's
+sequence), QPI across reset, 64 KiB erases, the 8-bit CRC table (small gain
+in the loader), and N25Q, which no unit is known to carry and the simulator
+does not model.
+
+Proof: fw/drv slic 182 (dual order and failures, converter bus error), qspi
+102 (protected erase), loader 144 (the reset loop), host and ARM; the
+v90line driver compiled against the 6.6.63 tree with W=1, no warnings; the
+release image built.
