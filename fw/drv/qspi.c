@@ -46,7 +46,7 @@ enum { R_CFG = 0x000, R_STS = 0x008, R_ISR = 0x00C, R_IER = 0x010, R_ICR = 0x014
 #define V_MEMADD    0xFFFF0000ul
 
 #define IDLE_POLLS  100000u             /* x 10 us: 1 s */
-#define CHIP_POLLS  40000u              /* x 100 us: 4 s; a sector erase takes 0.4 s at most */
+#define CHIP_POLLS  40000u              /* x 100 us: 4 s; a 4 KiB erase takes under 1 s on every chip listed */
 #define TRIES       4
 
 #define RD(q, r)      ((q)->io.rd((q)->io.ctx, (r)))
@@ -278,6 +278,18 @@ int qspi_read(qspi_t *q, uint32_t off, uint8_t *buf, uint32_t n)
     return QSPI_OK;
 }
 
+/* the sector at off reads all ones */
+static int erased(qspi_t *q, uint32_t off)
+{
+    uint32_t w[64], i, k;
+    for (i = 0; i < QSPI_SECTOR; i += sizeof w) {
+        q->io.win_read(q->io.ctx, off + i, (uint8_t *)w, sizeof w);
+        for (k = 0; k < 64; k++)
+            if (w[k] != 0xFFFFFFFFul) return QSPI_E_VERIFY;
+    }
+    return QSPI_OK;
+}
+
 int qspi_erase(qspi_t *q, uint32_t off, uint32_t n)
 {
     int r;
@@ -287,6 +299,9 @@ int qspi_erase(qspi_t *q, uint32_t off, uint32_t n)
         if ((r = write_enable(q)) != QSPI_OK) return r;
         if ((r = aux(q, TR_QUAD, CMD_SE, 1, off, 0, 0)) != QSPI_OK) return r;
         if ((r = chip_wait(q, SR_BUSY | SR_WEL, 0, CHIP_POLLS)) != QSPI_OK) return r;
+        /* A sector under block protection is not erased, and the chip says
+         * nothing: it only drops write enable, as after any erase. So look. */
+        if ((r = erased(q, off)) != QSPI_OK) return r;
     }
     return QSPI_OK;
 }

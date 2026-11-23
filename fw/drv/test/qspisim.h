@@ -16,6 +16,9 @@ typedef struct {
     int      need_qe;           /* Winbond/GD: 0x38 enters QPI only once the QE bit (SR2 bit 1) is set */
     uint8_t  sr2;               /* status register 2 (the QE bit lives here) */
     int      stuck;             /* controller never idle */
+    uint32_t prot_lo, prot_hi;  /* block protection over [lo, hi): erase/program ignored */
+    int      sr_busy;           /* status reads that say busy after a status write
+                                 * (0: done at once) */
     int      cut_bursts;        /* this many page programs end after the first word */
     int      lost_bursts;       /* this many are not taken at all: write enable stays set,
                                  * and the controller takes no more until it is reset */

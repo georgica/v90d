@@ -65,11 +65,14 @@ static void aux(qspisim *s, uint32_t cmd)
     case 0x35: if (type != 5 || !(cmd & (1ul << 13))) s->bad++; buf_put(s, R_FRD, 0, s->sr2); break;   /* read status register 2 */
     case 0x50: if (type != 9) s->bad++; break;      /* volatile status write enable */
     case 0xC0: if (type != 9 || !(cmd & (1ul << 14))) s->bad++; break;   /* set read parameters (in QPI) */
-    case 0x01: case 0x31: s->status_writes++; if (op == 0x31) s->sr2 = buf_get(s, R_FWD, 0); s->wel = 0; break;
+    case 0x01: case 0x31: s->status_writes++; if (op == 0x31) s->sr2 = buf_get(s, R_FWD, 0);
+        if (s->sr_busy) { s->busy = s->sr_busy; s->wel = 1; } else s->wel = 0;   /* WEL drops when it is done */
+        break;
     case 0x20:
         if (type != 0 || ((t >> 10) & 3) != 1 || (s->qpi && ((t >> 2) & 3) != 2)) { s->bad++; break; }
         if (!s->wel) { s->bad++; break; }
         s->last_erase = REG(s, R_ADD) & ~(QSPI_SECTOR - 1) & (QSPI_SIZE - 1);
+        if (s->last_erase >= s->prot_lo && s->last_erase < s->prot_hi) { s->wel = 0; break; }   /* protected: ignored */
         memset(s->mem + s->last_erase, 0xFF, QSPI_SECTOR);
         s->erases++; s->busy = s->busy_polls + 1;
         break;

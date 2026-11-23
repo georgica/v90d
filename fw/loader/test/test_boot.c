@@ -212,6 +212,18 @@ static void test_other_hardware(void)
     fresh(); install(0, 50000, 7); S.stuck = 1; keep();
     ld_run(&E, &R);
     CHECK_EQ_I(R.action, LD_RESET); CHECK_EQ_I(R.why, LD_W_FLASH); CHECK(untouched_outside(0, 0));
+    /* a chip we know that does not come ready while being set up (here a GD
+     * whose quad-enable write outlasts the driver's 4 s): handed back to
+     * stock like an unknown chip -- once it is done, our header's sector is
+     * erased with plain commands -- not left for the stock boot loader to
+     * start again and again */
+    fresh(); install(0, 50000, 7); memcpy(S.mem + LD_BOARD_OFF, "9610003716A", 12);
+    S.id[0] = 0xC8; S.id[1] = 0x40; S.id[2] = 0x18; S.need_qe = 1; S.sr2 = 0; S.sr_busy = 40002; keep();
+    ld_run(&E, &R);
+    CHECK_EQ_I(R.action, LD_RESET); CHECK_EQ_I(R.why, LD_W_FLASH);
+    CHECK_EQ_I((int)S.erases, 1); CHECK_EQ_I(S.last_erase == LD_CORE_A, 1);
+    CHECK_EQ_I(word(LD_CORE_A) == 0xFFFFFFFFul, 1);
+    CHECK(untouched_outside(LD_CORE_A, LD_CORE_A + 0x1000)); CHECK_EQ_I((int)S.bad, 0);
 }
 
 static void test_flash_trouble(void)

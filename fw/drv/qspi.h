@@ -1,6 +1,8 @@
-/* The serial flash of the HT802 (EON EN25QX128A, 16 MiB, on this unit) behind the
- * SoC's QSPI controller: read, erase 4 KiB sectors, program, and nothing
- * outside the address ranges the caller has allowed.
+/* The 16 MiB serial flash of the HT80x behind the SoC's QSPI controller (EON
+ * EN25QX128A on the reference unit; the Winbond, GigaDevice and Micron parts
+ * of other boards, refs/qspi-chips.md): read, erase 4 KiB sectors (each read
+ * back), program, and nothing outside the address ranges the caller has
+ * allowed.
  *
  * Written from the facts in refs/dvf99-core-facts.md section 7 and the
  * register values read from the running unit (HARDWARE.md); no vendor code.

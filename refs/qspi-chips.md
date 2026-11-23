@@ -16,7 +16,7 @@ EON value `V_RDTRSTP = 0x0008362A`):
     OPCODE lines  bits 0-1    ADD lines     bits 2-3
     DUMMY lines   bits 4-5    DIN lines     bits 8-9
     ADDMODE       bits 10-11  (1 = 3-byte, 2 = 4-byte)
-    DUMMY_SIZE    bits 12-15  (in BYTES; QPI = 2 bits/line/clock -> N bytes = 4N dummy clocks)
+    DUMMY_SIZE    bits 12-15  (in BYTES; QPI moves 4 bits a clock, one per line -> N bytes = 2N dummy clocks)
     HAS_OPCODE    bit 19
 
 Full QPI read (all phases on 4 lines), 3-byte address, opcode 0x0B:

@@ -167,6 +167,9 @@ static int raw_status(const qspi_io *io, uint8_t mask, uint8_t want, unsigned po
 static void raw_erase_sector(const qspi_io *io, uint32_t off)
 {
     uint8_t id[3];
+    /* a chip still busy with what the driver last asked of it takes no
+     * command but a status read: let it finish first (4 s at most) */
+    (void)raw_status(io, 1, 0, 40000);
     if (raw_cmd(io, 0x9Ful | (9ul << 8) | (1ul << 13), 0, 0, id, 3)) return;
     if ((id[0] == 0 && id[1] == 0 && id[2] == 0) || (id[0] == 0xFF && id[1] == 0xFF && id[2] == 0xFF)) return;   /* nobody there */
     if (raw_cmd(io, 0x06ul | (9ul << 8), 0, 0, 0, 0) || raw_status(io, 2, 2, 1000)) return;
@@ -185,7 +188,12 @@ void ld_run(const ld_env *e, ld_result *r)
     r->set = set = ld_set_from_fdt(e->fdt, e->fdt_max);
     st = qspi_init(&q, &e->io);
     if (st != QSPI_OK) {
-        if (st == QSPI_E_ID && set >= 0) raw_erase_sector(&e->io, core_of(set));
+        /* A chip we do not know, or one (or a controller) that did not come
+         * ready while being set up: either way hand the box back to stock,
+         * or the stock boot loader starts this core again and again. The raw
+         * erase reads the chip's ID first and does nothing if no chip
+         * answers, so it cannot make things worse. */
+        if (set >= 0) raw_erase_sector(&e->io, core_of(set));
         return;
     }
 

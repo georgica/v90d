@@ -41,6 +41,23 @@ static void test_init(void)
     CHECK(untouched_outside(0, 0));
 }
 
+/* a sector under the chip's block protection is not erased and the chip
+ * does not say so (it only drops write enable): the driver reads each sector
+ * back and reports it */
+static void test_protected_erase(void)
+{
+    fresh(); CHECK_EQ_I(qspi_init(&Q, &IO), QSPI_OK);
+    CHECK_EQ_I(qspi_allow(&Q, 0xFBE000, 0xFC0000), QSPI_OK);
+    memset(S.mem + 0xFBE000, 0, 0x2000);
+    S.prot_lo = 0xFBF000; S.prot_hi = 0xFC0000;
+    CHECK_EQ_I(qspi_erase(&Q, 0xFBE000, 0x2000), QSPI_E_VERIFY);
+    CHECK_EQ_I(S.mem[0xFBE000], 0xFF); CHECK_EQ_I(S.mem[0xFBF000], 0x00);
+    S.prot_lo = S.prot_hi = 0;
+    CHECK_EQ_I(qspi_erase(&Q, 0xFBE000, 0x2000), QSPI_OK);
+    CHECK_EQ_I(S.mem[0xFBF000], 0xFF);
+    CHECK_EQ_I((int)S.bad, 0);
+}
+
 static void test_ranges(void)
 {
     uint8_t b[64]; memset(b, 0, sizeof b);
@@ -147,6 +164,6 @@ static void test_slow_chip(void)
 
 int main(void)
 {
-    test_init(); test_ranges(); test_erase_write(); test_cut_program(); test_slow_chip();
+    test_init(); test_ranges(); test_protected_erase(); test_erase_write(); test_cut_program(); test_slow_chip();
     T_REPORT("qspi");
 }
