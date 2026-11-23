@@ -2728,3 +2728,75 @@ Proof: fw/drv slic 182 (dual order and failures, converter bus error), qspi
 102 (protected erase), loader 144 (the reset loop), host and ARM; the
 v90line driver compiled against the 6.6.63 tree with W=1, no warnings; the
 release image built.
+
+## 0.9.0: the Obihai OBi200 (2026-11-23)
+
+v90d runs on a second maker's box. The OBi200 keeps the maker's Linux 2.6.30
+kernel (Marvell's, never published) and the community firmware's system
+(arrynrob13), and v90d replaces only the maker's application in the box's
+`/obi` flash part. Everything is in `fw/obi/` and its README; the board
+section is in BOARDS.md.
+
+On the unit (OBi200 hardware 1.4): a U.S. Robotics 56K 5.4.62, reached over
+the owner's serial-over-TCP bridge, called in at V.92 54 666 / 33 333 bit/s,
+LAPM with V.42bis, no retrains; PPP up (PAP), pings to the box and to the
+internet through its NAT, Deflate both ways. Installed through the OBi's own
+update page; updated through v90d's Firmware page (checked, /obi written,
+restarted by itself, the flash read back equal to the file); the way back
+(the community firmware file on the same page) tested octet for octet on a
+copy of the unit's flash and in `fw/obi/test_obinv.py`.
+
+How (all read off the unit; the maker's binaries studied, none shipped in
+our sources):
+
+- `fw/obi/obiline.c`, the line in user space. The SLIC (Si3226x rev C,
+  channel 0) is reached through the maker's module's register ioctls:
+  `ps_bus` got `reg_rd`/`reg_wr` callbacks, so `fw/drv/slic.c` runs
+  unchanged, patch-free, after a hardware reset through the module (the part
+  is held in reset from boot). Audio is the module's `/dev/pcm`, 10 ms
+  blocks of both channels, driven as the maker's application drives it
+  (both channels started, poll, no prefill); the module stops a channel for
+  good on an overrun, so the loop is SCHED_FIFO 80 and the threads that share
+  its lock run at 70, above the daemon. The daemon gets the line over a
+  packet socket: `seq:PATH` in srv/line.c, the `dev:` protocol unchanged.
+- The kernel has no TUN driver: `srv/tun.c` falls back to the kernel's PPP
+  unit over an async PPP channel on a pseudo-terminal, framed with
+  `ppp/ppp_hdlc` (`tun_read`, `tun_write`, `tun_close`). No nftables either:
+  `srv/nat.c` uses the system's iptables (1.4.4) on kernels before 3.13, the
+  same plan as two chains put first in the nat table, all or nothing.
+- `fw/obi/compat26.c`: `rename` and `accept4` for 2.6.30.
+- `fw/obi/obi`, the launcher: the maker's modules, the LAN port (`eth1` is
+  made with `unicfg -gwadd` and the unit's MAC from the factory block, as
+  the maker's application does), the line, the daemon, the lights (power as
+  the maker leaves it, read off its LED module; phone on while off hook),
+  restarts.
+- `fw/obi/mkobifw.py` builds the OBi firmware file from the owner's base
+  file and rebuilds that base file octet for octet; the update page's keyed
+  MD5 checks are made with a string found in the base file's own
+  application, not kept here. A package must carry every part: the box keeps
+  the last package's header at 0x470000 and its boot checks the flash
+  against it (a one-part package sent the unit to recovery mode, once).
+- `fw/obi/obinv.c`, the Firmware page's flash tool there: writes only parts
+  that differ, only /obi, the system and the kernel; refuses a different
+  boot loader or recovery image, so the recovery mode stays; locks itself in
+  memory and restarts the box itself, since it may rewrite what it runs
+  from. The page's upload limit is a build option (16 MiB for the OBi).
+
+Audit before the release: two reviewers, one on `fw/obi`, one on the shared
+daemon changes. Fixed from it: a priority inversion between the audio loop
+and the threads sharing its lock; obinv rewriting the part it runs from
+without locking itself in memory; the audio loop's stop conditions (separate
+read and write errors, writes without reads); the header sector rewritten
+whole instead of erased around 1 KiB; the old header read past its end;
+duplicate parts accepted; the iptables fallback decided once from the
+kernel version (it could hide errors on a kernel with nftables), our chains
+first, all or nothing, an open port range from 0; one-sided bus callbacks.
+The HT802 paths (TUN, nftables) are unchanged and their tests pass, the
+namespace NAT test included.
+
+Releases are now built by CI (`.github/workflows/release.yml`): publishing a
+release builds and attaches `v90d-ht802fw.bin` (HT802/HT801),
+`v90d-obi200.fw` and `SHA256SUMS`, after the host tests.
+
+Open: the phone light not yet seen on the unit; the OBi202 (second port,
+its LAN set-up) not done; no Windows MPPE client yet (issue #6).

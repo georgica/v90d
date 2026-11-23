@@ -2,11 +2,13 @@
 
 The OBi200 (one telephone port) runs v90d with the maker's kernel and the
 community firmware's system around it. Only the box's `/obi` part of the flash
-(the maker's application) is replaced. The v90d file for the box is **built
-from your own OBi firmware file**: it carries the maker's telephony, LED and
-watchdog kernel modules, copied out of that file at build time. That is why
-there is no ready-made OBi image to download; the sources and the builder are
-in this directory.
+(the maker's application) is replaced.
+
+Each release carries **`v90d-obi200.fw`**, ready to install. It is built by
+the release CI from the community firmware file arrynrob13 (fetched and
+checked by `getbase.sh`): it is that whole file with our `/obi` in place of
+the maker's, the maker's telephony, LED and watchdog kernel modules copied
+into it. You can also build it yourself, below.
 
 Verified on a unit (OBi200 hardware 1.4, community firmware arrynrob13, build
 8680EX):
@@ -27,17 +29,18 @@ inferred, not yet seen on the unit.
   obifirmware.com, following its instructions). Its update page accepts
   firmware files that the maker did not sign; the stock firmware does not.
 - That same firmware file (`OBi2xx-3-2-2-8680EX-arrynrob13.fw`, md5
-  `b438e5161220e1e7c161e005de1d6bb6`): the builder takes the maker's modules
-  out of it, and it is your way back.
-- The v90d sources with the toolchain set up (`fw/setup.sh`), `mksquashfs` and
-  `unsquashfs` (squashfs-tools), Python 3.
+  `b438e5161220e1e7c161e005de1d6bb6`): it is your way back.
 
-## Build
+## Build it yourself (optional)
 
-    make -C fw/obi image BASE=/path/to/OBi2xx-3-2-2-8680EX-arrynrob13.fw
+With the v90d sources and the toolchain set up (`fw/setup.sh`), `mksquashfs`
+and `unsquashfs` (squashfs-tools) and Python 3:
 
-gives `fw/obi/build/v90d-obi200.fw`: the whole firmware file (about 12 MB),
-identical to BASE except for `/obi`.
+    make -C fw/obi image BASE=$(sh fw/obi/getbase.sh)
+
+gives `fw/obi/build/v90d-obi200.fw`, the same file as the release's: the
+whole firmware file (about 12 MB), identical to the base except for `/obi`.
+`make -C fw/obi test BASE=...` also runs the flash tool's tests.
 
 ## Install
 
@@ -53,8 +56,8 @@ system, not to `/obi`.
 
 ## Update
 
-On v90d's **Firmware** page, upload a newer `v90d-obi200.fw` (built the same
-way). The page checks the whole file, writes only what differs from the flash
+On v90d's **Firmware** page, upload a newer `v90d-obi200.fw` (from a
+release, or built the same way). The page checks the whole file, writes only what differs from the flash
 (normally `/obi` alone), and restarts the box.
 
 ## Going back

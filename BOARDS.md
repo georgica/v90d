@@ -1,7 +1,8 @@
 # Supported boards
 
-v90d is a Grandstream HT80x firmware. This lists the boards it is known or
-expected to run on, and what "supported" means for each.
+v90d is a Grandstream HT80x firmware, and also runs on the Obihai OBi200
+(below). This lists the boards it is known or expected to run on, and what
+"supported" means for each.
 
 v90d will not start on a board it does not recognise, **by design**. The
 loader reads the board's part number from the stock `factory` partition and
@@ -21,12 +22,18 @@ stock as before.
 | HT801 | V1.1C | `9610003611C` | DVF99 (same device tree) | 1 | 1 × Si3217x (factory data) | **Accepted by the loader, untested** |
 | HT801 | V2.x | not yet known | DVF9918 (expected) | 1 | 1 × Si3217x (expected) | **Expected, untested** |
 | HT802V2 | V2.0A | `9610009420A` | Rockchip RK3308H | 2 | Si32283 ProSLIC | **Rockchip; under investigation** |
+| Obihai OBi200 | 1.4 | (none) | Marvell FFxAV (88E7251 family), ARM926 | 1 | 1 × Si3226x (channel 0 wired) | **Tested** |
+| Obihai OBi202 | not yet seen | (none) | the same platform (expected) | 2 | 1 × Si3226x, both channels (expected) | **Not yet: needs work** |
+
+The two Obihai boxes are not Grandstream boards, and the loader above plays
+no part in them. See "The Obihai OBi200" below.
 
 ## What the status words mean
 
 - **Tested** — v90d has been installed on a real unit of this board and a
-  dial-up call made through it. This is the reference unit, from stock
-  firmware 1.0.65; its facts are in `HARDWARE.md`.
+  dial-up call made through it. For the HT802 this is the reference unit,
+  from stock firmware 1.0.65; its facts are in `HARDWARE.md`. For the OBi200,
+  one unit on the community firmware; its facts are in `fw/obi/README.md`.
 - **Confirmed by its owner** — v90d has been installed on a real unit of
   this board by someone outside the project, who reported the network and
   both phone ports working (battery, dial tone). No dial-up call through it
@@ -48,12 +55,62 @@ stock as before.
   when no second SLIC answers. Nobody has run it there. See the HT801 section
   below for what is known and what can go wrong.
 
+- **Not yet: needs work** — the board is expected to be close enough that
+  most of v90d runs unchanged, but a known part is missing (for the OBi202:
+  its second port and its LAN set-up). Do not install v90d on it yet.
+
 - **Rockchip; under investigation**: this board is a Rockchip RK3308 platform
   (not the DVF9918) running signed firmware. The stock upgrader refuses v90d
   because the image is not signed, so the normal install path is closed.
   Whether v90d can still be booted another way (over the RK3308 MaskROM, or by
   writing kernel and rootfs under the signed U-Boot) is an open question
   (below), not yet decided either way.
+
+## The Obihai OBi200
+
+A different maker and platform, done a different way. The HT80x get a whole
+system of ours (kernel, loader, flash sets). The OBi200 keeps the maker's:
+its Linux 2.6.30 kernel (Marvell's board support, never published as
+source), the maker's telephony, LED and watchdog modules, and the community
+firmware's root file system with its SSH. v90d replaces only the maker's
+application, in the box's `/obi` flash part (2.25 MB, of which v90d uses
+about a quarter). How to build, install, update and go back is in
+`fw/obi/README.md`; the facts about the box are at its end.
+
+What that means for an owner:
+
+- **It needs the community firmware** (arrynrob13 at the time of writing,
+  from obifirmware.com) on the box first. The maker's own firmware takes only
+  files it signed; the community firmware's update page takes others.
+- **Each release carries `v90d-obi200.fw`**, built by the release CI from
+  the community firmware file (it is that file with our `/obi`). The builder
+  is there too, for anyone who wants to make it themselves.
+- **The way back is always open.** Uploading the community firmware file on
+  v90d's Firmware page restores the maker's application (only `/obi`
+  differs), and v90d never writes the boot loader or the box's recovery
+  mode, which takes any firmware file.
+
+What was tried, on one OBi200 (hardware 1.4, from the community firmware
+8680EX-arrynrob13): it boots v90d from flash; the network comes up by DHCP;
+a U.S. Robotics 56K calls in at V.92 54 666 / 33 333 bit/s and gets PPP and
+the internet through the box's NAT; updates and the way back through the
+Firmware page; the power light. The phone light is driven as the maker
+documents it but has not yet been seen on the unit.
+
+How the box differs from the HT80x, inside: the SLIC is reached through the
+maker's module (register ioctls) instead of our own SPI driver; the audio is
+the module's 10 ms PCM device, served to the daemon by a small line program
+(`fw/obi/obiline.c`); the kernel has no TUN driver and no nftables, so the
+daemon uses the kernel's PPP over a pseudo-terminal for the caller's network
+device and `iptables` for NAT (both fall back by themselves when the kernel
+lacks the newer way).
+
+**The OBi202** (two phone ports and a second Ethernet port for a router mode)
+is expected to be the same platform with both channels of the Si3226x wired.
+v90d does not run there yet: the line program drives channel 0 only, and the
+launcher sets the LAN up the OBi200's way, while the maker's application
+builds a bridge and VLANs on the OBi202. Other Obihai models (OBi1xx, OBi3xx,
+OBi5xx, OBi2000) have not been looked at.
 
 ## The HT802V2 (Rockchip RK3308, signed firmware)
 

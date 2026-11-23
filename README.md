@@ -154,6 +154,12 @@ install path is closed. Whether v90d can still be booted another way (its
 kernel and userspace written past the upgrader, under the genuine signed
 U-Boot) is an open question, not yet decided. See [BOARDS.md](BOARDS.md).
 
+v90d also runs on the **Obihai OBi200** (one phone port), on top of the
+community firmware: a V.92 call at 54 666 bit/s with PPP and the internet
+through it has been made on a unit. Its v90d file (`v90d-obi200.fw` in each
+release) is installed on the OBi's update page; see
+[fw/obi/README.md](fw/obi/README.md).
+
 Tested with three modems:
 
 | modem | what connects |
