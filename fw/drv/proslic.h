@@ -27,6 +27,12 @@ typedef struct {
      * into the SPI control octet as the CID; 0 for the single-channel parts.
      * A zeroed ps_bus is channel 0, so existing callers need no change. */
     uint8_t  cid;
+    /* Optional: a bus that moves whole register accesses rather than octets
+     * (the OBi200's kernel driver offers register read/write ioctls, not raw
+     * SPI). Set both: ps_rd uses reg_rd and ps_wr reg_wr instead of xfer;
+     * the channel is then the callback's business. NULL in a zeroed ps_bus. */
+    uint8_t (*reg_rd)(void *ctx, uint8_t reg);
+    void    (*reg_wr)(void *ctx, uint8_t reg, uint8_t v);
 } ps_bus;
 
 /* direct registers 0..127 */

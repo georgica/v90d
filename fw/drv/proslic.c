@@ -12,6 +12,7 @@ static uint8_t cid_bits(const ps_bus *b) { return (uint8_t)((b->cid & 1) << 4); 
 
 uint8_t ps_rd(const ps_bus *b, uint8_t reg)
 {
+    if (b->reg_rd) return b->reg_rd(b->ctx, reg);
     b->xfer(b->ctx, (uint8_t)(CTL_READ | cid_bits(b)));
     b->xfer(b->ctx, reg);
     return b->xfer(b->ctx, 0xFF);
@@ -19,6 +20,7 @@ uint8_t ps_rd(const ps_bus *b, uint8_t reg)
 
 void ps_wr(const ps_bus *b, uint8_t reg, uint8_t v)
 {
+    if (b->reg_wr) { b->reg_wr(b->ctx, reg, v); return; }
     b->xfer(b->ctx, (uint8_t)(CTL_WRITE | cid_bits(b)));
     b->xfer(b->ctx, reg);
     b->xfer(b->ctx, v);
