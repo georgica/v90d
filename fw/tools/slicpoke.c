@@ -11,6 +11,14 @@
  *   slicpoke [-c 0|1] init [alaw|ulaw|linear [SLOT]]   reset and bring the port up (drv/slic.c)
  *   slicpoke [-c 0|1] hook | down     hook state and battery; line open and converter off
  *
+ * -c picks the chip select: 0 for port 1's part, 1 for port 2's on a board
+ * with a part per port. On the HT802 V1.x one dual-channel Si3226x on select
+ * 0 serves both ports, and these direct commands reach only its channel 0
+ * (port 1); port 2 (its channel 1) is reached through the driver, with the k
+ * commands below. "init" here brings up one channel alone, which on that part
+ * is not safe with the other channel's converter running (fw/drv/slic.h,
+ * slic_dual_init): do it with the driver stopped and the part just reset.
+ *
  * While our kernel driver (v90line) runs, the bus is its own: the commands
  * above would cut into its accesses. These go through the driver instead
  * (its slic / slic2 attribute; the port's thread does the access between two

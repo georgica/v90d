@@ -66,9 +66,13 @@ static const ram_val general2[] = {
  * `general` table sets, at the shared rev-C RAM addresses, carrying the
  * Si3226x values where they differ (line-driver power, battery hysteresis,
  * ringing battery, and the DC-DC error, over/under-voltage and over-current
- * thresholds). The VOV overhead and AC-ADC gain are left to the part's
- * defaults and the ring preset, as the Si3226x general configuration does.
- * Experimental, patch-free like the Si3217x; to be confirmed on hardware. */
+ * thresholds). Not written here, unlike the vendor's general configuration:
+ * the three VOV_DCDC values, AC_ADC_GAIN, and its few extra masks and
+ * debounces (DCDC_CPUMP_LP_MASK, OIMASK, UV/OV debounce; refs/
+ * si3226x-facts.md section 4 step 7). The part runs on its reset values
+ * there. Patch-free like the Si3217x; with these values both channels of the
+ * issue #4 unit came up (confirmed by its owner), so change them only with a
+ * unit to measure on. */
 static const ram_val general_3226x[] = {
     { R_P_TH_HVIC, 0x005B05B2 }, { R_COEF_P_HVIC, 0x07FEB800 }, { R_BAT_HYST, 0x000AD000 },
     { R_VBATH_EXPECT, 0x03D70A20 },                 /* 60 V talk battery (same as Si3217x) */
@@ -198,31 +202,37 @@ static int converter_up(const ps_bus *b)
 {
     uint32_t target, pd; long v; uint8_t enhance; unsigned t;
 
-    /* On a dual part (Si3226x) the two channels share one converter: whichever
-     * channel starts it first brings it up, and the other finds PD_DCDC bit 20
-     * already clear and leaves it running rather than re-arming it, which would
-     * disturb the channel already in service (refs/si3226x-facts.md section 4
-     * step 9). A part with a converter of its own per channel reads its own
-     * bit 20 still set here and starts it, so this is right for both. */
+    /* The vendor's start-up step skips a converter whose PD_DCDC bit 20 (the
+     * power-down) is already clear, i.e. one already running (refs/
+     * si3226x-facts.md section 4 step 9). After the reset the driver gives the
+     * part, bit 20 is set on every channel of both families, so this does not
+     * fire in practice; it is kept as the vendor has it. (An earlier reading,
+     * that the Si3226x's channels share one converter, was wrong: each has its
+     * own, on a shared DC input -- see slic_dual_init.) */
     if (!ps_ram_rd(b, R_PD_DCDC, &pd) && !(pd & 0x100000)) return 0;
 
+    /* The steps below are the Si3217x unit's, run unchanged on the Si3226x
+     * too: LIFT_EN, the PD_BIAS/PD_HVIC writes, the 20 ms wait (the vendor's
+     * Si3226x step uses 10 ms and sets DCDC_OITHRESH from its LO value
+     * first). Both channels of the issue #4 unit came up this way, so leave
+     * them as they are without a unit to measure on. */
     ps_wr(b, PS_LINEFEED, 0);
     enhance = ps_rd(b, PS_ENHANCE);
     ps_wr(b, PS_ENHANCE, enhance & 0x07);
-    if (ps_ram_wr(b, R_PD_DCDC, DCDC_ARM)) return SLIC_E_BUS;
+    /* From the arming on, a bus error turns the converter off before it is
+     * reported: a write that was sent but not seen through may still have
+     * taken, and a converter must not be left starting on its own. */
+    if (ps_ram_wr(b, R_PD_DCDC, DCDC_ARM)) goto bus;
     /* this topology without a gate driver: switch drive not inverted, charge pump on */
-    if (ps_ram_wr(b, R_DCDC_LIFT_EN, 0) || ps_ram_wr(b, R_DCDC_SWDRV_POL, 0) || ps_ram_wr(b, R_DCDC_CPUMP, 0x100000)) return SLIC_E_BUS;
+    if (ps_ram_wr(b, R_DCDC_LIFT_EN, 0) || ps_ram_wr(b, R_DCDC_SWDRV_POL, 0) || ps_ram_wr(b, R_DCDC_CPUMP, 0x100000)) goto bus;
     b->msleep(b->ctx, 20);
-    if (ps_ram_rd(b, R_VBATH_EXPECT, &target)) return SLIC_E_BUS;
+    if (ps_ram_rd(b, R_VBATH_EXPECT, &target)) goto bus;
 
-    if (ps_ram_wr(b, R_PD_DCDC, DCDC_START)) return SLIC_E_BUS;
-    ps_ram_wr(b, R_PD_BIAS, 0x200000);
-    ps_ram_wr(b, R_PD_HVIC, 0x200000);
+    if (ps_ram_wr(b, R_PD_DCDC, DCDC_START) || ps_ram_wr(b, R_PD_BIAS, 0x200000) || ps_ram_wr(b, R_PD_HVIC, 0x200000)) goto bus;
     b->msleep(b->ctx, 50);
     if (vbat_counts(b, &v) || v < (long)target / 2) { converter_off(b, DCDC_OFF_SHORT); return SLIC_E_SHORT; }
 
-    ps_ram_wr(b, R_DCDC_STATUS, 0);
-    ps_ram_wr(b, R_PD_DCDC, DCDC_RUN);
+    if (ps_ram_wr(b, R_DCDC_STATUS, 0) || ps_ram_wr(b, R_PD_DCDC, DCDC_RUN)) goto bus;
     ps_wr(b, PS_ENHANCE, enhance);
     b->msleep(b->ctx, 50);
     for (t = 0; t < 2000; t += 10) {
@@ -232,6 +242,9 @@ static int converter_up(const ps_bus *b)
     }
     converter_off(b, DCDC_OFF);
     return SLIC_E_VBAT;
+bus:
+    converter_off(b, DCDC_OFF);
+    return SLIC_E_BUS;
 }
 
 void slic_shutdown(const ps_bus *b)
@@ -242,14 +255,19 @@ void slic_shutdown(const ps_bus *b)
     ps_ram_wr(b, R_PD_DCDC, DCDC_OFF);
 }
 
-int slic_family(const ps_bus *b)
+/* A ProSLIC (bit 7), not a line-side device; the revision code names the
+ * family at rev C: 2 = Si3217x, 3 = Si3226x (refs/si3226x-facts.md). They share
+ * the rev-C RAM map, so only the general values and a couple of bring-up steps
+ * differ. -1: none, or not one we know. */
+static int family_of(uint8_t id)
 {
-    uint8_t id = ps_rd(b, PS_ID);
     if (id == 0xFF || !(id & 0x80)) return -1;
     if ((id & 0x07) == 2) return SLIC_FAM_3217X;
     if ((id & 0x07) == 3) return SLIC_FAM_3226X;
     return -1;
 }
+
+int slic_family(const ps_bus *b) { return family_of(ps_rd(b, PS_ID)); }
 
 int slic_present(const ps_bus *b)
 {
@@ -275,14 +293,7 @@ int slic_setup(const ps_bus *b, slic_info *info)
 
     info->stage = 0; info->vbat_mv = 0;
     info->id = ps_rd(b, PS_ID);
-    /* a ProSLIC (bit 7), not a line-side device; the revision code names the
-     * family at rev C: 2 = Si3217x, 3 = Si3226x (refs/si3226x-facts.md). They
-     * share the rev-C RAM map, so only the general values and a couple of
-     * bring-up steps differ. */
-    if (info->id == 0xFF || !(info->id & 0x80)) return SLIC_E_ID;
-    if ((info->id & 0x07) == 2) info->family = SLIC_FAM_3217X;
-    else if ((info->id & 0x07) == 3) info->family = SLIC_FAM_3226X;
-    else return SLIC_E_ID;
+    if ((info->family = family_of(info->id)) < 0) return SLIC_E_ID;
     ps_wr(b, PS_PCMRXLO, 0x5A);
     if (ps_rd(b, PS_PCMRXLO) != 0x5A) return SLIC_E_BUS;
     ps_wr(b, PS_PCMRXLO, 0);
@@ -308,9 +319,7 @@ int slic_setup(const ps_bus *b, slic_info *info)
 
 /* Stage 3: start the battery converter. slic_setup must have run. On a dual
  * part the converters of both channels are started back to back, between the
- * setup of both and any line calibration, so the second converter's start-up
- * inrush does not trip the first off the shared VDC input (the parts have a
- * converter each, but they share the board's DC input). */
+ * setup of both and any line calibration (slic_dual_init). */
 int slic_converter(const ps_bus *b, slic_info *info)
 {
     int r;
@@ -378,4 +387,30 @@ int slic_init(const ps_bus *b, const slic_cfg *cfg, slic_info *info)
 void slic_service(const ps_bus *b)
 {
     ps_wr(b, PS_LINEFEED, 1);       /* forward active */
+}
+
+/* the part as a whole does not answer: its other channel will not either */
+static int part_failed(int r) { return r == SLIC_E_ID || r == SLIC_E_BUS; }
+
+void slic_dual_init(const ps_bus *b0, const ps_bus *b1, const slic_cfg *c0, const slic_cfg *c1,
+                    slic_info *i0, slic_info *i1, int r[2])
+{
+    slic_cfg d0 = *c0, d1 = *c1;
+
+    d0.defer_service = d1.defer_service = 1;
+    r[0] = slic_setup(b0, i0);
+    if (part_failed(r[0])) {
+        i1->id = i0->id; i1->family = i0->family; i1->stage = 0; i1->vbat_mv = 0;
+        r[1] = r[0];
+        return;
+    }
+    r[1] = slic_setup(b1, i1);
+    /* the order that matters: no converter before both setups, both
+     * converters before anything that loads a line */
+    if (!r[0]) r[0] = slic_converter(b0, i0);
+    if (!r[1]) r[1] = slic_converter(b1, i1);
+    if (!r[0]) r[0] = slic_finish(b0, &d0, i0);
+    if (!r[1]) r[1] = slic_finish(b1, &d1, i1);
+    if (!r[0]) slic_service(b0);
+    if (!r[1]) slic_service(b1);
 }

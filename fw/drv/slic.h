@@ -3,8 +3,10 @@
  * address map and differing only in the ID revision code and a handful of
  * DC-DC / battery init values: the Si3217x (one channel each; HT802 V2.5A and
  * the HT801s) and the Si3226x (two channels per package; the V1.x boards, e.g.
- * the Si32260 on the issue #4 HT802 V1.6A). Si3226x is experimental, patch-free
- * like the Si3217x, confirmed on hardware per board.
+ * the Si32260 on the issue #4 HT802 V1.6A). Both run patch-free. The Si3226x
+ * bring-up was confirmed on the issue #4 unit by its owner (both ports up,
+ * battery and dial tone); its stage values are the Si3217x unit's except where
+ * slic.c says otherwise.
  *
  * Sequence and constants: refs/si3217x-map.md and refs/si3226x-facts.md (the
  * public description of the parts' start-up, studied from the Silicon Labs
@@ -28,12 +30,10 @@ enum { SLIC_FAM_3217X = 0, SLIC_FAM_3226X = 1 };
 typedef struct {
     uint8_t  pcm_format;        /* SLIC_PCM_* */
     uint16_t slot;              /* start of our samples, in bit clocks from frame sync */
-    int      defer_service;     /* 1: leave the line open at the end of slic_init,
-                                   to be put in service later with slic_service().
-                                   On a dual part both channels must be calibrated
-                                   with their lines open before either goes in
-                                   service, or the second channel's calibration
-                                   disturbs the first. 0: in service as before. */
+    int      defer_service;     /* 1: leave the line open at the end of slic_finish,
+                                   to be put in service later with slic_service()
+                                   (slic_dual_init does this for both channels).
+                                   0: in service at the end, as slic_init has it. */
 } slic_cfg;
 
 enum {
@@ -72,6 +72,20 @@ int  slic_finish(const ps_bus *b, const slic_cfg *cfg, slic_info *info);
 /* Put a line that was brought up with cfg->defer_service into service (forward
  * active). The converter and calibration are already done by slic_finish. */
 void slic_service(const ps_bus *b);
+/* Both channels of a dual part (Si3226x) on one chip select, b0 and b1 being
+ * channel 0 and 1 (CID 0 and 1), in the order the hardware needs: the setup of
+ * both, then both converters back to back (channel 0 first), then the rest of
+ * both with the lines open, then both lines in service. Each channel has a
+ * converter of its own but the board's DC input is shared: starting the second
+ * while the first already carries line current, or runs its line
+ * calibrations, trips the first off on the inrush (issue #4, found on the
+ * unit; this order fixed it). The cfgs' defer_service is ignored.
+ * r[0] and r[1] are the channels' results. A channel that fails is left with
+ * its converter off and its line open, and the other goes on on its own --
+ * except that when channel 0 finds the part itself not answering (SLIC_E_ID,
+ * SLIC_E_BUS in its setup), channel 1 is not tried and gets the same result. */
+void slic_dual_init(const ps_bus *b0, const ps_bus *b1, const slic_cfg *c0, const slic_cfg *c1,
+                    slic_info *i0, slic_info *i1, int r[2]);
 int  slic_offhook(const ps_bus *b);             /* 1 off hook, 0 on hook */
 long slic_vbat_mv(const ps_bus *b);
 void slic_shutdown(const ps_bus *b);            /* line open, converter off */

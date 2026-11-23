@@ -1,5 +1,7 @@
-/* Register and RAM access to a ProSLIC (Si3217x on the HT802: one
- * single-channel part per FXS port, each on its own chip select).
+/* Register and RAM access to a ProSLIC: a single-channel Si3217x per FXS port,
+ * each on its own chip select (HT802 V2.5A, HT801), or a dual-channel Si3226x
+ * serving both ports on one select, the channel named by the CID bit of each
+ * access's control octet (ps_bus.cid; the HT802 V1.x).
  *
  * Written from the facts in refs/si3226x-facts.md (protocol as described in
  * the public data sheet and observed on the board); no vendor code.

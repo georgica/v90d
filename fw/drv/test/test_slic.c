@@ -165,7 +165,11 @@ static void test_second_channel_cid(void)
 /* Bringing up channel 1 of a dual part while its shared converter is already
  * running (channel 0 started it): slic_init must leave the converter alone,
  * not re-arm it, and still bring the channel into service. */
-static void test_second_channel_shares_converter(void)
+/* the vendor's start-up step leaves a converter that is already running (its
+ * PD_DCDC bit 20 clear) alone. After the driver's reset this does not happen;
+ * kept as the vendor has it. (Each channel of a Si3226x has a converter of its
+ * own: test_dual_order is what keeps them apart.) */
+static void test_running_converter_left_alone(void)
 {
     slic_info i;
     fresh(); C.reg[0] = 0xB3; B.cid = 1;
@@ -285,6 +289,152 @@ static void test_gain_helpers(void)
     CHECK(slic_gain_scale(0, 30) == 0);
 }
 
+/* ---- a dual part (Si3226x): two channels, each its own simulated register
+ * set, one clock, and one log of the steps whose order matters ---- */
+enum { EV_MADC, EV_CONV, EV_CAL4, EV_CAL5, EV_SERVICE };
+static struct { int ch, ev; } L[64];
+static int nL;
+typedef struct {
+    chipsim c; ps_bus b; int ch;
+    int vbat_mode, running, cal_left, stall, wrong_cid; long conv_ms;
+} chan_t;
+static chan_t D[2];
+
+static void d_log(int ch, int ev) { if (nL < 64) { L[nL].ch = ch; L[nL].ev = ev; nL++; } }
+static void d_on_ram(chipsim *c, unsigned a, uint32_t v)
+{
+    chan_t *k = c->user_ctx;
+    if (a == 1538) {
+        int run = v == 0x600000 || v == 0x400000;
+        if (v == 0x600000) { d_log(k->ch, EV_CONV); if (k->stall) k->stall = 2; }
+        if (run && !k->running) k->conv_ms = 0;
+        k->running = run;
+        if (!run) c->ram[3] = MV(1000);
+    }
+}
+static void d_on_write(chipsim *c, uint8_t r, uint8_t v)
+{
+    chan_t *k = c->user_ctx;
+    if (c->ch != k->ch) k->wrong_cid++;
+    if (r == 10 && k->stall == 2) { c->busy = 63; k->stall = 0; }     /* sent, but never seen done */
+    if (r == 29 && (v & 0x80)) {
+        d_log(k->ch, c->reg[27] == 0xC0 ? EV_CAL4 : c->reg[27] == 0x40 ? EV_CAL5 : EV_MADC);
+        k->cal_left = 40;
+    }
+    if (r == 30 && v == 1) d_log(k->ch, EV_SERVICE);
+}
+/* time passes for both channels whichever one the driver sleeps on */
+static void d_on_sleep(chipsim *c, unsigned ms)
+{
+    int n;
+    (void)c;
+    for (n = 0; n < 2; n++) {
+        chan_t *k = &D[n];
+        if (k->cal_left) { k->cal_left -= (int)ms; if (k->cal_left <= 0) { k->cal_left = 0; k->c.reg[29] &= 0x7F; } }
+        if (k->running) {
+            long target = k->vbat_mode == 1 ? 2000 : 59000, v;
+            k->conv_ms += ms;
+            v = target * k->conv_ms / 40; if (v > target) v = target;
+            k->c.ram[3] = MV(v);
+        }
+    }
+}
+static void d_fresh(void)
+{
+    int n;
+    nL = 0;
+    for (n = 0; n < 2; n++) {
+        chan_t *k = &D[n];
+        memset(k, 0, sizeof *k);
+        chipsim_init(&k->c); chipsim_bus(&k->c, &k->b);
+        k->b.cid = (uint8_t)n; k->ch = n;
+        k->c.user_ctx = k; k->c.on_ram = d_on_ram; k->c.on_write = d_on_write; k->c.on_sleep = d_on_sleep;
+        k->c.busy_polls = 1;
+        k->c.reg[0] = 0xB3;
+        k->c.reg[11] = 0x05; k->c.reg[47] = 0x10; k->c.reg[80] = 0x3F; k->c.reg[68] = 0xF0;
+        k->c.ram[1538] = 0x900000; k->c.ram[1575] = 0x1EC3FDBC; k->c.ram[767] = 0x03958100;
+    }
+}
+static int d_first(int ev, int ch)
+{
+    int i;
+    for (i = 0; i < nL; i++) if (L[i].ev == ev && (ch < 0 || L[i].ch == ch)) return i;
+    return -1;
+}
+static int d_last(int ev, int ch)
+{
+    int i;
+    for (i = nL - 1; i >= 0; i--) if (L[i].ev == ev && (ch < 0 || L[i].ch == ch)) return i;
+    return -1;
+}
+
+static const slic_cfg C0 = { SLIC_PCM_ULAW, 0, 0 }, C1 = { SLIC_PCM_ULAW, 16, 0 };
+
+/* the order that brought both ports of the issue #4 unit up: both setups,
+ * then both converters back to back (channel 0 first), and nothing that
+ * loads a line -- the line calibrations, the line in service -- before both
+ * converters are running; both lines in service only after both are done */
+static void test_dual_order(void)
+{
+    slic_info i0, i1; int r[2], conv0, conv1;
+
+    d_fresh();
+    slic_dual_init(&D[0].b, &D[1].b, &C0, &C1, &i0, &i1, r);
+    CHECK_EQ_I(r[0], SLIC_OK); CHECK_EQ_I(r[1], SLIC_OK);
+    CHECK_EQ_I(i0.family, SLIC_FAM_3226X); CHECK_EQ_I(i1.family, SLIC_FAM_3226X);
+    conv0 = d_first(EV_CONV, 0); conv1 = d_first(EV_CONV, 1);
+    CHECK(conv0 >= 0 && conv1 > conv0);
+    CHECK(d_last(EV_MADC, 0) >= 0 && d_last(EV_MADC, 1) >= 0);
+    CHECK(d_last(EV_MADC, -1) < conv0);
+    CHECK(d_first(EV_CAL4, -1) > conv1);
+    CHECK(d_first(EV_CAL5, -1) > conv1);
+    CHECK(d_first(EV_SERVICE, -1) > conv1);
+    CHECK(d_first(EV_SERVICE, -1) > d_last(EV_CAL5, -1));
+    CHECK(d_first(EV_SERVICE, 0) >= 0 && d_first(EV_SERVICE, 1) >= 0);
+    /* each channel spoken to on its own CID, with its own PCM slot */
+    CHECK_EQ_I(D[0].wrong_cid, 0); CHECK_EQ_I(D[1].wrong_cid, 0);
+    CHECK_EQ_I(D[0].c.reg[PS_PCMTXLO], 0); CHECK_EQ_I(D[1].c.reg[PS_PCMTXLO], 16);
+    CHECK_EQ_I(D[0].c.reg[PS_LINEFEED], 1); CHECK_EQ_I(D[1].c.reg[PS_LINEFEED], 1);
+    CHECK_EQ_I((int)D[0].c.bad, 0); CHECK_EQ_I((int)D[1].c.bad, 0);
+}
+
+/* one channel failing leaves it off and the other in service; only a part
+ * that does not answer at all stops both */
+static void test_dual_failures(void)
+{
+    slic_info i0, i1; int r[2];
+
+    d_fresh(); D[1].vbat_mode = 1;                  /* port 2's line shorted */
+    slic_dual_init(&D[0].b, &D[1].b, &C0, &C1, &i0, &i1, r);
+    CHECK_EQ_I(r[0], SLIC_OK); CHECK_EQ_I(r[1], SLIC_E_SHORT);
+    CHECK_EQ_I(D[0].c.reg[PS_LINEFEED], 1);
+    CHECK_EQ_I(D[1].c.reg[PS_LINEFEED], 0); CHECK_EQ_I((long)D[1].c.ram[1538], 0x300000);
+
+    d_fresh(); D[0].vbat_mode = 1;                  /* port 1's line shorted */
+    slic_dual_init(&D[0].b, &D[1].b, &C0, &C1, &i0, &i1, r);
+    CHECK_EQ_I(r[0], SLIC_E_SHORT); CHECK_EQ_I(r[1], SLIC_OK);
+    CHECK_EQ_I(D[0].c.reg[PS_LINEFEED], 0); CHECK_EQ_I((long)D[0].c.ram[1538], 0x300000);
+    CHECK_EQ_I(D[1].c.reg[PS_LINEFEED], 1);
+
+    d_fresh(); D[0].c.reg[0] = 0xFF;                /* nothing answers: channel 1 is not tried */
+    slic_dual_init(&D[0].b, &D[1].b, &C0, &C1, &i0, &i1, r);
+    CHECK_EQ_I(r[0], SLIC_E_ID); CHECK_EQ_I(r[1], SLIC_E_ID);
+    CHECK_EQ_I((long)D[1].c.frames, 0);
+}
+
+/* the start of the converter was sent but never seen done: the converter is
+ * turned off before the bus error is reported, not left starting */
+static void test_converter_bus_error(void)
+{
+    slic_info i; int r;
+    d_fresh(); D[0].stall = 1;
+    r = slic_init(&D[0].b, &C0, &i);
+    CHECK_EQ_I(r, SLIC_E_BUS);
+    CHECK_EQ_I(i.stage, 3);
+    CHECK_EQ_I((long)D[0].c.ram[1538], 0x900000);   /* DCDC_OFF */
+    CHECK_EQ_I(D[0].c.reg[PS_LINEFEED], 0);
+}
+
 int main(void)
 {
     test_gain_helpers();
@@ -294,7 +444,10 @@ int main(void)
     test_si3226x();
     test_deferred_service();
     test_second_channel_cid();
-    test_second_channel_shares_converter();
+    test_running_converter_left_alone();
+    test_dual_order();
+    test_dual_failures();
+    test_converter_bus_error();
     test_present();
     test_dead_ram();
     test_short_circuit();
