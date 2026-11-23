@@ -432,6 +432,39 @@ static void test_auth_negotiation(void)
     CHECK_EQ_I(status()->phase, PPP_PHASE_TERMINATE);
     CHECK_EQ_I(status()->end_reason, PPP_END_AUTH_REFUSED);
 
+    /* MS-CHAPv2 first. A peer that Naks it toward MS-CHAP v1 (Windows 95
+     * without the v2 update), which we do not do, gets CHAP-MD5 next, and
+     * only then PAP: never a password in clear while CHAP-MD5 is left */
+    c.auth = PPP_AUTH_MSCHAPV2 | PPP_AUTH_CHAP | PPP_AUTH_PAP;
+    start(&c);
+    pull();
+    f = find(PPP_PROTO_LCP, PPP_CONF_REQ);
+    v = f ? opt(f, 3, &vl) : NULL;
+    CHECK(v && vl == 3 && v[0] == 0xc2 && v[1] == 0x23 && v[2] == 0x81);
+    push_cp(PPP_PROTO_LCP, PPP_CONF_NAK, f->d[1], nak_mschap, sizeof nak_mschap);
+    pull();
+    f = find(PPP_PROTO_LCP, PPP_CONF_REQ);
+    v = f ? opt(f, 3, &vl) : NULL;
+    CHECK(v && vl == 3 && v[0] == 0xc2 && v[1] == 0x23 && v[2] == 5);
+    push_cp(PPP_PROTO_LCP, PPP_CONF_NAK, f->d[1], nak_mschap, sizeof nak_mschap);
+    pull();
+    f = find(PPP_PROTO_LCP, PPP_CONF_REQ);
+    v = f ? opt(f, 3, &vl) : NULL;
+    CHECK(v && vl == 2 && v[0] == 0xc0 && v[1] == 0x23);
+
+    /* with encryption required nothing but MS-CHAPv2 will do (the MPPE keys
+     * come from it): a Nak of it ends the link at once, before any password */
+    c.auth = PPP_AUTH_MSCHAPV2 | PPP_AUTH_CHAP | PPP_AUTH_PAP;
+    c.encrypt = 1;
+    start(&c);
+    pull();
+    f = find(PPP_PROTO_LCP, PPP_CONF_REQ);
+    push_cp(PPP_PROTO_LCP, PPP_CONF_NAK, f->d[1], nak_pap, sizeof nak_pap);
+    pull();
+    CHECK(find(PPP_PROTO_LCP, PPP_TERM_REQ) != NULL);
+    CHECK_EQ_I(status()->end_reason, PPP_END_ENCRYPT_REQUIRED);
+    c.encrypt = 0;
+
     /* CHAP only: a Nak for PAP cannot be honoured */
     c.auth = PPP_AUTH_CHAP;
     start(&c);
@@ -632,6 +665,16 @@ static void test_mschap2(void)
     pull();
     f = find(PPP_PROTO_CHAP, 4);
     CHECK(f && f->d[4] == 'E' && f->d[5] == '=');
+    /* RFC 2759 section 6: "E=691 R=0 C=<32 hex digits> V=3 M=<text>" */
+    if (f) {
+        int i, hex = 1;
+        CHECK(f->n >= 4 + 12 + 32 + 7);
+        CHECK(memcmp(f->d + 4, "E=691 R=0 C=", 12) == 0);
+        for (i = 0; i < 32; i++)
+            hex &= (f->d[16 + i] >= '0' && f->d[16 + i] <= '9') || (f->d[16 + i] >= 'A' && f->d[16 + i] <= 'F');
+        CHECK(hex);
+        CHECK(memcmp(f->d + 48, " V=3 M=", 7) == 0);
+    }
     CHECK(find(PPP_PROTO_CHAP, 3) == NULL);
     CHECK_EQ_I(status()->phase, PPP_PHASE_TERMINATE);
     CHECK_EQ_I(status()->end_reason, PPP_END_AUTH_FAILED);
@@ -756,6 +799,25 @@ static void test_pap(void)
     lcp_up(peer_lcp, sizeof peer_lcp);
     CHECK_EQ_I(status()->phase, PPP_PHASE_NETWORK);
     CHECK(find(PPP_PROTO_IPCP, PPP_CONF_REQ) != NULL);
+}
+
+/* encryption required but the login was PAP (allowed by the configuration):
+ * there are no MPPE keys, so the link ends instead of opening IPCP and then
+ * carrying nothing */
+static void test_encrypt_needs_keys(void)
+{
+    ppp_config_t c;
+
+    base_cfg(&c);
+    c.auth = PPP_AUTH_PAP;
+    c.encrypt = 1;
+    start(&c);
+    lcp_up(peer_lcp, sizeof peer_lcp);
+    pap_request(1, "alice", "wonderland");
+    pull();
+    CHECK(find(PPP_PROTO_IPCP, PPP_CONF_REQ) == NULL);
+    CHECK(status()->phase != PPP_PHASE_NETWORK);
+    CHECK_EQ_I(status()->end_reason, PPP_END_ENCRYPT_REQUIRED);
 }
 
 static void test_ipcp(void)
@@ -1348,6 +1410,7 @@ int main(void)
     test_auth_negotiation();
     test_chap();
     test_mschap2();
+    test_encrypt_needs_keys();
     test_pap();
     test_ipcp();
     test_data_and_lcp_codes();

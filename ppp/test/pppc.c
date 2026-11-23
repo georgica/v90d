@@ -501,7 +501,7 @@ static void c_deliver(pppc_t *c, const uint8_t *ip, size_t n)
 /* a compressed datagram from the server */
 static void cc_input(pppc_t *c, const uint8_t *info, size_t n)
 {
-    static uint8_t out[1600];
+    uint8_t out[1600];      /* not static: several clients may run at once */
     const uint8_t *d = out;
     unsigned hdr;
     int r;
@@ -698,7 +698,9 @@ void pppc_tick(pppc_t *c, uint32_t ms)
         } else if (c->auth == PPPC_AUTH_PAP) {
             pap_send(c);
         } else if (c->chap_answered) {
-            c_cp(c, P_CHAP, 2, c->chap_id, c->chap_rsp, 17,
+            /* the response as it was: its value-size octet, then the value
+             * (16 octets for CHAP-MD5, 49 for MS-CHAPv2) */
+            c_cp(c, P_CHAP, 2, c->chap_id, c->chap_rsp, (size_t)c->chap_rsp[0] + 1,
                  (const uint8_t *)c->cfg.user, strlen(c->cfg.user));
             c->auth_timer = c->lcp.restart_ms;
         }
@@ -707,7 +709,7 @@ void pppc_tick(pppc_t *c, uint32_t ms)
 
 int pppc_send_ip(pppc_t *c, const uint8_t *pkt, size_t len)
 {
-    static uint8_t out[1600];
+    uint8_t out[1600];      /* not static: several clients may run at once */
     uint8_t h[4];
     size_t cn;
 

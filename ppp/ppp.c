@@ -567,12 +567,23 @@ static void lcp_auth_refused(ppp_t *p, unsigned suggestion)
     unsigned left = p->cfg.auth & ~(unsigned)p->auth_tried;
     unsigned next = 0;
 
+    if (p->cfg.encrypt) {
+        /* MPPE is keyed from MS-CHAPv2 only. Falling back to another login
+         * would have the caller send its password (in clear, for PAP) for a
+         * link that is then ended for want of keys: end it now. */
+        request_close(p, PPP_END_ENCRYPT_REQUIRED);
+        return;
+    }
+    /* the peer's suggestion if we allow it, else the strongest left: never
+     * PAP (a password in clear) while CHAP-MD5 is still to be tried */
     if (suggestion & left)
         next = suggestion;
-    else if (left & PPP_AUTH_PAP)
-        next = PPP_AUTH_PAP;
+    else if (left & PPP_AUTH_MSCHAPV2)
+        next = PPP_AUTH_MSCHAPV2;
     else if (left & PPP_AUTH_CHAP)
         next = PPP_AUTH_CHAP;
+    else if (left & PPP_AUTH_PAP)
+        next = PPP_AUTH_PAP;
     if (!next) {
         request_close(p, PPP_END_AUTH_REFUSED);
         return;
@@ -612,6 +623,11 @@ static void lcp_recv_nak(ppp_fsm_t *f, const uint8_t *opts, size_t len)
                 else if (vlen == 3 && val[0] == 0xc2 && val[1] == 0x23 &&
                          val[2] == CHAP_ALG_MD5)
                     sug = PPP_AUTH_CHAP;
+                else if (vlen == 3 && val[0] == 0xc2 && val[1] == 0x23 &&
+                         val[2] == CHAP_ALG_MSCHAP2)
+                    sug = PPP_AUTH_MSCHAPV2;
+                /* anything else (MS-CHAP v1, 0x80, which we do not do;
+                 * EAP) is no suggestion we can take */
                 lcp_auth_refused(p, sug);
             }
             break;
@@ -695,6 +711,12 @@ static void lcp_down(ppp_fsm_t *f)
     p->auth_done = p->auth_ok = 0;
     p->mppe_have = 0;
     p->mppe_started = 0;
+    p->enc_wait_ms = 0;
+    /* the keys of this login do not outlive it */
+    ppp_wipe(p->mppe_send, sizeof p->mppe_send);
+    ppp_wipe(p->mppe_recv, sizeof p->mppe_recv);
+    ppp_wipe(p->mschap2_resp, sizeof p->mschap2_resp);
+    ppp_mppe_reset(&p->mppe);
     /* back to the default framing */
     p->peer_mru = PPP_MAX_MRU;
     p->tx_accm = 0xffffffffu;
@@ -738,8 +760,11 @@ static int lcp_ext_code(ppp_fsm_t *f, uint8_t code, uint8_t id,
                 ppp_fsm_protocol_rejected(&p->ipcp);
             request_close(p, PPP_END_IPCP_FAILED);
         } else if (proto == PPP_PROTO_CCP) {
-            /* the peer has no CCP: the link goes on uncompressed */
+            /* the peer has no CCP: the link goes on uncompressed -- unless
+             * we require encryption, which only CCP can bring */
             ppp_fsm_protocol_rejected(&p->ccp);
+            if (p->cfg.encrypt)
+                request_close(p, PPP_END_ENCRYPT_REQUIRED);
         } else if (proto == PPP_PROTO_COMP) {
             /* it will not take compressed datagrams after all */
             ppp_fsm_close(&p->ccp);
@@ -908,7 +933,18 @@ static void auth_reply(ppp_t *p, uint8_t id)
             memcpy(m + 42, " M=Welcome", 10);
             tx_cp(p, PPP_PROTO_CHAP, CHAP_SUCCESS, id, m, sizeof m, NULL, 0);
         } else {
-            static const char e[] = "E=691 R=0 V=3";
+            /* RFC 2759 section 6: "E=691 R=0 C=<32 hex> V=3 M=<text>". C is
+             * the challenge for a retry; we allow none (R=0) but send a fresh
+             * one, as the format has it, for clients that parse it. */
+            static const char hx[] = "0123456789ABCDEF";
+            char e[] = "E=691 R=0 C=00000000000000000000000000000000 V=3 M=Authentication failed";
+            uint8_t c[16];
+            int i;
+            nonce(p, c, sizeof c);
+            for (i = 0; i < 16; i++) {
+                e[12 + 2 * i] = hx[c[i] >> 4];
+                e[13 + 2 * i] = hx[c[i] & 15];
+            }
             tx_cp(p, PPP_PROTO_CHAP, CHAP_FAILURE, id, (const uint8_t *)e, sizeof e - 1, NULL, 0);
         }
     } else if (p->auth_proto == PPP_AUTH_CHAP) {
@@ -1023,10 +1059,12 @@ static void chap_input(ppp_t *p, const uint8_t *pkt, size_t n)
          * NT-Response[24], Flags[1]. Our challenge is the authenticator
          * challenge. Match the NT-Response, then build the authenticator
          * response and derive the MPPE master keys. */
-        if (sl >= 0 && vs == 49) {
+        if (vs == 49) {
             const uint8_t *peer = d + 1, *ntr = d + 1 + 24;
-            ppp_mschap2_nt_response(p->challenge, peer, user, ul, secret, (size_t)sl, want);
-            ok = same_bytes(want, ntr, 24);
+            /* an unknown user is hashed too (with an empty secret), so the
+             * answer takes as long whether the name exists or not */
+            ppp_mschap2_nt_response(p->challenge, peer, user, ul, secret, sl >= 0 ? (size_t)sl : 0, want);
+            ok = sl >= 0 && same_bytes(want, ntr, 24);
             if (ok) {
                 ppp_mschap2_auth_response(secret, (size_t)sl, ntr, peer, p->challenge,
                                           user, ul, p->mschap2_resp);
@@ -1034,17 +1072,19 @@ static void chap_input(ppp_t *p, const uint8_t *pkt, size_t n)
                 p->mppe_have = 1;
             }
         }
-    } else if (sl >= 0 && vs == 16) {
-        /* RFC 1994 4.1: MD5 over identifier, secret, challenge value */
+    } else if (vs == 16) {
+        /* RFC 1994 4.1: MD5 over identifier, secret, challenge value (an
+         * unknown user with an empty secret, as above) */
         ppp_md5_t m;
         ppp_md5_init(&m);
         ppp_md5_update(&m, &p->auth_id, 1);
-        ppp_md5_update(&m, secret, (size_t)sl);
+        ppp_md5_update(&m, secret, sl >= 0 ? (size_t)sl : 0);
         ppp_md5_update(&m, p->challenge, 16);
         ppp_md5_final(&m, want);
-        ok = same_bytes(want, d + 1, 16);
+        ok = sl >= 0 && same_bytes(want, d + 1, 16);
     }
-    memset(secret, 0, sizeof secret);
+    ppp_wipe(secret, sizeof secret);
+    ppp_wipe(want, sizeof want);
     auth_finish(p, pkt[1], ok, user, ul);
 }
 
@@ -1245,6 +1285,9 @@ static void ccp_pick(ppp_t *p)
 
     p->cw_opt = 0;
     p->cw_naks = 0;
+    /* set again by ccp_build_cr if the new wish is MPPE: an MPPE request the
+     * peer refused must not count as agreed when CCP opens on another one */
+    p->cw_mppe = 0;
     if (p->cfg.comp_no_rx)
         return;
     for (i = 0; i < 3; i++) {
@@ -1312,11 +1355,12 @@ static int ccp_judge(ppp_t *p, uint8_t type, const uint8_t *val, size_t vlen,
     if (type != p->cchosen)
         return PPP_CONF_REJ;
     if (type == CCP_OPT_MPPC) {
-        /* vlen is 4 (checked when it was chosen). Option 18 carries MPPC
-         * (RFC 2118) and/or the MPPE encryption bits (RFC 3078). We accept
-         * exactly 128-bit stateless MPPE (when we encrypt and have keys), or
-         * plain MPPC; anything else is Nak'd toward what we do. */
-        uint32_t v = get32(val);
+        /* Option 18 carries MPPC (RFC 2118) and/or the MPPE encryption bits
+         * (RFC 3078). We accept exactly 128-bit stateless MPPE (when we
+         * encrypt and have keys), or plain MPPC; anything else is Nak'd
+         * toward what we do. Every copy of the option is judged here, not
+         * only the one ccp_recv_cr chose, so the length is checked here. */
+        uint32_t v = vlen == 4 ? get32(val) : 0;
         if (p->cfg.encrypt && p->mppe_have && v == MPPE_OFFER) {
             p->cpend_opt = type;
             p->cpend_wbits = 0;
@@ -1538,6 +1582,22 @@ static void comp_reset_again(ppp_t *p)
     tx_cp_next(p, PPP_PROTO_CCP, CCP_RESET_REQ, p->rr_id);
 }
 
+/* Encryption required: MPPE must be up both ways within CCP's own retry
+ * span (a request every restart_ms, max_configure of them, and one more for
+ * slack) of the network phase starting. CCP that never converges, a peer
+ * that never answers it, anything that leaves IPCP up with MPPE down: the
+ * link ends instead of staying up carrying nothing. */
+static void encrypt_tick(ppp_t *p, uint32_t ms)
+{
+    uint32_t limit = p->cfg.restart_ms * (p->cfg.max_configure + 1u);
+
+    if (!p->cfg.encrypt || p->phase != PPP_PHASE_NETWORK || p->tx_alg == PPP_COMP_MPPE)
+        return;
+    p->enc_wait_ms += ms;
+    if (p->enc_wait_ms >= limit)
+        request_close(p, PPP_END_ENCRYPT_REQUIRED);
+}
+
 static void ccp_tick(ppp_t *p, uint32_t ms)
 {
     uint32_t rate = p->cfg.comp_rate ? p->cfg.comp_rate : PPP_COMP_RATE;
@@ -1616,11 +1676,18 @@ static const ppp_fsm_ops_t ccp_ops = {
 
 static void network_start(ppp_t *p)
 {
+    if (p->cfg.encrypt && !p->mppe_have) {
+        /* encryption required, but the login gave no MPPE keys (it was not
+         * MS-CHAPv2): nothing could ever be carried, so do not open IPCP */
+        request_close(p, PPP_END_ENCRYPT_REQUIRED);
+        return;
+    }
     set_phase(p, PPP_PHASE_NETWORK);
     ppp_fsm_open(&p->ipcp);
     ppp_fsm_up(&p->ipcp);
     /* RFC 1962 section 2: CCP belongs to the Network-Layer Protocol phase */
     p->cw_tried = 0;
+    p->enc_wait_ms = 0;
     if (ccp_wanted(p)) {
         ppp_fsm_open(&p->ccp);
         ppp_fsm_up(&p->ccp);
@@ -1694,7 +1761,11 @@ static void comp_input(ppp_t *p, const uint8_t *info, size_t n)
 
     p->cnt.comp_rx_in += (uint32_t)n;
     if (n < 3) {
-        if (!p->rx_wait)
+        /* too short for a header and a protocol field. With MPPE it is
+         * dropped like any bad frame, with no Reset-Request (see below) */
+        if (p->rx_alg == PPP_COMP_MPPE)
+            p->cnt.comp_rx_errors++;
+        else if (!p->rx_wait)
             comp_rx_error(p);
         return;
     }
@@ -1925,6 +1996,11 @@ void ppp_init(ppp_t *p, const ppp_config_t *cfg)
     fsm_setup(p, &p->ipcp, &ipcp_ops);
     fsm_setup(p, &p->ccp, &ccp_ops);
     p->cfg.comp &= PPP_COMP_DEFLATE | PPP_COMP_MPPC;
+    /* with encryption required CCP carries MPPE and nothing else: offering
+     * or accepting Deflate or MPPC would only lead to a CCP without MPPE,
+     * and the link ending (ppp.h, encrypt) */
+    if (p->cfg.encrypt)
+        p->cfg.comp = 0;
     if (p->cfg.deflate_wbits < PPP_DEFLATE_MIN_WBITS || p->cfg.deflate_wbits > PPP_DEFLATE_MAX_WBITS)
         p->cfg.deflate_wbits = PPP_DEFLATE_MAX_WBITS;
     ppp_hdlc_rx_init(&p->rx, PPP_HDLC_BUF);
@@ -2117,6 +2193,9 @@ int ppp_send_ip(ppp_t *p, const uint8_t *pkt, size_t len)
         return PPP_ERR_DOWN;
     if (len > p->peer_mru)
         return PPP_ERR_SIZE;
+    /* MPPE has no native form to fall back on: the whole frame must fit */
+    if (p->tx_alg == PPP_COMP_MPPE && len + PPP_MPPE_OVERHEAD > p->peer_mru)
+        return PPP_ERR_SIZE;
     /* LCP, IPCP and CCP packets never come this way: only IP is compressed */
     if (p->tx_alg != PPP_COMP_NONE && len > 0)
         return send_compressed(p, pkt, len);
@@ -2135,6 +2214,7 @@ void ppp_tick(ppp_t *p, uint32_t ms)
     ppp_fsm_tick(&p->ipcp, ms);
     ppp_fsm_tick(&p->ccp, ms);
     ccp_tick(p, ms);
+    encrypt_tick(p, ms);
     auth_tick(p, ms);
     keepalive_tick(p, ms);
     run_pending(p);

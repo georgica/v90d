@@ -1661,6 +1661,122 @@ static void test_mppe(void)
     CHECK_EQ_I(status()->end_reason, PPP_END_ENCRYPT_REQUIRED);
 }
 
+/* bring MPPE up both ways on a fresh session (keys injected) */
+static void mppe_open(ppp_config_t *cfg)
+{
+    static const uint8_t ompe[6] = { 18, 6, 0x01, 0x00, 0x00, 0x40 };
+    unsigned i;
+    for (i = 0; i < 16; i++) { inj_s[i] = (uint8_t)(i + 1); inj_r[i] = (uint8_t)(i + 101); }
+    base_cfg(cfg);
+    cfg->encrypt = 1;
+    inject_mppe = 1;
+    up(cfg);
+    inject_mppe = 0;
+    push_cp(P_CCP, PPP_CONF_REQ, 20, ompe, 6);
+    pull();
+    push_cp(P_CCP, PPP_CONF_ACK, scr.d[1], scr.d + 4, scr.n - 4);
+    pull();
+}
+
+/* the corners of MPPE found in review */
+static void test_mppe_edges(void)
+{
+    static const uint8_t ompe[6] = { 18, 6, 0x01, 0x00, 0x00, 0x40 };
+    static uint8_t big[1500];
+    ppp_config_t cfg;
+    uint32_t errs;
+    unsigned ms;
+
+    /* with encryption the compressors are off whatever comp says: the
+     * server's request is MPPE, not Deflate (base_cfg leaves comp at its
+     * default, Deflate and MPPC) */
+    mppe_open(&cfg);
+    CHECK_EQ_I(status()->comp_tx, PPP_COMP_MPPE);
+    CHECK_EQ_I(status()->comp_rx, PPP_COMP_MPPE);
+
+    /* MRU: MPPE adds 4 octets and has no native form to fall back on */
+    CHECK_EQ_I(ppp_send_ip(&S, big, 1500 - PPP_MPPE_OVERHEAD + 1), PPP_ERR_SIZE);
+    CHECK_EQ_I(ppp_send_ip(&S, big, 1500 - PPP_MPPE_OVERHEAD), 0);
+    pull();
+
+    /* a frame too short for MPPE is dropped and counted, with no CCP
+     * Reset-Request (which could only lead to a renegotiation) */
+    errs = status()->counters.comp_rx_errors;
+    push(P_COMP, ompe, 2);
+    pull();
+    CHECK(find(P_CCP, 14) == NULL);
+    CHECK(status()->counters.comp_rx_errors > errs);
+    CHECK_EQ_I(status()->end_reason, PPP_END_NONE);
+
+    /* the peer refuses our MPPE request but asks for MPPE itself: our
+     * receive direction is not MPPE, so CCP opening must end the link, not
+     * encrypt toward a peer that agreed to nothing of the kind */
+    base_cfg(&cfg);
+    cfg.encrypt = 1;
+    inject_mppe = 1;
+    up(&cfg);
+    inject_mppe = 0;
+    push_cp(P_CCP, PPP_CONF_REJ, scr.d[1], scr.d + 4, scr.n - 4);
+    pull();
+    if (scr_new)                                   /* the server's empty request */
+        push_cp(P_CCP, PPP_CONF_ACK, scr.d[1], scr.d + 4, scr.n - 4);
+    push_cp(P_CCP, PPP_CONF_REQ, 21, ompe, 6);
+    pull();
+    ppp_tick(&S, 10);
+    pull();
+    CHECK(status()->comp_tx != PPP_COMP_MPPE);
+    CHECK_EQ_I(status()->end_reason, PPP_END_ENCRYPT_REQUIRED);
+
+    /* a request with a second, short option 18 is not Acked (each copy is
+     * judged with its own length) */
+    base_cfg(&cfg);
+    cfg.encrypt = 1;
+    inject_mppe = 1;
+    up(&cfg);
+    inject_mppe = 0;
+    {
+        static const uint8_t two[10] = { 18, 6, 0x01, 0x00, 0x00, 0x40, 18, 4, 0x00, 0x40 };
+        push_cp(P_CCP, PPP_CONF_REQ, 22, two, sizeof two);
+        pull();
+        CHECK(find(P_CCP, PPP_CONF_ACK) == NULL);
+        CHECK(find(P_CCP, PPP_CONF_NAK) != NULL);
+    }
+
+    /* the peer has no CCP at all: with encryption required the link ends */
+    base_cfg(&cfg);
+    cfg.encrypt = 1;
+    inject_mppe = 1;
+    up(&cfg);
+    inject_mppe = 0;
+    {
+        uint8_t rej[2 + 8] = { 0x80, 0xfd };
+        memcpy(rej + 2, scr.d, 8);
+        push_cp(PPP_PROTO_LCP, 8, 9, rej, sizeof rej);      /* LCP Protocol-Reject of CCP */
+        pull();
+        ppp_tick(&S, 10);
+        pull();
+        CHECK_EQ_I(status()->end_reason, PPP_END_ENCRYPT_REQUIRED);
+    }
+
+    /* CCP never answered: after its whole retry span the link ends rather
+     * than stay up carrying nothing */
+    base_cfg(&cfg);
+    cfg.encrypt = 1;
+    inject_mppe = 1;
+    up(&cfg);
+    inject_mppe = 0;
+    for (ms = 0; ms < 3000u * 10u && status()->end_reason == PPP_END_NONE; ms += 100) {
+        ppp_tick(&S, 100);
+        pull();
+    }
+    CHECK_EQ_I(status()->end_reason, PPP_END_NONE);            /* not before the span */
+    for (; ms < 3000u * 12u && status()->end_reason == PPP_END_NONE; ms += 100) {
+        ppp_tick(&S, 100);
+        pull();
+    }
+    CHECK_EQ_I(status()->end_reason, PPP_END_ENCRYPT_REQUIRED);
+}
+
 /* MPPE fails closed: with encryption required, no cleartext datagram is sent
  * or accepted, and if the peer will not do MPPE the link is ended. */
 static void test_mppe_required(void)
@@ -1709,6 +1825,7 @@ int main(void)
     test_negotiation();
     test_mppe();
     test_mppe_required();
+    test_mppe_edges();
     test_deflate_data();
     test_only_ip_is_compressed();
     test_deflate_reset();

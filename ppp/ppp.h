@@ -305,6 +305,9 @@ typedef struct ppp {
     uint8_t  mppe_started;     /* MPPE was keyed once this authentication; a CCP
                                   re-open must not re-key it (RC4 keystream reuse) */
     ppp_mppe_t mppe;           /* the encryption session, keyed at ccp_up */
+    uint32_t enc_wait_ms;      /* with encryption required: time in the network
+                                  phase without MPPE up; the link ends when it
+                                  passes CCP's whole retry span */
     uint16_t tx_seq, rx_seq;   /* Deflate sequence number / MPPC coherency count */
     uint8_t  rx_wait;          /* out of step: waiting for the peer to start afresh */
     uint8_t  rr_id, rr_tries;

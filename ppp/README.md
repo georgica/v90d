@@ -225,37 +225,63 @@ RFC 2759 / 3078 / 3079 (MS-CHAPv2 and MPPE):
 
 27. MS-CHAPv2 (`ppp_crypto.c`) is offered through LCP as CHAP with algorithm
     0x81. On the caller's 49-octet response we form the NT-Response from the
-    MD4 of the UTF-16LE password and check it, then return "S=" and the
-    40-hex authenticator. The vectors of RFC 2759 section 9.2 are in
-    `test/test_crypto.c`. The password is bounded at `PPP_CRYPTO_PASS_MAX`
-    (64). MS-CHAPv2 is required (not merely offered) whenever encryption is
-    on, because MPPE is keyed from it.
-28. The MPPE keys (RFC 3079) come from the NT-Response and the hash of the
-    NT-hash: the master key, then one send and one receive start key. The
-    session key for a direction is `SHA1(start || pad1 || current || pad2)`
-    truncated to the key length, with the first octets forced (40-bit: the
-    three octets D1 26 9E; 56-bit: D1 alone). RFC 3079's 128/40-bit RC4
-    samples reproduce; its one 56-bit sample is internally inconsistent in the
-    RFC and is not asserted. The reported SendSessionKey is that SHA-1 digest
-    truncated and forced, *not* an RC4 self-encryption of it; the RC4 "test
-    message" samples of section 3.5 confirm which it is.
-29. MPPE on the wire (RFC 3078, `ppp_mppe.c`) is stateless only (bit H,
-    0x01000000): each packet rekeys. The two-octet header is A (FLUSHED,
-    always, since stateless) | the 12-bit coherency count, then RC4 of the
-    protocol-and-data. A gap in the count means loss: the receiver rekeys
-    forward over the missed packets (at most 256, else the packet is dropped).
-    A frame without the ENCRYPT bit is refused. We offer 128-bit (S, 0x40)
-    and never the 40- or 56-bit forms.
-30. Fails closed. If encryption is required and MPPE is not agreed in both
-    directions by the time CCP opens, the link is terminated with
-    `PPP_END_ENCRYPT_REQUIRED`; no cleartext IP is sent (`ppp_send_ip`
-    refuses) or accepted (a cleartext network datagram is dropped and
-    counted) in the meantime.
-31. A CCP re-open does not re-key. Re-running the key schedule from the master
-    key would restart RC4 at coherency 0 and reuse the keystream, so MPPE is
-    keyed once per authentication; a CCP re-open after it has run ends the
-    link instead, and a decrypt error drops the packet rather than sending a
-    Reset-Request (which would renegotiate and re-key).
+    MD4 of the password in UTF-16LE (the configured secret is UTF-8 and is
+    decoded, surrogate pairs included, which is what a Windows client
+    hashes), check it, and answer "S=" and the 40-hex authenticator. A
+    Failure is "E=691 R=0 C=<32 hex> V=3 M=..." (RFC 2759 section 6; no
+    retry is offered, the C= challenge is sent because the format has it).
+    An unknown user is hashed with an empty secret, so the answer takes as
+    long either way. The vectors of RFC 2759 section 9.2 are in
+    `test/test_crypto.c`.
+28. Authentication fallback. A peer that Naks our method gets its own
+    suggestion if we allow it, otherwise the strongest method left:
+    MS-CHAPv2, then CHAP-MD5, then PAP. A Nak toward MS-CHAP v1 (0x80, which
+    we do not do; Windows 95 without the v2 update) therefore leads to
+    CHAP-MD5, never straight to PAP and a password in clear. With encryption
+    required there is no fallback at all: MPPE is keyed from MS-CHAPv2, so a
+    refusal of it ends the link before any password is sent.
+29. The MPPE keys (RFC 3079) come from the NT-Response and the hash of the
+    NT-hash: the master key, then a send and a receive start key (the
+    server's assignment). Each direction's first session key is
+    GetNewKeyFromSHA(start, start), truncated, no RC4 (RFC 3079 3.3; the
+    "session key" of its 3.5 samples, whose 128- and 40-bit RC4 lines
+    reproduce; the one 56-bit line is inconsistent in the RFC itself). A key
+    change (RFC 3078 7.3) is GetNewKeyFromSHA(start, current), truncated,
+    then RC4-encrypted under itself; then the short keys are forced (40-bit:
+    D1 26 9E; 56-bit: D1).
+30. MPPE on the wire (`ppp_mppe.c`) is stateless only (bit H, 0x01000000),
+    with the Linux kernel's schedule, which is what pppd and the Windows
+    clients it was matched against do: the coherency count starts at 4095,
+    and a key change comes before every packet, the first one (number 0)
+    included -- so no packet is ever sent under the initial key. The header
+    is A (FLUSHED, always) | D (ENCRYPT) | the 12-bit count, then RC4 of the
+    protocol field and the packet. The receiver makes one key change per
+    count since the last packet, stepping over lost ones, up to
+    `PPP_MPPE_WINDOW` (2047, under half the counts, as the kernel does); a
+    count at or behind the last one (a replay) or further ahead is dropped
+    and changes nothing. A frame without D is refused. We offer 128-bit (S,
+    0x40) only. The per-packet vectors in `test/test_mppe.c` and
+    `test/test_crypto.c` come from a separate reference (Python's SHA-1 and
+    an RC4 written apart from ours) that reproduces RFC 3079's samples, and
+    `srv/test/ns_pppd.c` runs a whole call against pppd with
+    `require-mppe-128` and the kernel's `ppp_mppe`.
+31. Fails closed. With `cfg.encrypt`: CCP offers and accepts option 18 with
+    128-bit stateless MPPE only (`comp` is cleared at `ppp_init`, so no
+    Deflate or MPPC to fall back to); if MPPE is not agreed in both
+    directions when CCP opens, if the peer Protocol-Rejects CCP, if the login
+    gave no keys, or if MPPE is still not up after CCP's whole retry span
+    (restart time times one more than Max-Configure), the link is ended with
+    `PPP_END_ENCRYPT_REQUIRED`. Meanwhile no cleartext IP is sent
+    (`ppp_send_ip` refuses) or accepted (dropped and counted). An IP packet
+    must fit the peer's MRU with the 4 octets MPPE adds
+    (`PPP_MPPE_OVERHEAD`); the daemon sets an encrypting port's TUN MTU that
+    much lower.
+32. A CCP re-open does not re-key. Starting the schedule again from the
+    master key would reuse the keystream, so MPPE is keyed once per
+    authentication; a CCP re-open after it has run ends the link. A bad or
+    short MPPE frame is dropped and counted, never answered with a
+    Reset-Request (which would renegotiate). The keys of a login are wiped
+    when LCP goes down.
 
 ## Windows callers: assumed, not tested
 
@@ -275,9 +301,11 @@ and the behaviour described in it:
 
 The models of these in `test/pppc.c` (`PPPC_CCP_WINDOWS`,
 `PPPC_CCP_WINDOWS_MPPE`) encode exactly these assumptions and nothing more.
-The MPPE packet path and key derivation are also checked directly, end to
-end, against the RFC 3079 vectors in `test/test_mppe.c` and
-`test/test_crypto.c`.
+MS-CHAPv2 and MPPE are also checked against a peer not written here:
+`srv/test/ns_pppd.c` makes a whole call to the daemon from pppd 2.5 with
+`require-mppe-128`, through the Linux kernel's `ppp_mppe` (whose key
+schedule was itself matched against Windows), and moves files both ways
+over TCP. A real Windows client has still not been tried.
 
 ## Tests
 
