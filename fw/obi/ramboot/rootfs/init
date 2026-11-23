@@ -1,0 +1,49 @@
+#!/bin/busybox sh
+# Bring-up init for v90d's own OBi200 kernel: proves userspace runs, logs
+# what the kernel sees to /dev/kmsg (the RAM log and pstore keep it), brings
+# the Ethernet up with a shell on telnet, and restarts the box through the
+# kernel's restart handler after a while (BRINGUP_S on the command line).
+/bin/busybox --install -s /bin
+export PATH=/bin
+mount -t devtmpfs dev /dev
+mkdir -p /dev/pts; mount -t devpts devpts /dev/pts
+mount -t proc proc /proc
+mount -t sysfs sys /sys
+log() { echo "init: $*" > /dev/kmsg; }
+logf() { log "--- $1"; while IFS= read -r l; do log "$l"; done < "$1"; }
+log "userspace up: $(uname -a)"
+logf /proc/interrupts
+ip link set lo up
+for i in /sys/class/net/*; do log "netdev $(basename $i) $(cat $i/address)"; done
+ip link set eth0 up && ip addr add 192.168.1.101/24 dev eth0 && ip route add default via 192.168.1.1
+# An unauthenticated root shell for bring-up only: just with bringup_shell=1
+# on the command line, never part of a release image, gone at the restart.
+grep -q 'bringup_shell=1' /proc/cmdline && telnetd -l /bin/sh -p 23
+sleep 5
+log "--- ip"; ip addr | while IFS= read -r l; do log "$l"; done
+ping -c3 -W2 192.168.1.1 2>&1 | while IFS= read -r l; do log "$l"; done
+logf /proc/net/dev
+logf /proc/interrupts
+# v90d itself, when it is in the image: settings from /scratch (read only)
+if [ -x /bin/v90d ]; then
+  mkdir -p /var/tmp /var/run /etc /scratch
+  ln -sf /var/tmp/resolv.conf /etc/resolv.conf
+  echo "nameserver 1.1.1.1" > /var/tmp/resolv.conf
+  syslogd -C64
+  m=$(grep '"scratch"' /proc/mtd | cut -d: -f1)
+  [ -n "$m" ] && mount -t jffs2 -o ro "$m" /scratch 2>&1 | while IFS= read -r l; do log "$l"; done
+  CONF=/tmp/v90d.conf
+  cp /scratch/v90d/v90d.conf $CONF 2>/dev/null || cp /etc/v90d.conf $CONF
+  /bin/v90d -c $CONF -p >/dev/null 2>&1 || cp /etc/v90d.conf $CONF
+  log "settings: $(ls -la $CONF)"
+  sysctl -w kernel.sched_rt_runtime_us=-1 >/dev/null 2>&1
+  ( while :; do /bin/obiline -s /var/run/v90line 2>&1 | logger -t obiline; sleep 2; done ) &
+  sleep 2
+  ( while :; do /bin/v90d -c $CONF -l seq:/var/run/v90line -i eth0 -t ppp0 2>&1 | logger -t v90d; sleep 2; done ) &
+  log "v90d started"
+fi
+s=$(sed -n 's/.*bringup_s=\([0-9]*\).*/\1/p' /proc/cmdline); s=${s:-300}
+log "up for $s s, then restart"
+n=0; while [ $n -lt $s ]; do sleep 30; n=$((n+30)); log "t=$n $(grep eth0 /proc/net/dev)"; done
+log "rebooting through the kernel's restart"
+sync; reboot -f
