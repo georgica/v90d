@@ -2531,3 +2531,62 @@ The modem sources are byte-for-byte libv90modem 0.3.0, which went through
 check-arm on its own and shipped in v90d 0.5.1; the loader and boot models
 are unchanged by this restructure and were green in 0.5.1. The release
 image was not put on the unit (the 0.5.1 image, the same modem, was).
+
+## MS-CHAPv2 and MPPE encryption, per port (issue #6) (2026-11-22)
+
+A caller that sets "require data encryption" (Windows dial-up) is now served.
+The PPP stack gained MS-CHAPv2 (RFC 2759) and 128-bit stateless MPPE (RFC
+3078/3079), clean-room from the RFCs, in `ppp/ppp_crypto.c` and
+`ppp/ppp_mppe.c` with the negotiation and data path in `ppp/ppp.c`. Off by
+default; a new `[ppp] encryption` switch turns it on.
+
+What it does. On, the server offers CHAP algorithm 0x81 (MS-CHAPv2),
+verifies the 49-octet response against MD4(password), derives the MPPE master
+and session keys from the authentication, and negotiates CCP option 18 with
+128-bit stateless MPPE in place of Deflate/MPPC. Each IP datagram then carries
+a 2-octet MPPE header (FLUSHED, ENCRYPT, 12-bit coherency count) and RC4
+ciphertext; the receiver rekeys forward across lost packets.
+
+Fails closed (from the security review). Encryption is a requirement, not best
+effort: if MPPE is not agreed in both directions the link ends
+(PPP_END_ENCRYPT_REQUIRED) rather than falling back; no cleartext IP is sent
+or accepted meanwhile; plain MPPC is not Ack'd when MPPE was asked for. MPPE is
+keyed once per authentication - a CCP re-open after it has run ends the link
+rather than restarting RC4 from the master key (which would reuse the
+keystream), and a decrypt error drops the packet instead of renegotiating.
+
+Per port. `encryption` is port 1 and `encryption2` is port 2, the only part of
+`[ppp]` set per port (the users are shared). It is held in `cfg_port_t` and
+carried through `port_take`/`port_give`/`cfg_for_port` like `ppp_peer2`, so the
+settings page (a "PPP encryption" control on each port's Modem tab), the config
+file, srv's per-port view, and `/status.json` (`ppp_encryption`, and a
+per-direction "MPPE" reading) all became per port with no change to srv.c.
+MPPE requires MS-CHAPv2, so a port that requires it needs a `user`.
+
+Interop: NOT tested against a real client. Verified against the RFC 2759/3079
+vectors and a modeled Windows peer only. The real pppd we use as a black box
+covers Deflate/MPPC, not MPPE. The Netstalgia/nsdiald dial-up ISP (which builds
+`ppp/` and `dce/` from a pinned copy) is adopting it at 6c1277d as
+off/require, marked experimental, and will send back real Win9x/XP dial-in
+results.
+
+Proof (host, and ARM under qemu):
+
+- `make check`: ALL HOST CHECKS PASS; `make check-arm` paths (ppp/cfg/srv
+  test-arm): ALL ARM TESTS PASS, 0 failures.
+- New vectors and paths: `ppp/test/test_crypto.c` 20 checks (NT-Response,
+  authenticator, master/session keys), `test_mppe.c` 1815 (RFC RC4 sample,
+  128/40/56-bit round trips, loss, plaintext refused), `test_ppp.c` 1825 (now
+  with MS-CHAPv2), `test_ccp.c` 84786 (a full MPPE session, fail-closed both
+  ways, a CCP re-open ending the link).
+- Config/UI/status: `cfg` test_config 645, test_settings 769, test_status 623,
+  0 failures - parse/write/validate of `encryption`/`encryption2`,
+  `cfg_for_port`, per-port render and apply, the JSON/HTML.
+- `make -C srv v90d` and `v90d-arm`: both built clean.
+- Commits on main: 9e980da (crypto), 817d26d (MPPE engine), dd6bada
+  (MS-CHAPv2), 622f205 (CCP integration, fail closed), 6c1277d (no re-key on
+  CCP re-open), 1dfdda3 (config/settings/status, per port).
+
+Not done: no real-client interop; stateful MPPE and 40/56-bit are not offered
+(the engine does 40/56, the negotiation offers 128 only); no opportunistic
+("allow") mode - the switch is off or require. Not put on a unit yet.
