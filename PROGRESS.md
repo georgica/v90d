@@ -2866,3 +2866,52 @@ TCP flake in call 5, `noccp`; clean before and after).
 Not verified: a real Windows client. The kernel's stateful MPPE differs
 from Windows' (it rekeys on every FLUSHED), so pppd cannot stand in for
 Windows here; the Windows behaviour is from RFC 3078 and that 2011 report.
+
+## 0.10.0: the OBi200 on our own kernel (2026-11-23)
+
+The OBi200 now runs v90d on Linux 6.6 with drivers of ours, not on the
+maker's 2.6.30. No source was ever published for the board, so the drivers
+were reconstructed from the maker's kernel (dumped from a running unit, with
+its symbol table) and its modules (`fw/kernel/*-NOTES.md`, each fact marked
+verified, inferred or guessed):
+
+- board support: the FFxAV interrupt controller, timer, watchdog and restart;
+  the CPU calls itself ARMv5TE (0x41159265), so the ARM926 entries of both the
+  kernel and its decompressor match on part number (the decompressor's own
+  table fell back to ARMv4 cache code, lost dirty lines, and the kernel ran
+  into the maker's leftover code: crashes that moved with every build)
+- Ethernet ("UniMAC AV", descriptor rings, a 2-byte Marvell header on every
+  frame) and its switch (memory mapped, product 0xc00, not one mv88e6xxx
+  knows): 20 Mbit/s down, 28 up, byte exact
+- SPI controller (DesignWare SSI, chip-select held by the FIFO) with spi-nor
+  for the W25Q128: reads match the flash dump; U-Boot, the factory block and
+  the whole chip read only; a read-only frame is sent again after a receive
+  overrun (one Firmware page write failed its check once, its data right)
+- watchdog, LEDs (power on GPIO 5, phone forced through the switch PHYs), GPIO
+- telephony with the maker's module's interface (/dev/fxsN ioctls,
+  /dev/pcm), so obiline is unchanged: the SLIC on SPI chip select 2, and the
+  audio DMA, which this kernel takes over as the maker's kernel left it
+  running (its ring-off command is never acknowledged on this box): rings
+  adopted in place, each descriptor rewritten before it is handed back
+
+U-Boot checks checksums and has no fallback, so the kernel is not written to
+the maker's kernel slot. The maker's kernel boots; `/obi/obi` starts ours
+from RAM: `kjump` (no kexec on 2.6.30: a stub after the LED module's code,
+run through /dev/led, caches and MMU off) unpacks `kernel.xz` with the
+kernel's own XZ decoder while the maker's kernel still feeds the watchdog
+(unpacking in the new kernel outlasts its 1.6 s), the shim copies the Image
+into place. `oinit` mounts the box's own root file system and /obi; `kinit`
+does the part of the maker's rc the box needs (no ssh, as on the HT80x). A
+start count in RAM (`kjump --count`) keeps the box on the maker's kernel after
+two starts that did not come up, until the power is cut. The Firmware page
+writes through a "firmware" partition from 0x50000 under our kernel.
+
+Proof, on one OBi200 (hardware 1.4, community firmware 8680EX-arrynrob13):
+starts our kernel from flash by itself, also from a power cut (v90d ready
+about 115 s after the power comes back); a U.S. Robotics 56K calls in at
+V.92 54 666 / 33 333 bit/s, LAPM V.42bis, gets PPP and the internet through
+nftables NAT (the same as on the maker's kernel); the settings from /scratch
+(JFFS2 with 64 KiB erase blocks: 4 KiB SPI-NOR sectors misread it); several
+updates through the Firmware page under our kernel and the way back to 0.9.1;
+the lights, seen by the owner. obinv `make test` (27 checks), host tests and
+the HT802 release build pass. /obi is 94 % full (2.23 of 2.36 MB).

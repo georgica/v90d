@@ -69,12 +69,13 @@ no part in them. See "The Obihai OBi200" below.
 ## The Obihai OBi200
 
 A different maker and platform, done a different way. The HT80x get a whole
-system of ours (kernel, loader, flash sets). The OBi200 keeps the maker's:
-its Linux 2.6.30 kernel (Marvell's board support, never published as
-source), the maker's telephony, LED and watchdog modules, and the community
-firmware's root file system with its SSH. v90d replaces only the maker's
-application, in the box's `/obi` flash part (2.25 MB, of which v90d uses
-about a quarter). How to build, install, update and go back is in
+system of ours (kernel, loader, flash sets). On the OBi200 v90d replaces only
+the maker's application, in the box's `/obi` flash part (2.25 MB, of which
+v90d uses about 95 %), and brings **its own Linux 6.6 kernel** there: the
+maker's kernel (2.6.30, Marvell's board support, never published as source)
+boots first and `/obi/obi` starts ours from RAM. U-Boot, the maker's kernel in
+the flash, the community firmware's root file system and the recovery mode
+stay as they are. How to build, install, update and go back is in
 `fw/obi/README.md`; the facts about the box are at its end.
 
 What that means for an owner:
@@ -88,25 +89,28 @@ What that means for an owner:
 - **Each release carries `v90d-obi200.fw`**, built by the release CI from
   the community firmware file (it is that file with our `/obi`). The builder
   is there too, for anyone who wants to make it themselves.
+- **If our kernel does not come up**, the box restarts and stays on the
+  maker's kernel (v90d runs there too) until the power is cut.
 - **The way back is always open.** Uploading the community firmware file on
   v90d's Firmware page restores the maker's application (only `/obi`
   differs), and v90d never writes the boot loader or the box's recovery
   mode, which takes any firmware file.
 
 What was tried, on one OBi200 (hardware 1.4, from the community firmware
-8680EX-arrynrob13): it boots v90d from flash; the network comes up by DHCP;
-a U.S. Robotics 56K calls in at V.92 54 666 / 33 333 bit/s and gets PPP and
-the internet through the box's NAT; updates and the way back through the
-Firmware page; the power light. The phone light is driven as the maker
-documents it but has not yet been seen on the unit.
+8680EX-arrynrob13): it starts our kernel from flash by itself, also after a
+power cut; the network comes up by DHCP; a U.S. Robotics 56K calls in at
+V.92 54 666 / 33 333 bit/s and gets PPP and the internet through the box's
+NAT; updates and the way back through the Firmware page, under either
+kernel; the power and phone lights.
 
-How the box differs from the HT80x, inside: the SLIC is reached through the
-maker's module (register ioctls) instead of our own SPI driver; the audio is
-the module's 10 ms PCM device, served to the daemon by a small line program
-(`fw/obi/obiline.c`); the kernel has no TUN driver and no nftables, so the
-daemon uses the kernel's PPP over a pseudo-terminal for the caller's network
-device and `iptables` for NAT (both fall back by themselves when the kernel
-lacks the newer way).
+How the box differs from the HT80x, inside: the drivers for its Marvell
+FFxAV chip (Ethernet and its switch, SPI flash, watchdog, lights, the SLIC
+and the audio DMA) were reconstructed from the maker's kernel and modules
+(`fw/kernel/*-NOTES.md`); the telephony driver keeps the maker's module's
+interface, so the same small line program (`fw/obi/obiline.c`) serves the
+daemon under either kernel. Under the maker's kernel, which has no TUN
+driver and no nftables, the daemon uses the kernel's PPP over a
+pseudo-terminal and `iptables` instead (both fall back by themselves).
 
 **The OBi202** (two phone ports and a second Ethernet port for a router mode)
 is expected to be the same platform with both channels of the Si3226x wired.
