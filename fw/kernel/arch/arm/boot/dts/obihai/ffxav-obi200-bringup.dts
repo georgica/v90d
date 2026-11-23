@@ -1,0 +1,15 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * The OBi200 for bring-up (fw/obi/ramboot run.sh): the low-level debug log,
+ * no restart on a panic (the watchdog's tick feeding ends after
+ * ffxav_feed_s), the test init's time (bringup_s) and its telnet shell
+ * (bringup_shell=1: an unauthenticated root shell, never in a release),
+ * and this unit's MAC address for the Ethernet.
+ */
+#include "ffxav-obi200.dts"
+
+/ {
+	chosen {
+		bootargs = "earlyprintk keep_bootcon ignore_loglevel panic=0 ffxav_feed_s=930 bringup_s=900 bringup_shell=1 ffxav_eth.mac=9c:ad:ef:65:30:63";
+	};
+};

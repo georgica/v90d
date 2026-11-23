@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: GPL-2.0
+menuconfig ARCH_FFXAV
+	bool "Marvell FFxAV (88E7251, as in the Obihai OBi200)"
+	depends on ARCH_MULTI_V5
+	select CPU_ARM926T
+	select FFXAV_INTC
+	select FFXAV_TIMER
+	help
+	  Support for the Marvell 88E7251 "Link Street Gateway" SoC as the
+	  Obihai OBi200 uses it (the maker's name for the platform: FFxAV).

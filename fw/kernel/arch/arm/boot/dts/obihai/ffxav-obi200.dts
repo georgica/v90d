@@ -1,0 +1,315 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Obihai OBi200: Marvell 88E7251 ("FFxAV"), ARM926EJ-S, 64 MiB.
+ *
+ * Memory as the board's own kernel has it (56 MiB); the top 8 MiB stay
+ * outside it: the RAM-boot loader puts the kernel there (fw/obi, kjump at
+ * 0x03800000, up to 6 MiB), the RAM log of pstore is at 0x03e00000 and the
+ * low-level debug output (64 KiB, the whole log with earlyprintk) at
+ * 0x03f20000, so
+ * that what a kernel wrote survives
+ * the watchdog's reset and can be read by the next one.
+ *
+ * Written for the v90d project.
+ */
+/dts-v1/;
+
+/ {
+	model = "Obihai OBi200";
+	compatible = "obihai,obi200", "marvell,ffxav";
+	#address-cells = <1>;
+	#size-cells = <1>;
+	interrupt-parent = <&intc>;
+
+	chosen {
+		bootargs = "panic=5";
+	};
+
+	memory@0 {
+		device_type = "memory";
+		reg = <0x00000000 0x03800000>;
+	};
+
+	reserved-memory {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		ramoops@3e00000 {
+			compatible = "ramoops";
+			reg = <0x03e00000 0x100000>;
+			record-size = <0x20000>;
+			console-size = <0x80000>;
+		};
+
+		/*
+		 * Where the stock kernel's audio DMA rings and buffers live.
+		 * This kernel is always started from the stock one (fw/obi:
+		 * kjump), whose rings keep running through the jump; the
+		 * telephony driver takes them over in place (ffxav_tel.c).
+		 */
+		stock_audio_dma: stock-audio-dma@3000000 {
+			reg = <0x03000000 0x200000>;
+			no-map;
+		};
+	};
+
+	cpus {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		cpu@0 {
+			device_type = "cpu";
+			compatible = "arm,arm926ej-s";
+			reg = <0>;
+		};
+	};
+
+	soc {
+		compatible = "simple-bus";
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		intc: interrupt-controller@80003000 {
+			compatible = "marvell,ffxav-intc";
+			reg = <0x80003000 0x10>;
+			interrupt-controller;
+			#interrupt-cells = <1>;
+		};
+
+		timer@8000d000 {
+			compatible = "marvell,ffxav-timer";
+			reg = <0x8000d000 0x100>, <0x8000d800 0x20>;
+			interrupts = <5>;
+		};
+
+		/*
+		 * The Ethernet controller and the embedded switch it is wired
+		 * to (its port 5); the LAN jack is on the switch. The unit's
+		 * MAC address is in the flash's factory block (after "OB100
+		 * UNIT INFO" at 0x40000, at 0x40100): give it with
+		 * ffxav_eth.mac= on the command line, or add
+		 * local-mac-address here. The SRAM at 0x88000000 can hold the
+		 * descriptor rings (ffxav_eth.sram_rings=1), as on the board's
+		 * own kernel.
+		 */
+		ethernet@80008000 {
+			compatible = "marvell,ffxav-eth";
+			reg = <0x80008000 0x1000>, <0x8000e000 0x1000>,
+			      <0x88000000 0x2000>;
+			reg-names = "mac", "switch", "sram";
+			interrupts = <9>;
+			marvell,tx-header = <0x002f>;
+			marvell,cpu-port = <5>;
+		};
+
+		/*
+		 * SPI, GPIO, watchdog and LEDs: kernel/SPI-LED-WDT-NOTES.md.
+		 *
+		 * GPIO: 16 pins (laid out like a DesignWare APB GPIO block,
+		 * "snps,dw-apb-gpio" would drive it too), driven by
+		 * drivers/gpio/gpio-ffxav.c. ONE node for this block: the
+		 * telephony driver's SLIC reset (pin 0) and interrupt (pin 2)
+		 * and the power LED (pin 5, low = on) all use &gpio. Its
+		 * interrupt (IRQ 12, chained) is not described. Bit 9 of the
+		 * system register 0x8000f0dc (cleared by both the board's LED
+		 * and telephony modules before they use pins 0, 2 and 5: the
+		 * pins' function) is cleared by the telephony driver; nobody
+		 * must claim (request) that register's range.
+		 */
+		gpio: gpio@8000c000 {
+			compatible = "marvell,ffxav-gpio";
+			reg = <0x8000c000 0x80>;
+			gpio-controller;
+			#gpio-cells = <2>;
+		};
+
+		/*
+		 * The SPI controller (DesignWare APB SSI, polled; IRQ 23 is
+		 * not used). The second region is the system register whose
+		 * bits 27 (cleared) and 26 (set) the board's driver writes
+		 * when it sets a device up. Chip selects are the controller's
+		 * own, reg = the bit in its SER register: 0 = the flash (the
+		 * board's kernel calls it chip select 1), 1 = the SLIC (its
+		 * chip select 2).
+		 */
+		spi: spi@8000c800 {
+			compatible = "marvell,ffxav-spi";
+			reg = <0x8000c800 0x100>, <0x8000f0ac 0x4>;
+			interrupts = <23>;
+			clock-frequency = <100000000>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			/*
+			 * 16 MiB of NOR, 20 MHz asked (16.7 MHz: the
+			 * divider is even), mode 3, as in the board's own
+			 * board info. U-Boot, the factory block (the MAC at
+			 * 0x40100) and the view of the whole flash are
+			 * read-only: nothing here can write or erase them.
+			 * The other partitions are the board's own table
+			 * (spi_flash0); the board's kernel keeps the factory
+			 * block inside "u-boot" (0 to 0x50000).
+			 */
+			flash@0 {
+				compatible = "jedec,spi-nor";
+				reg = <0>;
+				spi-max-frequency = <20000000>;
+				spi-cpol;
+				spi-cpha;
+
+				partitions {
+					compatible = "fixed-partitions";
+					#address-cells = <1>;
+					#size-cells = <1>;
+
+					partition@0 {
+						label = "u-boot";
+						reg = <0x000000 0x040000>;
+						read-only;
+					};
+
+					partition@40000 {
+						label = "factory";
+						reg = <0x040000 0x010000>;
+						read-only;
+					};
+
+					partition@50000 {
+						label = "kernel";
+						reg = <0x050000 0x280000>;
+					};
+
+					partition@480000 {
+						label = "rootfs";
+						reg = <0x480000 0x6c0000>;
+					};
+
+					partition@b40000 {
+						label = "scratch";
+						reg = <0xb40000 0x0c0000>;
+					};
+
+					partition@c00000 {
+						label = "obi app";
+						reg = <0xc00000 0x240000>;
+					};
+
+					partition@f00000 {
+						label = "bluetooth";
+						reg = <0xf00000 0x100000>;
+					};
+
+					partition-all@0 {
+						label = "flash";
+						reg = <0x000000 0x1000000>;
+						read-only;
+					};
+
+					/*
+					 * What the Firmware page writes (obinv:
+					 * the firmware header at 0x470000 and the
+					 * parts of a firmware file): everything
+					 * after U-Boot and the factory block.
+					 * obinv itself refuses files whose
+					 * recovery images differ from the box's.
+					 */
+					partition-fw@50000 {
+						label = "firmware";
+						reg = <0x050000 0xfb0000>;
+					};
+				};
+			};
+
+			/*
+			 * The SLIC (Si3226x, both FXS channels; channel 0 is the
+			 * jack): SER bit 1, the board's chip select 2, mode 3,
+			 * 8-bit words, 2 MHz, as ffxav_mp.ko registers it
+			 * ("mp_spi"). Driven by drivers/misc/ffxav_tel.c
+			 * (TDM-NOTES.md); its reset line is in the tdm node.
+			 */
+			slic@1 {
+				compatible = "silabs,si3226x-obi";
+				reg = <1>;
+				spi-max-frequency = <2000000>;
+				spi-cpol;
+				spi-cpha;
+			};
+		};
+
+		/*
+		 * The audio block's TDM highway (port 0 of 2) and the telephone
+		 * devices of the board's telephony module (/dev/fxs0, /dev/fxs1,
+		 * /dev/pcm): drivers/misc/ffxav_tel.c, kernel/TDM-NOTES.md.
+		 * Regions: the port, the block's global, interrupt and DMA
+		 * registers, and the system block (audio clocks at 0xac, pads at
+		 * 0xdc; mapped, not claimed). IRQ 24: DMA done and port errors
+		 * (IRQ 6, its timer, is not used). The SLIC's reset is GPIO 0,
+		 * low holds it; the SLIC itself is the child of the SPI node.
+		 */
+		tdm@80018000 {
+			compatible = "marvell,ffxav-tdm";
+			reg = <0x80018000 0x400>, <0x8001b000 0x1000>,
+			      <0x8000f000 0x100>;
+			reg-names = "port", "global", "sys";
+			interrupts = <24>;
+			slic-reset-gpios = <&gpio 0 1>;	/* GPIO_ACTIVE_LOW */
+			/* the stock's descriptor rings, adopted as they run */
+			memory-region = <&stock_audio_dma>;
+		};
+
+		/*
+		 * The watchdog. The second region is the system register the
+		 * board's watchdog module sets to 0xbfffffff (reset routing).
+		 * IRQ 3 (its first expiry) is not used.
+		 */
+		watchdog@8000d800 {
+			compatible = "marvell,ffxav-wdt";
+			reg = <0x8000d800 0x20>, <0x8000f028 0x4>;
+			interrupts = <3>;
+		};
+
+		/*
+		 * LEDs forced through the LED override register of the switch
+		 * PHYs (in the switch window of the Ethernet node; not
+		 * requested). Which LED is which is the board's LED module's
+		 * table: its LED 1 (the phone) on PHY 2, its LED 2 on PHY 3
+		 * (a second phone on the two-port models, it seems), and PHY 4
+		 * as the second element of the power LED (the colour is a
+		 * guess). Their state is left as found.
+		 */
+		leds@8000e000 {
+			compatible = "marvell,ffxav-phy-leds";
+			reg = <0x8000e000 0x380>;
+			marvell,led-select = <0x4a4a>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			led@2 {
+				reg = <2>;
+				label = "obi200:green:phone";
+			};
+
+			led@3 {
+				reg = <3>;
+				label = "obi200:green:phone-2";
+			};
+
+			led@4 {
+				reg = <4>;
+				label = "obi200:red:power";
+			};
+		};
+	};
+
+	leds {
+		compatible = "gpio-leds";
+
+		led-power {
+			label = "obi200:green:power";
+			gpios = <&gpio 5 1>;	/* GPIO_ACTIVE_LOW */
+			linux,default-trigger = "default-on";
+		};
+	};
+};
