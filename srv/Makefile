@@ -70,7 +70,7 @@ $(BUILD)/ns_pppd: $(NSP_SRC) $(HDRS) ../ppp/test/gen.h
 test-ns-pppd: $(BUILD)/v90d $(BUILD)/ns_pppd
 	@if ! command -v pppd >/dev/null 2>&1; then echo "  (no pppd here: the call with the real pppd is not tried)"; \
 	 elif ! sudo -n true 2>/dev/null; then echo "  (no sudo without a password: the call with the real pppd is not tried)"; \
-	 elif ! sudo -n modprobe ppp_deflate 2>/dev/null; then echo "  (no ppp_deflate module in this kernel: the call with the real pppd is not tried)"; \
+	 elif ! sudo -n modprobe ppp_deflate 2>/dev/null || ! sudo -n modprobe ppp_mppe 2>/dev/null; then echo "  (no ppp_deflate or ppp_mppe module in this kernel: the call with the real pppd is not tried)"; \
 	 else d=$$(mktemp -d) && { sudo -n unshare -n -m ./$(BUILD)/ns_pppd ./$(BUILD)/v90d $$d; rc=$$?; rm -rf $$d; exit $$rc; }; fi
 
 # The Firmware page end to end takes the image's flash tool built for the

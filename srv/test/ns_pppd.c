@@ -444,7 +444,12 @@ static void one_call(int n, const call_t *k, const char *log)
     printf("; from caller %s, %lu received as %lu", k->rx, ro, ri);
     if (ri) printf(" (%lu.%02lu to 1)", ro / ri, ro * 100 / ri % 100);
     printf("\n    modem: %lu octets to pppd, %lu from it\n", oct_to_pppd, oct_from_pppd);
-    if (strcmp(k->tx, "none") != 0) {
+    if (strcmp(k->tx, "mppe") == 0) {
+        /* encrypted, not compressed: all of the download went through MPPE
+         * and came out a little longer (4 octets a packet) */
+        CHECK(ti >= down_len);
+        CHECK(to > ti);
+    } else if (strcmp(k->tx, "none") != 0) {
         /* the text part of the download shrank; all of it went through the compressor */
         CHECK(ti >= down_len);
         CHECK(to < ti);
@@ -452,7 +457,8 @@ static void one_call(int n, const call_t *k, const char *log)
     } else {
         CHECK_EQ_I(ti, 0);
     }
-    if (strcmp(k->rx, "none") != 0) CHECK(ri * 2 < ro && ro >= up_len);
+    if (strcmp(k->rx, "mppe") == 0) CHECK(ri > ro && ro >= up_len);
+    else if (strcmp(k->rx, "none") != 0) CHECK(ri * 2 < ro && ro >= up_len);
     else CHECK_EQ_I(ri, 0);
     /* no decompressor of ours lost step, and none of pppd's (it would have asked) */
     CHECK(strstr(resp, "\"rx_errors\":0") != NULL);
@@ -545,6 +551,27 @@ int main(int argc, char **argv)
     CHECK_EQ_I(if_address("v90t0"), PPP_LOCAL);
     for (i = 0; i < sizeof calls / sizeof calls[0] && !dead; i++)
         one_call((int)i, &calls[i], log);
+
+    /* Encryption, against the Linux kernel's ppp_mppe (what Windows clients
+     * were matched against) and pppd's MS-CHAPv2, which also checks our
+     * authenticator response. Port 1 is switched to "PPP encryption: on"
+     * through the daemon's own settings page, as an owner would. */
+    if (!dead) {
+        static const call_t mppe = {
+            "require-mppe-128 (MS-CHAPv2 and 128-bit MPPE, nothing else)",
+            "require-mppe-128 refuse-pap refuse-chap refuse-mschap refuse-eap",
+            80000, 20000, 30000, "mppe", "mppe", "MPPE 128-bit stateless compression enabled" };
+        static const char req[] = "POST /modem HTTP/1.0\r\n"
+            "Content-Type: application/x-www-form-urlencoded\r\nContent-Length: 13\r\n\r\nencryption=on";
+        static char resp[40000];
+        CHECK(http(req, resp, sizeof resp) > 0);
+        if (!strstr(resp, "saved")) printf("    the settings page did not save: %.200s\n", resp);
+        CHECK(strstr(resp, "saved") != NULL);
+        run_ms(3000);                       /* adopted; the network set up again */
+        CHECK(http("GET /status.json HTTP/1.0\r\n\r\n", resp, sizeof resp) > 0);
+        CHECK(strstr(resp, "\"ppp_encryption\":true") != NULL);
+        one_call((int)i, &mppe, log);
+    }
 
     CHECK_EQ_I(dead, 0);
     kill(pid, SIGTERM);
