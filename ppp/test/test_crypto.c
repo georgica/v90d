@@ -104,23 +104,61 @@ static void test_mppe_keys(void)
     /* 128-bit */
     ppp_mppe_master_keys((const uint8_t *)"clientPass", 10, NT_RESP, 16, send, recv);
     CHECK(eq(send, send128, 16));
-    memcpy(sk, send, 16);
-    ppp_mppe_new_key(send, sk, 16, PPP_MPPE_FORCE_NONE);
+    ppp_mppe_initial_key(send, sk, 16, PPP_MPPE_FORCE_NONE);
     CHECK(eq(sk, sess128, 16));
     ppp_rc4_init(&r, sk, 16); ppp_rc4(&r, msg_in, ct, 12); CHECK(eq(ct, ct128, 12));
+    /* one key change (RFC 3078 7.3, with its RC4 step): the key of the first
+     * stateless packet, then of the second. The vectors come from a separate
+     * reference (Python hashlib SHA-1 and an RC4 written apart from this one)
+     * that reproduces the RFC 3079 lines above. */
+    {
+        static const uint8_t k1[16] = { 0x72,0x6F,0x10,0x50,0x0E,0x2B,0x54,0x13,0x5B,0x1B,0x74,0xD7,0x68,0x2F,0x04,0x71 };
+        static const uint8_t k2[16] = { 0x28,0x05,0xBC,0x78,0x69,0xBE,0xC8,0x25,0x57,0x3A,0x78,0x03,0xE9,0x5A,0x3A,0xCD };
+        ppp_mppe_change_key(send, sk, 16, PPP_MPPE_FORCE_NONE);
+        CHECK(eq(sk, k1, 16));
+        ppp_mppe_change_key(send, sk, 16, PPP_MPPE_FORCE_NONE);
+        CHECK(eq(sk, k2, 16));
+    }
 
     /* 40-bit: same 8-octet start key, session forced to D1 26 9E ... */
     ppp_mppe_master_keys((const uint8_t *)"clientPass", 10, NT_RESP, 8, send, recv);
     CHECK(eq(send, send8, 8));
-    memcpy(sk, send, 8);
-    ppp_mppe_new_key(send, sk, 8, PPP_MPPE_FORCE_40);
+    ppp_mppe_initial_key(send, sk, 8, PPP_MPPE_FORCE_40);
     CHECK(eq(sk, sess40, 8));
     ppp_rc4_init(&r, sk, 8); ppp_rc4(&r, msg_in, ct, 12); CHECK(eq(ct, ct40, 12));
 
     /* 56-bit: first octet forced to D1 (key checked; see the note above) */
-    memcpy(sk, send, 8);
-    ppp_mppe_new_key(send, sk, 8, PPP_MPPE_FORCE_56);
+    ppp_mppe_initial_key(send, sk, 8, PPP_MPPE_FORCE_56);
     CHECK(eq(sk, sess56, 8));
+}
+
+/* The NT hash takes the password as UTF-16LE; the configuration holds it in
+ * UTF-8. Each case: the hash equals MD4 (RFC 1320-checked above) of the
+ * UTF-16LE that the characters are. */
+static void test_nt_hash_utf8(void)
+{
+    static const struct { const char *utf8; uint8_t u16[8]; size_t n; } t[] = {
+        { "\xc3\xa9", { 0xE9, 0x00 }, 2 },                          /* e acute, U+00E9 */
+        { "\xe2\x82\xac", { 0xAC, 0x20 }, 2 },                      /* euro sign, U+20AC */
+        { "\xf0\x9f\x98\x80", { 0x3D, 0xD8, 0x00, 0xDE }, 4 },      /* U+1F600: a surrogate pair */
+        { "a\xffz", { 'a', 0, 0xFF, 0, 'z', 0 }, 6 },               /* not UTF-8: one Latin-1 octet */
+        { "\xc0\xaf", { 0xC0, 0, 0xAF, 0 }, 4 },                    /* overlong: two Latin-1 octets */
+    };
+    uint8_t a[16], b[16];
+    size_t i;
+
+    for (i = 0; i < sizeof t / sizeof t[0]; i++) {
+        ppp_nt_password_hash((const uint8_t *)t[i].utf8, strlen(t[i].utf8), a);
+        ppp_md4(t[i].u16, t[i].n, b);
+        CHECK(eq(a, b, 16));
+    }
+    /* plain ASCII is what it always was */
+    ppp_nt_password_hash((const uint8_t *)"clientPass", 10, a);
+    {
+        static const uint8_t u[20] = { 'c',0,'l',0,'i',0,'e',0,'n',0,'t',0,'P',0,'a',0,'s',0,'s',0 };
+        ppp_md4(u, 20, b);
+        CHECK(eq(a, b, 16));
+    }
 }
 
 int main(void)
@@ -131,5 +169,6 @@ int main(void)
     test_rc4();
     test_mschap2();
     test_mppe_keys();
+    test_nt_hash_utf8();
     T_REPORT("crypto");
 }

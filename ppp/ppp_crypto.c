@@ -265,14 +265,61 @@ void ppp_rc4(ppp_rc4_t *r, const uint8_t *in, uint8_t *out, size_t len)
 
 /* ---- MS-CHAPv2 (RFC 2759) ---- */
 
+void ppp_wipe(void *p, size_t n)
+{
+    volatile uint8_t *v = (volatile uint8_t *)p;
+    while (n--) *v++ = 0;
+}
+
+/* One character of UTF-8 at s[0..n): its code point and length in octets.
+ * Anything that is not well-formed UTF-8 (overlong, a surrogate, beyond
+ * U+10FFFF, cut short) is one Latin-1 character of one octet. */
+static uint32_t utf8_char(const uint8_t *s, size_t n, size_t *len)
+{
+    uint32_t c = s[0];
+    size_t k = 0, j;
+
+    if (c >= 0xc2 && c <= 0xdf) { k = 1; c &= 0x1f; }
+    else if (c >= 0xe0 && c <= 0xef) { k = 2; c &= 0x0f; }
+    else if (c >= 0xf0 && c <= 0xf4) { k = 3; c &= 0x07; }
+    if (k && k < n) {
+        for (j = 1; j <= k && (s[j] & 0xc0) == 0x80; j++)
+            c = c << 6 | (s[j] & 0x3fu);
+        if (j > k && (k == 1 || (k == 2 && c >= 0x800 && (c < 0xd800 || c > 0xdfff)) ||
+                      (k == 3 && c >= 0x10000 && c <= 0x10ffff))) {
+            *len = k + 1;
+            return c;
+        }
+    }
+    *len = 1;
+    return s[0];
+}
+
 void ppp_nt_password_hash(const uint8_t *pass, size_t plen, uint8_t out[16])
 {
     uint8_t uni[2 * PPP_CRYPTO_PASS_MAX];
-    size_t i;
-    if (plen > PPP_CRYPTO_PASS_MAX) plen = PPP_CRYPTO_PASS_MAX;
-    for (i = 0; i < plen; i++) { uni[2*i] = pass[i]; uni[2*i+1] = 0; }
-    ppp_md4(uni, 2 * plen, out);
-    memset(uni, 0, sizeof uni);
+    size_t i = 0, u = 0, l;
+
+    while (i < plen) {
+        uint32_t c = utf8_char(pass + i, plen - i, &l);
+        if (c >= 0x10000) {
+            if (u + 2 > PPP_CRYPTO_PASS_MAX) break;
+            c -= 0x10000;                       /* a surrogate pair */
+            uni[2*u]     = (uint8_t)((0xd800 | (c >> 10)) & 0xff);
+            uni[2*u + 1] = (uint8_t)((0xd800 | (c >> 10)) >> 8);
+            uni[2*u + 2] = (uint8_t)((0xdc00 | (c & 0x3ff)) & 0xff);
+            uni[2*u + 3] = (uint8_t)((0xdc00 | (c & 0x3ff)) >> 8);
+            u += 2;
+        } else {
+            if (u + 1 > PPP_CRYPTO_PASS_MAX) break;
+            uni[2*u] = (uint8_t)(c & 0xff);
+            uni[2*u + 1] = (uint8_t)(c >> 8);
+            u += 1;
+        }
+        i += l;
+    }
+    ppp_md4(uni, 2 * u, out);
+    ppp_wipe(uni, sizeof uni);
 }
 
 static void challenge_hash(const uint8_t peer[16], const uint8_t auth[16],
@@ -294,7 +341,7 @@ static void challenge_response(const uint8_t chal8[8], const uint8_t pwhash[16],
     ppp_des_key_from_7(z + 0,  k); ppp_des_encrypt(k, chal8, out24 + 0);
     ppp_des_key_from_7(z + 7,  k); ppp_des_encrypt(k, chal8, out24 + 8);
     ppp_des_key_from_7(z + 14, k); ppp_des_encrypt(k, chal8, out24 + 16);
-    memset(z, 0, sizeof z);
+    ppp_wipe(z, sizeof z);
 }
 
 void ppp_mschap2_nt_response(const uint8_t auth_chal[16], const uint8_t peer_chal[16],
@@ -305,7 +352,7 @@ void ppp_mschap2_nt_response(const uint8_t auth_chal[16], const uint8_t peer_cha
     challenge_hash(peer_chal, auth_chal, user, ulen, chal);
     ppp_nt_password_hash(pass, plen, pwhash);
     challenge_response(chal, pwhash, out);
-    memset(pwhash, 0, sizeof pwhash);
+    ppp_wipe(pwhash, sizeof pwhash);
 }
 
 static const char MAGIC1[] = "Magic server to client signing constant";
@@ -335,7 +382,7 @@ void ppp_mschap2_auth_response(const uint8_t *pass, size_t plen, const uint8_t n
     ppp_sha1_final(&s, d2);
     out[0] = 'S'; out[1] = '=';
     for (i = 0; i < 20; i++) { out[2 + 2*i] = (uint8_t)hex[d2[i] >> 4]; out[3 + 2*i] = (uint8_t)hex[d2[i] & 15]; }
-    memset(pwhash, 0, sizeof pwhash); memset(pwhh, 0, sizeof pwhh);
+    ppp_wipe(pwhash, sizeof pwhash); ppp_wipe(pwhh, sizeof pwhh);
 }
 
 /* ---- MPPE keys (RFC 3079) ---- */
@@ -374,22 +421,43 @@ void ppp_mppe_master_keys(const uint8_t *pass, size_t plen, const uint8_t nt_res
     ppp_sha1_final(&s, mk);                 /* first 16 octets are the master key */
     asym_start_key(mk, keylen, MSEND, send_start);
     asym_start_key(mk, keylen, MRECV, recv_start);
-    memset(pwhash, 0, sizeof pwhash); memset(pwhh, 0, sizeof pwhh); memset(mk, 0, sizeof mk);
+    ppp_wipe(pwhash, sizeof pwhash); ppp_wipe(pwhh, sizeof pwhh); ppp_wipe(mk, sizeof mk);
 }
 
-void ppp_mppe_new_key(const uint8_t *start, uint8_t *session, size_t keylen, int force)
+/* RFC 3078 section 7.3 GetNewKeyFromSHA: SHA-1 over StartKey, pad1, the
+ * current session key, pad2; the first keylen octets go to out */
+static void key_from_sha(const uint8_t *start, const uint8_t *session, size_t keylen, uint8_t *out)
 {
     ppp_sha1_t s; uint8_t d[20];
-    /* SHA-1 over StartKey, pad1, the current session key, pad2; the first
-     * keylen octets are the next session key (RFC 3078 7.3 / RFC 3079 3.5
-     * test vectors). The leading octets are then forced for the short keys. */
     ppp_sha1_init(&s);
     ppp_sha1_update(&s, start, keylen);
     ppp_sha1_update(&s, SHSPAD1, 40);
     ppp_sha1_update(&s, session, keylen);
     ppp_sha1_update(&s, SHSPAD2, 40);
     ppp_sha1_final(&s, d);
-    memcpy(session, d, keylen);
-    if (force == PPP_MPPE_FORCE_40) { session[0] = 0xd1; session[1] = 0x26; session[2] = 0x9e; }
-    else if (force == PPP_MPPE_FORCE_56) { session[0] = 0xd1; }
+    memcpy(out, d, keylen);
+    ppp_wipe(d, sizeof d); ppp_wipe(&s, sizeof s);
+}
+
+static void force_short(uint8_t *k, int force)
+{
+    if (force == PPP_MPPE_FORCE_40) { k[0] = 0xd1; k[1] = 0x26; k[2] = 0x9e; }
+    else if (force == PPP_MPPE_FORCE_56) { k[0] = 0xd1; }
+}
+
+void ppp_mppe_initial_key(const uint8_t *start, uint8_t *session, size_t keylen, int force)
+{
+    key_from_sha(start, start, keylen, session);
+    force_short(session, force);
+}
+
+void ppp_mppe_change_key(const uint8_t *start, uint8_t *session, size_t keylen, int force)
+{
+    uint8_t interim[16];
+    ppp_rc4_t r;
+    key_from_sha(start, session, keylen, interim);
+    ppp_rc4_init(&r, interim, keylen);
+    ppp_rc4(&r, interim, session, keylen);      /* SessionKey = rc4(InterimKey) under InterimKey */
+    force_short(session, force);
+    ppp_wipe(interim, sizeof interim); ppp_wipe(&r, sizeof r);
 }

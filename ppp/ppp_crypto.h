@@ -11,8 +11,14 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* longest secret the MS-CHAPv2 helpers convert to UTF-16LE */
-#define PPP_CRYPTO_PASS_MAX 64
+/* longest password in UTF-16 units: RFC 2759's limit of 256 Unicode
+ * characters. The secret is given as UTF-8, so at most this many octets are
+ * read (a longer one would be truncated; PPP_SECRET_MAX is far below it). */
+#define PPP_CRYPTO_PASS_MAX 256
+
+/* Zero n octets in a way the compiler may not drop as a dead store: for
+ * keys, hashes and cipher state about to go out of scope. */
+void ppp_wipe(void *p, size_t n);
 
 /* ---- primitives ---- */
 
@@ -47,7 +53,10 @@ void ppp_rc4(ppp_rc4_t *r, const uint8_t *in, uint8_t *out, size_t len);
 /* ---- MS-CHAPv2 (RFC 2759), server side ---- */
 
 /* The NT password hash: MD4 of the password in UTF-16LE (no terminator).
- * pass is the plain ASCII secret; only code points < 256 are represented. */
+ * pass is the secret in UTF-8, as the configuration holds it, decoded to
+ * UTF-16 (characters beyond U+FFFF as surrogate pairs), which is what a
+ * Windows client hashes. An octet that is not part of valid UTF-8 counts as
+ * one Latin-1 character. */
 void ppp_nt_password_hash(const uint8_t *pass, size_t plen, uint8_t out[16]);
 
 /* The expected 24-octet NT-Response for these challenges and this secret
@@ -70,12 +79,22 @@ void ppp_mschap2_auth_response(const uint8_t *pass, size_t plen, const uint8_t n
 void ppp_mppe_master_keys(const uint8_t *pass, size_t plen, const uint8_t nt_response[24],
                           size_t keylen, uint8_t send_start[16], uint8_t recv_start[16]);
 
-/* One key change (RFC 3078 section 7.3 / RFC 3079 Get_Key): from the start
- * key and the current session key to the next session key, in place in
- * `session`. keylen is 8 or 16; for 8 the result's leading octets are forced
- * (40-bit: D1 26 9E; 56-bit: D1) when force40 / force56 is set. On the first
- * call the caller sets session = start. */
+/* MPPE session keys. keylen is 8 (40- or 56-bit) or 16 (128-bit); for the
+ * short keys the leading octets are forced (40-bit: D1 26 9E, 56-bit: D1).
+ *
+ * ppp_mppe_initial_key: the first session key of a direction, from its start
+ *   key: GetNewKeyFromSHA(start, start) truncated, no RC4 (RFC 3079 section
+ *   3.3; the "session key" of its section 3.5 samples).
+ * ppp_mppe_change_key: one key change (RFC 3078 section 7.3), in place:
+ *   InterimKey = GetNewKeyFromSHA(start, session) truncated, then
+ *   session = RC4(InterimKey, InterimKey), then the forcing.
+ *
+ * In stateless mode a key change comes before EVERY packet, the first one
+ * included, so packet 0 is encrypted with change(initial), not with the
+ * initial key itself. This is what the Linux kernel's ppp_mppe (and so pppd,
+ * and the Windows clients it was matched against) does. */
 enum { PPP_MPPE_FORCE_NONE = 0, PPP_MPPE_FORCE_40 = 1, PPP_MPPE_FORCE_56 = 2 };
-void ppp_mppe_new_key(const uint8_t *start, uint8_t *session, size_t keylen, int force);
+void ppp_mppe_initial_key(const uint8_t *start, uint8_t *session, size_t keylen, int force);
+void ppp_mppe_change_key(const uint8_t *start, uint8_t *session, size_t keylen, int force);
 
 #endif

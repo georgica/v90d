@@ -7,23 +7,37 @@
 
 static int eq(const uint8_t *a, const uint8_t *b, size_t n) { return memcmp(a, b, n) == 0; }
 
-/* RFC 3079 section 3.5.3: 128-bit send start key, and the RC4 of "test
- * message" under the first session key derived from it. */
+/* RFC 3079 section 3.5.3's 128-bit send start key. The packets: "test
+ * message" as the first three stateless packets, each under its own key
+ * change (RFC 3078 7.3, with the RC4 step) from the initial session key.
+ * The ciphertexts come from a separate reference (Python hashlib SHA-1 and
+ * an RC4 written apart from ppp_crypto) that also reproduces RFC 3079's own
+ * RC4 sample; ppp/README.md says how. */
 static const uint8_t START128[16] = { 0x8B,0x7C,0xDC,0x14,0x9B,0x99,0x3A,0x1B,0xA1,0x18,0xCB,0x15,0x3F,0x56,0xDC,0xCB };
-static const uint8_t CT128[12]    = { 0x81,0x84,0x83,0x17,0xDF,0x68,0x84,0x62,0x72,0xFB,0x5A,0xBE };
+static const uint8_t PKT[3][12] = {
+    { 0x04,0x1C,0x25,0x5F,0xC0,0x02,0x3D,0xC9,0xA0,0x07,0xEE,0x40 },
+    { 0x41,0x78,0x92,0x5D,0x86,0x5C,0x8B,0x2F,0x31,0xBC,0x7C,0xF2 },
+    { 0xB8,0x9D,0x43,0xAF,0x11,0xD4,0xAE,0x2C,0xA7,0x28,0xC2,0x76 },
+};
 
 static void test_vector(void)
 {
-    ppp_mppe_t m;
-    uint8_t out[64], recv[16] = { 0 };
+    ppp_mppe_t m, rx;
+    uint8_t out[64], pt[64], zero[16] = { 0 };
     size_t n;
+    int i;
 
-    ppp_mppe_begin(&m, START128, recv, 16, PPP_MPPE_FORCE_NONE);
-    n = ppp_mppe_encrypt(&m, (const uint8_t *)"test message", 12, out, sizeof out);
-    CHECK_EQ_I((int)n, 14);
-    CHECK_EQ_I(out[0], 0x90);    /* FLUSHED | ENCRYPT, count 0 */
-    CHECK_EQ_I(out[1], 0x00);
-    CHECK(eq(out + 2, CT128, 12));
+    ppp_mppe_begin(&m, START128, zero, 16, PPP_MPPE_FORCE_NONE);
+    ppp_mppe_begin(&rx, zero, START128, 16, PPP_MPPE_FORCE_NONE);   /* the far end */
+    for (i = 0; i < 3; i++) {
+        n = ppp_mppe_encrypt(&m, (const uint8_t *)"test message", 12, out, sizeof out);
+        CHECK_EQ_I((int)n, 14);
+        CHECK_EQ_I(out[0], 0x90);    /* FLUSHED | ENCRYPT */
+        CHECK_EQ_I(out[1], i);       /* the first packet is number 0 */
+        CHECK(eq(out + 2, PKT[i], 12));
+        CHECK_EQ_I(ppp_mppe_decrypt(&rx, out, n, pt, sizeof pt), 12);
+        CHECK(eq(pt, (const uint8_t *)"test message", 12));
+    }
 }
 
 /* a and b are two ends: a's send key is b's receive key and vice versa */
@@ -88,9 +102,43 @@ static void test_loss(void)
     d = ppp_mppe_decrypt(&b, ct, n, pt, sizeof pt);            /* receiver catches up */
     CHECK_EQ_I(d, 32); CHECK(eq(pt, msg, 32));
 
+    /* a replay of the last packet (no key change to make) is dropped */
+    CHECK_EQ_I(ppp_mppe_decrypt(&b, ct, n, pt, sizeof pt), -1);
     /* a plaintext (unencrypted) frame is refused */
     ct[0] &= (uint8_t)~0x10;
     CHECK_EQ_I(ppp_mppe_decrypt(&b, ct, n, pt, sizeof pt), -1);
+}
+
+/* the receive window: up to PPP_MPPE_WINDOW lost packets in a row are
+ * stepped over; a count further ahead (or behind) is dropped and leaves the
+ * receiver where it was */
+static void test_window(void)
+{
+    static ppp_mppe_t a, b, a2;
+    uint8_t msg[8] = { 1, 2, 3, 4, 5, 6, 7, 8 }, ct[16], pt[16];
+    size_t n;
+    unsigned i;
+
+    pair(&a, &b, 16, PPP_MPPE_FORCE_NONE);
+    n = ppp_mppe_encrypt(&a, msg, 8, ct, sizeof ct);
+    CHECK_EQ_I(ppp_mppe_decrypt(&b, ct, n, pt, sizeof pt), 8);
+    for (i = 0; i < PPP_MPPE_WINDOW - 1; i++)                   /* lost */
+        (void)ppp_mppe_encrypt(&a, msg, 8, ct, sizeof ct);
+    n = ppp_mppe_encrypt(&a, msg, 8, ct, sizeof ct);             /* PPP_MPPE_WINDOW ahead */
+    CHECK_EQ_I(ppp_mppe_decrypt(&b, ct, n, pt, sizeof pt), 8);
+    CHECK(eq(pt, msg, 8));
+
+    pair(&a, &b, 16, PPP_MPPE_FORCE_NONE);
+    n = ppp_mppe_encrypt(&a, msg, 8, ct, sizeof ct);
+    CHECK_EQ_I(ppp_mppe_decrypt(&b, ct, n, pt, sizeof pt), 8);
+    a2 = a;
+    for (i = 0; i < PPP_MPPE_WINDOW; i++)                       /* one more lost */
+        (void)ppp_mppe_encrypt(&a, msg, 8, ct, sizeof ct);
+    n = ppp_mppe_encrypt(&a, msg, 8, ct, sizeof ct);
+    CHECK_EQ_I(ppp_mppe_decrypt(&b, ct, n, pt, sizeof pt), -1);  /* too far: dropped */
+    n = ppp_mppe_encrypt(&a2, msg, 8, ct, sizeof ct);           /* the next in line still works */
+    CHECK_EQ_I(ppp_mppe_decrypt(&b, ct, n, pt, sizeof pt), 8);
+    CHECK(eq(pt, msg, 8));
 }
 
 int main(void)
@@ -98,5 +146,6 @@ int main(void)
     test_vector();
     test_roundtrip();
     test_loss();
+    test_window();
     T_REPORT("mppe");
 }

@@ -1,8 +1,14 @@
 /* MPPE (Microsoft Point-to-Point Encryption, RFC 3078): the packet path.
  * Keyed from the MS-CHAPv2 exchange (ppp_crypto's master keys); negotiated
- * inside CCP option 18 alongside MPPC. Stateless (historyless) mode only:
- * the key changes on every packet, which suits a link with no error control
- * (the same reason CCP runs MPPC historyless here).
+ * inside CCP option 18. Stateless (historyless) mode only: the key changes
+ * before every packet, which suits a link with no error control (the same
+ * reason CCP runs MPPC historyless here).
+ *
+ * The key schedule is the one the Linux kernel's ppp_mppe uses, which is
+ * what pppd and the Windows clients interoperate with: each direction starts
+ * from ppp_mppe_initial_key, its coherency count starts at 4095 (so the first
+ * packet is number 0), and a key change (ppp_mppe_change_key, with its RC4
+ * step) comes before every packet, the first one included.
  *
  * Written from RFC 3078 / RFC 3079; integer only, no allocation. */
 #ifndef V90D_PPP_MPPE_H
@@ -17,7 +23,7 @@ typedef struct {
     uint8_t  session[16];   /* the current session key */
     size_t   keylen;        /* 8 (40- or 56-bit) or 16 (128-bit) */
     int      force;         /* PPP_MPPE_FORCE_* for the short keys */
-    uint16_t coherency;     /* 12-bit packet counter */
+    uint16_t coherency;     /* 12-bit count of the last packet sent / received */
 } ppp_mppe_dir_t;
 
 typedef struct {
@@ -30,10 +36,22 @@ typedef struct {
 #define PPP_MPPE_ENCRYPT 0x1000u   /* D: the packet is encrypted */
 #define PPP_MPPE_COUNT   0x0fffu   /* coherency count */
 
+/* An MPPE frame is this much longer than the IP packet in it: the 2-octet
+ * MPPE header and the 2-octet PPP protocol field inside the ciphertext. A
+ * link that encrypts carries IP packets of at most the peer's MRU less this. */
+#define PPP_MPPE_OVERHEAD 4
+
+/* How far ahead of the last received packet a count may be and still be
+ * followed (one key change per step): less than half the 4096 counts, as in
+ * the Linux kernel. A count at or behind the last one, or further ahead, is
+ * a replay or a late packet and is dropped. */
+#define PPP_MPPE_WINDOW 2047u
+
 /* Set both directions up from the server's master start keys (send/recv),
  * key length 8 or 16, with the short-key forcing (PPP_MPPE_FORCE_*). */
 void ppp_mppe_begin(ppp_mppe_t *m, const uint8_t send_start[16], const uint8_t recv_start[16],
                     size_t keylen, int force);
+/* Forget both directions' keys (wiped). */
 void ppp_mppe_reset(ppp_mppe_t *m);
 
 /* Encrypt one datagram (the octets that follow 0x00FD: the encapsulated PPP
@@ -42,8 +60,9 @@ void ppp_mppe_reset(ppp_mppe_t *m);
 size_t ppp_mppe_encrypt(ppp_mppe_t *m, const uint8_t *in, size_t len, uint8_t *out, size_t max);
 
 /* Decrypt one received MPPE datagram (2-octet header then ciphertext).
- * Writes the plaintext to out; returns its length, or -1 on a bad header or
- * a coherency count that cannot be followed. */
+ * Writes the plaintext to out; returns its length, or -1 on a bad header, a
+ * frame that does not fit, or a count outside the window (nothing changes
+ * then: the next good packet is still followed). */
 int ppp_mppe_decrypt(ppp_mppe_t *m, const uint8_t *in, size_t len, uint8_t *out, size_t max);
 
 #endif
