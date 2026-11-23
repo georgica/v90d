@@ -918,10 +918,15 @@ static void test_dreamcast_call(void)
 
     base_cfg(&c); c.rings = 0; c.auth = CFG_AUTH_PAP; c.v92 = 1;
     c.service = CFG_SERVICE_DREAMCAST;
+    /* [ppp] encryption is ignored on a console port: the console keeps the
+     * port's own login (PAP here, which is all this caller does) instead of
+     * being asked for MS-CHAPv2 it cannot do */
+    c.encryption = 1;
     line_init();
     srv_init(&S, &c, 77, lan_rx, NULL);
     CHECK_EQ_I(S.status.service, CFG_SERVICE_DREAMCAST);
     CHECK_EQ_I(S.status.ppp_compression, 0);
+    CHECK_EQ_I(S.status.ppp_encryption, 0);
     CHECK_EQ_I(S.status.v92, 0);
     /* another number is not answered, another login is turned away */
     place_call("1111111", 6000);
@@ -959,6 +964,11 @@ static void test_dreamcast_call(void)
     /* the Internet service on the same settings: the box's own name
      * servers, V.92 as set, and the packets as they came */
     c.service = CFG_SERVICE_INTERNET;
+    /* encryption on an Internet port does apply, and replaces compression */
+    line_init();
+    srv_init(&S, &c, 78, lan_rx, NULL);
+    CHECK_EQ_I(S.status.ppp_encryption, 1); CHECK_EQ_I(S.status.ppp_compression, 0);
+    c.encryption = 0;       /* this caller does PAP only */
     line_init();
     srv_init(&S, &c, 78, lan_rx, NULL);
     CHECK_EQ_I(S.status.v92, 1); CHECK_EQ_I(S.status.ppp_compression, 1);

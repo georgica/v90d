@@ -294,8 +294,9 @@ int cfg_write(const cfg_t *c, int with_secrets, char *buf, size_t cap);
 int cfg_save(const cfg_t *c, const char *path, char *err, size_t errsz);
 
 /* The configuration as one port's server wants it: *out is *c with, for
- * port 1 (the second port; port 0 is the first), the [modem2], [line2] and
- * ppp_peer2 values in the fields of [modem], [line] and ppp_peer. */
+ * port 1 (the second port; port 0 is the first), the [modem2], [line2],
+ * ppp_peer2 and encryption2 values in the fields of [modem], [line],
+ * ppp_peer and encryption. */
 void cfg_for_port(const cfg_t *c, int port, cfg_t *out);
 
 /* One dotted IPv4 address, nothing around it, into host byte order.

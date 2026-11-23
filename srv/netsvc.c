@@ -433,7 +433,12 @@ static void net_apply(void)
             }
         }
         if (tun_fd[i] >= 0) close(tun_fd[i]);
-        tun_fd[i] = tun_open(tun_name[i], c->ppp_local, c->ppp_peer, c->mru);
+        /* an encrypting port carries IP packets 4 octets shorter (the MPPE
+         * header and the protocol field ride inside the frame); with the
+         * smaller MTU the kernel answers "fragmentation needed" instead of
+         * the PPP layer dropping a full-size packet */
+        tun_fd[i] = tun_open(tun_name[i], c->ppp_local, c->ppp_peer,
+                             c->mru - (c->encryption ? PPP_MPPE_OVERHEAD : 0));
         if (tun_fd[i] < 0) logf_(CFG_LOG_ERROR, "cannot set up %s: %s (callers will get PPP but no network)", tun_name[i], strerror(errno));
         else logf_(CFG_LOG_INFO, "%s up: %s -> %s", tun_name[i], ip_str(c->ppp_local, a), ip_str(c->ppp_peer, b));
     }

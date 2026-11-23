@@ -266,7 +266,7 @@ int settings_render_page(const cfg_t *c, int page, int saved, const char *error,
                 " (HTTP) and FTP address the caller opens is fetched from Protoweb, the archive of"
                 " the web as it was, with no proxy to set on the caller's computer; mail, chat and"
                 " secure sites do not work. Dreamcast: set the console to dial this port's number"
-                " with a user name and password of the PPP page; PPP compression and V.92 are off"
+                " with a user name and password of the PPP page; PPP compression, PPP encryption and V.92 are off"
                 " for this port and the console is given the name servers of the game revival"
                 " projects, whatever the other pages say. Its further switches are on the Dreamcast tab. Saturn: two consoles that telephone each other, each on a box of its own; dial 0 to wait for the other player, #a*b*c*d# to call the one at that address. The last two have not been tried with a real"
                 " console. A change takes effect when the lines are free.</p></section>\n");
@@ -454,6 +454,14 @@ static const char *sec_of(const form_t *f, int fi)
     return s;
 }
 
+/* the config key a field sets, for messages: port 2's own key where it has
+ * one outside [line2] and [modem2] */
+static const char *key_of(const form_t *f, int fi)
+{
+    if (f->port2 && fi == F_ENCRYPTION) return "encryption2";
+    return fields[fi].name;
+}
+
 /* note the first thing that is wrong with a value */
 static void fail(form_t *f, const char *fmt, ...)
 {
@@ -550,7 +558,7 @@ static void set_num(form_t *f, int fi, int *field, const char *v)
 {
     char sv[41];
     if (get_num(v, field))
-        fail(f, "[%s] %s: '%s' is not a number", sec_of(f, fi), fields[fi].name, safe(v, sv));
+        fail(f, "[%s] %s: '%s' is not a number", sec_of(f, fi), key_of(f, fi), safe(v, sv));
 }
 
 /* an address field: blanks around it allowed; empty = none where that is allowed */
@@ -566,7 +574,7 @@ static void set_addr(form_t *f, int fi, uint32_t *field, const char *v, int none
     if (n == 0 && none_ok) { *field = 0; return; }
     if (n < sizeof t) { memcpy(t, v, n); t[n] = '\0'; }
     if (n >= sizeof t || cfg_parse_ip(t, &a))
-        fail(f, "[%s] %s: '%s' is not an IPv4 address", sec_of(f, fi), fields[fi].name, safe(v, sv));
+        fail(f, "[%s] %s: '%s' is not an IPv4 address", sec_of(f, fi), key_of(f, fi), safe(v, sv));
     else
         *field = a;
 }
@@ -578,7 +586,7 @@ static void set_enum(form_t *f, int fi, int *field, const char *v, const char *c
     int i;
     for (i = 0; i < count; i++)
         if (strcmp(names[i], v) == 0) { *field = i; return; }
-    fail(f, "[%s] %s: '%s' is not one of: %s", sec_of(f, fi), fields[fi].name, safe(v, sv), list);
+    fail(f, "[%s] %s: '%s' is not one of: %s", sec_of(f, fi), key_of(f, fi), safe(v, sv), list);
 }
 
 /* one decoded field into the form */
@@ -648,7 +656,7 @@ static void set_field(form_t *f, int fi, const char *v, size_t len)
         break;
     default:                                    /* the 0/1 fields */
         if (len == 1 && (v[0] == '0' || v[0] == '1')) f->sw[fi] = v[0] - '0';
-        else fail(f, "[%s] %s: '%s' is not 0 or 1", sec_of(f, fi), fields[fi].name, safe(v, sv));
+        else fail(f, "[%s] %s: '%s' is not 0 or 1", sec_of(f, fi), key_of(f, fi), safe(v, sv));
         break;
     }
 }

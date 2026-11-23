@@ -248,6 +248,29 @@ static int validate_port(const cfg_t *c, int o, char *msg, int *k1)
 /* 0 if valid. Otherwise -1, the message in msg, and in *k1 / *k2 the keys
  * to blame (the parser reports the line of k1 if the file set it, else of
  * k2, else no line). */
+/* the rules between the [modem] keys of one port (o = 0, or K2_OFF with
+ * port 2's values in *c, as for validate_port) */
+static int modem_rules(const cfg_t *c, int o, char *msg, int *k1, int *k2)
+{
+    const char *sec = sec_names[keydefs[K_V42BIS + o].sec];
+    if (c->v42bis && !c->v42) {
+        *k1 = K_V42BIS + o; *k2 = K_V42 + o;
+        snprintf(msg, MSG_MAX, "[%s] v42bis = on needs v42 = on (set v42bis = off)", sec);
+        return -1;
+    }
+    if (c->x2 && !(c->modulations & CFG_MOD_V34)) {
+        *k1 = K_X2 + o; *k2 = K_MODS + o;
+        snprintf(msg, MSG_MAX, "[%s] x2 = on needs v34 in modulations", sec);
+        return -1;
+    }
+    if (c->k56 && !(c->modulations & CFG_MOD_V34)) {
+        *k1 = K_K56 + o; *k2 = K_MODS + o;
+        snprintf(msg, MSG_MAX, "[%s] k56 = on needs v34 in modulations", sec);
+        return -1;
+    }
+    return 0;
+}
+
 static int validate(const cfg_t *c, char *msg, int *k1, int *k2)
 {
     char ip[16], nm[16], sn[41];
@@ -335,21 +358,7 @@ static int validate(const cfg_t *c, char *msg, int *k1, int *k2)
         *k1 = c->encryption ? K_ENCRYPTION : K_ENCRYPTION2; *k2 = K_USER;
         return kerr(msg, *k1, "encryption needs MS-CHAPv2, so at least one user");
     }
-    if (c->v42bis && !c->v42) {
-        *k1 = K_V42BIS; *k2 = K_V42;
-        snprintf(msg, MSG_MAX, "[modem] v42bis = on needs v42 = on (set v42bis = off)");
-        return -1;
-    }
-    if (c->x2 && !(c->modulations & CFG_MOD_V34)) {
-        *k1 = K_X2; *k2 = K_MODS;
-        snprintf(msg, MSG_MAX, "[modem] x2 = on needs v34 in modulations");
-        return -1;
-    }
-    if (c->k56 && !(c->modulations & CFG_MOD_V34)) {
-        *k1 = K_K56; *k2 = K_MODS;
-        snprintf(msg, MSG_MAX, "[modem] k56 = on needs v34 in modulations");
-        return -1;
-    }
+    if (modem_rules(c, 0, msg, k1, k2)) return -1;
 
     /* port 2 */
     {
@@ -358,21 +367,7 @@ static int validate(const cfg_t *c, char *msg, int *k1, int *k2)
         *k2 = -1;
         *k1 = K_ENCRYPTION2; if (en(msg, K_ENCRYPTION2, two.encryption, 2)) return -1;
         if (validate_port(&two, K2_OFF, msg, k1)) return -1;
-        if (two.v42bis && !two.v42) {
-            *k1 = K2_V42BIS; *k2 = K2_V42;
-            snprintf(msg, MSG_MAX, "[modem2] v42bis = on needs v42 = on (set v42bis = off)");
-            return -1;
-        }
-        if (two.x2 && !(two.modulations & CFG_MOD_V34)) {
-            *k1 = K2_X2; *k2 = K2_MODS;
-            snprintf(msg, MSG_MAX, "[modem2] x2 = on needs v34 in modulations");
-            return -1;
-        }
-        if (two.k56 && !(two.modulations & CFG_MOD_V34)) {
-            *k1 = K2_K56; *k2 = K2_MODS;
-            snprintf(msg, MSG_MAX, "[modem2] k56 = on needs v34 in modulations");
-            return -1;
-        }
+        if (modem_rules(&two, K2_OFF, msg, k1, k2)) return -1;
         /* x2 and k56 may be on for both ports: the daemon serves only one heavy
          * call at a time (srv.c, the shared heavy slot), so no config rule
          * limits it. */

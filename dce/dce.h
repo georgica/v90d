@@ -165,7 +165,7 @@ typedef struct {
     uint32_t    our_ip;
     uint32_t    peer_ip;       /* as assigned; kept after the call ends */
     unsigned    ppp_comp_tx, ppp_comp_rx;  /* PPP compression (CCP) in force now, towards /
-                                              from the caller: PPP_COMP_NONE, _DEFLATE, _MPPC
+                                              from the caller: PPP_COMP_NONE, _DEFLATE, _MPPC, _MPPE
                                               (ppp_counters keeps the figures after the call) */
     ppp_counters_t ppp_counters;
 

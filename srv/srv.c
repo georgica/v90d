@@ -43,6 +43,10 @@ static uint8_t silence(const srv_t *s) { return v90m_g711_encode(s->cfg.law == C
 static int for_console(const cfg_t *c) { return c->service == CFG_SERVICE_DREAMCAST; }
 /* two consoles joined modem to modem: saturn.h */
 static int for_link(const cfg_t *c) { return c->service == CFG_SERVICE_SATURN; }
+/* every [modem] and [ppp] option applies: an Internet or Archive port, or a
+ * BBS call on any port. A console port or a console link runs a fixed set
+ * (no V.92, x2, K56flex, PPP compression or encryption) whatever is set. */
+static int full_options(const cfg_t *c, int bbs) { return bbs || (!for_console(c) && !for_link(c)); }
 
 static void raw_from_caller(void *ctx, const uint8_t *oct, size_t n)
 {
@@ -118,9 +122,10 @@ static void adopt(srv_t *s, const cfg_t *cfg)
     tel_cfg t; int i;
     s->cfg = *cfg; s->have_next = 0;
     s->status.service = cfg->service;
-    s->status.v92 = cfg->v92 && !for_console(cfg) && !for_link(cfg);
-    s->status.ppp_compression = cfg->compression && !for_console(cfg) && !for_link(cfg);
-    s->status.ppp_encryption = cfg->encryption && !for_console(cfg) && !for_link(cfg);
+    s->status.v92 = cfg->v92 && full_options(cfg, 0);
+    /* encryption replaces plain compression (call_start) */
+    s->status.ppp_compression = cfg->compression && !cfg->encryption && full_options(cfg, 0);
+    s->status.ppp_encryption = cfg->encryption && full_options(cfg, 0);
     for (i = 0; i < CFG_MAX_USERS; i++) {
         s->users[i].name = s->cfg.users[i].name;
         s->users[i].secret = s->cfg.users[i].secret;
@@ -191,7 +196,7 @@ static void call_start(srv_t *s)
 {
     dce_cfg_t d;
     const cfg_t *c = &s->cfg;
-    int bbs; char board[BBS_NUMBER_LEN + 1];
+    int bbs, enc; char board[BBS_NUMBER_LEN + 1];
     s->link = SATURN_NONE;
     s->call_start = s->clock; s->call_s = 0;
     /* a terminal program for a bulletin board (bbs.h), unless the number is the port's own */
@@ -217,7 +222,7 @@ static void call_start(srv_t *s)
     /* V.92 rides on the V.90 offer. Only with error control: a V.92 caller
      * that saw LAPM in our JM skips ODP / ADP (V.92 9.3.1) and would wait
      * for a LAPM that v42 = off never starts */
-    if ((c->modulations & CFG_MOD_V90) && c->v92 && c->v42 && (bbs || (!for_console(c) && !for_link(c)))) d.modulations |= V90M_MOD_V92;
+    if ((c->modulations & CFG_MOD_V90) && c->v92 && c->v42 && full_options(c, bbs)) d.modulations |= V90M_MOD_V92;
     if (c->modulations & CFG_MOD_V34) d.modulations |= V90M_MOD_V34;
     if (c->modulations & CFG_MOD_V32BIS) d.modulations |= V90M_MOD_V32BIS;
     /* 1200 bit/s: V.22 and, behind a 2225 Hz answer tone, Bell 212A */
@@ -236,7 +241,7 @@ static void call_start(srv_t *s)
      * originate strip below) only when we really will offer one, so the slot
      * never leaks. */
     if ((c->x2 || c->k56) && (c->modulations & CFG_MOD_V34) && !s->originate
-        && (bbs || (!for_console(c) && !for_link(c)))
+        && full_options(c, bbs)
         && (!s->heavy_slot || *s->heavy_slot == 0)) {
         if (c->x2)  d.modulations |= V90M_MOD_X2;
         if (c->k56) d.modulations |= V90M_MOD_K56;
@@ -258,13 +263,17 @@ static void call_start(srv_t *s)
         d.v42.lapm.v42bis_tx = 0; d.v42.lapm.v42bis_rx = 0;
         d.v42.lapm.v44_tx = 0; d.v42.lapm.v44_rx = 0;
     }
-    if (c->encryption)
+    /* [ppp] encryption, decided once so the authentication, the encryption
+     * and the compression below agree: never on a console port, which can
+     * do neither MS-CHAPv2 nor MPPE and keeps the port's own login */
+    enc = c->encryption && full_options(c, bbs);
+    if (enc)
         /* MPPE needs the MS-CHAPv2 keys and must not fall back: force the
          * authentication regardless of the [ppp] auth setting */
         d.ppp.auth = PPP_AUTH_MSCHAPV2;
     else
         d.ppp.auth = c->auth == CFG_AUTH_CHAP ? PPP_AUTH_CHAP : c->auth == CFG_AUTH_PAP ? PPP_AUTH_PAP : PPP_AUTH_NONE;
-    d.ppp.encrypt = c->encryption;
+    d.ppp.encrypt = enc;
     d.ppp.users = s->users; d.ppp.n_users = (size_t)c->n_users;
     d.ppp.our_ip = c->ppp_local; d.ppp.peer_ip = c->ppp_peer;
     d.ppp.dns1 = c->dns[0]; d.ppp.dns2 = c->dns[1];
@@ -273,7 +282,7 @@ static void call_start(srv_t *s)
     /* [ppp] compression: CCP with Deflate and MPPC, or no CCP at all. When
      * encryption is required, CCP carries only MPPE (no plain compression to
      * fall back to), so drop Deflate/MPPC. */
-    d.ppp.comp = (c->encryption || !c->compression) ? PPP_COMP_NONE : (PPP_COMP_DEFLATE | PPP_COMP_MPPC);
+    d.ppp.comp = (enc || !c->compression) ? PPP_COMP_NONE : (PPP_COMP_DEFLATE | PPP_COMP_MPPC);
     if (for_console(c) && !bbs) {
         /* The number and the login are the port's, as for every service.
          * Whatever [ppp] and [network] say: no CCP (one game is known to
@@ -281,7 +290,6 @@ static void call_start(srv_t *s)
          * servers that know where the games' servers are today. V.92 is
          * left out above: the console's modem is older than it. */
         d.ppp.comp = PPP_COMP_NONE;
-        d.ppp.encrypt = 0;      /* a console cannot do MS-CHAPv2/MPPE */
         d.ppp.dns1 = CONSOLE_DNS1; d.ppp.dns2 = CONSOLE_DNS2;
         console_init(&s->console);
     }

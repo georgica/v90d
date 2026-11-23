@@ -345,7 +345,8 @@ static void adopt(const cfg_t *n)
         netsvc_set_peer_conf(i, view.ppp_peer);
         if (view.service == CFG_SERVICE_DREAMCAST && view.dc_lan && netsvc_lan_ip(i)) view.ppp_peer = netsvc_lan_ip(i);
         if (view.dc_lan != S[i].cfg.dc_lan) net_dirty = 1;
-        if (view.ppp_local != S[i].cfg.ppp_local || view.ppp_peer != S[i].cfg.ppp_peer || view.nat != S[i].cfg.nat || view.service != S[i].cfg.service || view.mru != S[i].cfg.mru)
+        if (view.ppp_local != S[i].cfg.ppp_local || view.ppp_peer != S[i].cfg.ppp_peer || view.nat != S[i].cfg.nat || view.service != S[i].cfg.service || view.mru != S[i].cfg.mru
+            || view.encryption != S[i].cfg.encryption)      /* the tun MTU follows it (netsvc.c) */
             net_dirty = 1;
         srv_reconfigure(&S[i], &view);
     }

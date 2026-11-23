@@ -413,6 +413,11 @@ static void test_ethernet(void)
     CHECK_EQ_I(out.encryption, 1); CHECK_EQ_I(out.port2.encryption, 0);
     CHECK_EQ_I(apply(&c, "port=2&encryption=on", &out), SETTINGS_OK);
     CHECK_EQ_I(out.encryption, 0); CHECK_EQ_I(out.port2.encryption, 1);
+    /* a bad value is reported under the key it would have set */
+    CHECK_EQ_I(apply(&c, "encryption=maybe", &out), SETTINGS_INVALID);
+    CHECK(strcmp(err, "[ppp] encryption: 'maybe' is not one of: on, off") == 0);
+    CHECK_EQ_I(apply(&c, "port=2&encryption=maybe", &out), SETTINGS_INVALID);
+    CHECK(strcmp(err, "[ppp] encryption2: 'maybe' is not one of: on, off") == 0);
     c.service = CFG_SERVICE_ARCHIVE;
     CHECK_EQ_I(apply(&c, "service=internet", &out), SETTINGS_OK);
     CHECK_EQ_I(out.service, CFG_SERVICE_INTERNET);
