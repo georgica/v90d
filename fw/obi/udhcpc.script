@@ -1,0 +1,22 @@
+#!/bin/sh
+# udhcpc's script for the OBi200's LAN port under v90d (fw/obi/obi).
+# /etc/resolv.conf on this box is a link to /var/tmp/resolv.conf.
+# Ours; written for this image.
+RESOLV=/var/tmp/resolv.conf
+case "$1" in
+    deconfig)
+        ifconfig "$interface" 0.0.0.0
+        ;;
+    bound|renew)
+        ifconfig "$interface" "$ip" ${subnet:+netmask $subnet} ${broadcast:+broadcast $broadcast}
+        if [ -n "$router" ]; then
+            while route del default gw 0.0.0.0 dev "$interface" 2>/dev/null; do :; done
+            for r in $router; do route add default gw "$r" dev "$interface"; break; done
+        fi
+        : > $RESOLV.new
+        for d in $dns; do echo "nameserver $d" >> $RESOLV.new; done
+        mv $RESOLV.new $RESOLV
+        logger -t udhcpc "$interface $ip"
+        ;;
+esac
+exit 0

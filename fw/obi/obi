@@ -1,0 +1,90 @@
+#!/bin/sh
+# v90d on the Obihai OBi200: this file is /obi/obi, which the maker's
+# /etc/rc starts at boot in place of the maker's application. The kernel,
+# U-Boot and the root file system are the maker's (or the community
+# firmware's) and stay as they were; only the /obi partition is ours.
+#
+#   ffxav_*.ko    the maker's telephony, LED and watchdog modules, taken
+#                 from the owner's own firmware file by mkobifw.py
+#   obiline       our line driver in user space (fw/obi/obiline.c), served
+#                 to the daemon on /var/run/v90line
+#   v90d          the daemon; settings in /scratch/v90d (the box's writable
+#                 flash), the status and settings pages on the LAN port
+# Ours; written for this image.
+
+D=${V90D_DIR:-/obi}
+PATH=/sbin:/usr/sbin:/bin:/usr/bin
+export PATH
+say() { echo "v90d: $*"; logger -t v90d "$*" 2>/dev/null; }
+
+# the line's audio loop runs SCHED_FIFO all the time
+sysctl -w kernel.sched_rt_runtime_us=-1 >/dev/null 2>&1
+
+cd $D || exit 1
+# the maker's modules, in the maker's order (its start script loads the
+# watchdog's too; we never open the watchdog device, and the box runs on)
+for m in ffxav_mp ffxav_led ffxav_wdt; do
+    grep -q "^$m " /proc/modules || insmod $D/$m.ko || say "cannot load $m.ko"
+done
+
+# settings: kept in /scratch, the factory ones until the first save
+mkdir -p /scratch/v90d
+CONF=/scratch/v90d/v90d.conf
+[ -s $CONF ] || cp $D/v90d.conf $CONF
+if ! $D/v90d -c $CONF -p >/dev/null 2>&1; then
+    say "the saved settings are not understood by this firmware: factory settings for now"
+    CONF=/tmp/v90d.conf
+    cp $D/v90d.conf $CONF
+fi
+chmod 600 $CONF
+
+# The LAN port. The Ethernet controller's own device (unm) carries the
+# switch's tagged frames; the routed interface eth1 is made on top of it with
+# the unit's MAC, as the maker's application does at boot (unicfg -gwadd ...
+# and two switch register writes, read off a box starting up). The MAC is in
+# the factory block of the flash, after "OB100 UNIT INFO" at 0x40000.
+LAN=eth1
+unit_mac() {
+    [ "$(hexdump -s 262144 -n 15 -e '15/1 "%c"' /dev/mtdblock6 2>/dev/null)" = "OB100 UNIT INFO" ] || return 1
+    hexdump -s 262400 -n 6 -e '5/1 "%02x:" 1/1 "%02x"' /dev/mtdblock6 2>/dev/null
+}
+if [ ! -d /sys/class/net/$LAN ]; then
+    MAC=$(unit_mac) || { MAC=02:90:d0:00:00:01; say "no unit MAC in the flash: $MAC for now"; }
+    ifconfig unm down 2>/dev/null
+    unicfg -gwadd $LAN 0 $MAC 0x2f >/dev/null 2>&1 || say "cannot make $LAN"
+    swcfg -sw 0 5 9 0x28 >/dev/null 2>&1
+    swcfg -sw 0 5 0xa 0xb0c8 >/dev/null 2>&1
+fi
+eval "$($D/v90d -c $CONF -p)" || LAN_MODE=dhcp
+ifconfig lo 127.0.0.1 up
+ifconfig $LAN 0.0.0.0 allmulti up
+if [ "$LAN_MODE" = static ]; then
+    ifconfig $LAN "$LAN_ADDRESS" netmask "$LAN_NETMASK"
+    [ -n "$LAN_GATEWAY" ] && route add default gw "$LAN_GATEWAY" dev $LAN
+    : > /var/tmp/resolv.conf
+    for d in $LAN_DNS1 $LAN_DNS2; do echo "nameserver $d" >> /var/tmp/resolv.conf; done
+    say "LAN $LAN_ADDRESS (fixed)"
+else
+    udhcpc -i $LAN -b -s $D/udhcpc.script -H v90d -p /var/run/${LAN}udhcpc.pid >/dev/null 2>&1
+    say "LAN by DHCP"
+fi
+
+# the box has no battery clock: the call history wants the time of day
+( sleep 15; rdate -s time.nist.gov ) >/dev/null 2>&1 &
+
+# what the Firmware page shows about how this box keeps its firmware
+$D/obinv where > /tmp/v90d.where 2>/dev/null
+
+# the line, then the daemon on it; each started again if it ever stops.
+# The Firmware page's flash tool is obinv (fw/obi/obinv.c).
+( while :; do $D/obiline -s /var/run/v90line 2>&1 | logger -t obiline; sleep 2; done ) &
+sleep 2
+( while :; do $D/v90d -c $CONF -l seq:/var/run/v90line -i $LAN -t ppp0 -N $D/obinv 2>&1 | logger -t v90d; sleep 2; done ) &
+
+# The Restart button, and the Firmware page once it has written the flash,
+# leave a note: restart then (the settings are written as they are saved).
+( while sleep 2; do
+    [ -f /tmp/v90d.restart ] || continue
+    say "restart asked"; sync; sleep 1; reboot
+  done ) &
+say "started"
