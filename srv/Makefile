@@ -43,7 +43,7 @@ $(BUILD)/arm_test_rig: test/test_rig.c $(RIG_SRC_ARM) $(HDRS) ../rig/pppcall.h
 	@mkdir -p $(BUILD)
 	$(ARM_CC) $(CFLAGS) $(INC) -I../rig -static -o $@ test/test_rig.c $(RIG_SRC_ARM) $(LDLIBS)
 
-.PHONY: test test-arm test-ns test-ns-nat test-ns-upnp test-ns-pppd v90d v90d-arm clean
+.PHONY: test test-arm test-ns test-ns-nat test-ns-upnp test-ns-pppd v90d v90d-arm v90d-obi clean
 v90d: $(BUILD)/v90d
 v90d-arm: $(BUILD)/v90d-arm
 $(BUILD)/v90d: $(DAEMON_SRC) $(HDRS) ../fw/VERSION $(LIBV90M_A)
@@ -52,6 +52,13 @@ $(BUILD)/v90d: $(DAEMON_SRC) $(HDRS) ../fw/VERSION $(LIBV90M_A)
 $(BUILD)/v90d-arm: $(DAEMON_SRC) $(HDRS) ../fw/VERSION $(LIBV90M_A_ARM)
 	@mkdir -p $(BUILD)
 	$(ARM_CC) $(CFLAGS) $(DAEMON_DEF) $(DAEMON_INC) -static -Os -o $@ $(DAEMON_SRC) $(LIBV90M_A_ARM) $(LDLIBS)
+	$(dir $(ARM_CC))arm-linux-strip $@
+# the daemon for the Obihai OBi200 (fw/obi): the same, with the shims for its
+# Linux 2.6.30 (fw/obi/compat26.c)
+v90d-obi: $(BUILD)/v90d-obi
+$(BUILD)/v90d-obi: $(DAEMON_SRC) $(HDRS) ../fw/VERSION $(LIBV90M_A_ARM) ../fw/obi/compat26.c
+	@mkdir -p $(BUILD)
+	$(ARM_CC) $(CFLAGS) $(DAEMON_DEF) $(DAEMON_INC) -DHTTPD_FW_UPLOAD_MAX="(16u * 1024u * 1024u + 4096u)" -static -Os -o $@ ../fw/obi/compat26.c $(DAEMON_SRC) $(LIBV90M_A_ARM) $(LDLIBS)
 	$(dir $(ARM_CC))arm-linux-strip $@
 # The real daemon in a private network namespace (needs unprivileged user
 # namespaces): TUN device, NAT rule, HTTP listener, a whole call.
@@ -77,9 +84,9 @@ test-ns-pppd: $(BUILD)/v90d $(BUILD)/ns_pppd
 # host and a file that stands for the flash (fw/tools); without python3 or
 # fw/ that part is left out.
 FW_NV := ../fw/tools/v90nv.host
-$(BUILD)/ns_nat: test/ns_nat.c nat.c nat.h tun.c tun.h
+$(BUILD)/ns_nat: test/ns_nat.c nat.c nat.h tun.c tun.h ../ppp/ppp_hdlc.c
 	@mkdir -p $(BUILD)
-	$(CC) $(CFLAGS) $(INC) -o $@ test/ns_nat.c nat.c tun.c
+	$(CC) $(CFLAGS) $(INC) -o $@ test/ns_nat.c nat.c tun.c ../ppp/ppp_hdlc.c
 test-ns-nat: $(BUILD)/ns_nat
 	unshare -Urn ./$(BUILD)/ns_nat
 $(BUILD)/ns_upnp: test/ns_upnp.c upnp.c upnp.h

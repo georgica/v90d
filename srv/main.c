@@ -182,7 +182,7 @@ static void on_term(int sig) { (void)sig; stop = 1; }
 static void ip_to_kernel(void *ctx, const uint8_t *pkt, size_t len)
 {
     int i = (int)(((srv_t *)ctx) - S);
-    if (tun_fd[i] >= 0 && write(tun_fd[i], pkt, len) < 0) S[i].status.rx_errors++;
+    if (tun_fd[i] >= 0 && tun_write(tun_fd[i], pkt, len) < 0) S[i].status.rx_errors++;
 }
 
 /* a port has the archive for its service */
@@ -631,7 +631,7 @@ int main(int argc, char **argv)
             /* packets for the caller; one that does not fit yet is kept */
             if (tun_fd[p] >= 0) {
                 for (i = 0; i < 16; i++) {
-                    if (pending_n[p] <= 0) pending_n[p] = read(tun_fd[p], pending[p], sizeof pending[p]);
+                    if (pending_n[p] <= 0) pending_n[p] = tun_read(tun_fd[p], pending[p], sizeof pending[p]);
                     if (pending_n[p] <= 0) break;
                     r = srv_send_ip(&S[p], pending[p], (size_t)pending_n[p]);
                     if (r == PPP_ERR_FULL) break;

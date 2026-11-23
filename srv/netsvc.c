@@ -432,7 +432,7 @@ static void net_apply(void)
                 srv_reconfigure(&S[i], &v);
             }
         }
-        if (tun_fd[i] >= 0) close(tun_fd[i]);
+        if (tun_fd[i] >= 0) tun_close(tun_fd[i]);
         /* an encrypting port carries IP packets 4 octets shorter (the MPPE
          * header and the protocol field ride inside the frame); with the
          * smaller MTU the kernel answers "fragmentation needed" instead of

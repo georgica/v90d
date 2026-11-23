@@ -13,6 +13,10 @@
 #include <linux/netfilter.h>
 #include <linux/netfilter/nfnetlink.h>
 #include <linux/netfilter/nf_tables.h>
+#include <stdio.h>
+#include <sys/utsname.h>
+#include <sys/wait.h>
+#include <sched.h>
 #include "nat.h"
 
 #define TABLE "v90d"
@@ -295,7 +299,164 @@ int nat_masquerade2(uint32_t peer_ip, uint32_t peer2_ip)
     return nat_apply(&p);
 }
 
+/* ---- the iptables way, for kernels before nftables (3.13) ----
+ *
+ * The same plan as two chains of the nat table, v90d_post and v90d_pre,
+ * put first in POSTROUTING and PREROUTING, through the box's own iptables
+ * program (the OBi200's Linux 2.6.30 has iptables and no nf_tables). Taken
+ * on such a kernel only (ipt_kernel). */
+
+#define IPT_POST "v90d_post"
+#define IPT_PRE  "v90d_pre"
+
+/* Linux before 3.13 has no nf_tables: decided once, from the kernel's
+ * version, so a refused rule on a kernel that has nf_tables stays an error
+ * of its own and never turns into iptables rules. */
+static int ipt_kernel(void)
+{
+    static int known = -1;
+    struct utsname u;
+    if (known < 0) {
+        int major = 0, minor = 0;
+        known = uname(&u) == 0 && sscanf(u.release, "%d.%d", &major, &minor) == 2 && (major < 3 || (major == 3 && minor < 13));
+    }
+    return known;
+}
+
+static const char *ipt_path(void)
+{
+    static const char *const where[] = { "/usr/sbin/iptables", "/sbin/iptables", "/usr/bin/iptables", NULL };
+    int i;
+    for (i = 0; where[i]; i++) if (access(where[i], X_OK) == 0) return where[i];
+    return NULL;
+}
+
+/* run iptables -t nat with these arguments (NULL-terminated); its exit status, or -1 */
+static int ipt(const char *const *args)
+{
+    const char *argv[32];
+    const char *path = ipt_path();
+    int n = 0, st;
+    pid_t pid;
+    if (!path) { errno = ENOENT; return -1; }
+    argv[n++] = path; argv[n++] = "-t"; argv[n++] = "nat";
+    while (*args && n < 31) argv[n++] = *args++;
+    argv[n] = NULL;
+    pid = fork();
+    if (pid < 0) return -1;
+    if (pid == 0) {
+        struct sched_param sp;
+        int fd = open("/dev/null", O_RDWR);
+        memset(&sp, 0, sizeof sp);
+        (void)sched_setscheduler(0, SCHED_OTHER, &sp);     /* not the daemon's real-time priority */
+        if (fd >= 0) { dup2(fd, 1); dup2(fd, 2); }
+        execv(path, (char *const *)argv);
+        _exit(127);
+    }
+    while (waitpid(pid, &st, 0) < 0) if (errno != EINTR) return -1;
+    return WIFEXITED(st) ? WEXITSTATUS(st) : -1;
+}
+
+static void ipt_unhook(void)
+{
+    static const char *const dpost[] = { "-D", "POSTROUTING", "-j", IPT_POST, NULL };
+    static const char *const dpre[] = { "-D", "PREROUTING", "-j", IPT_PRE, NULL };
+    static const char *const fpost[] = { "-F", IPT_POST, NULL }, *const xpost[] = { "-X", IPT_POST, NULL };
+    static const char *const fpre[] = { "-F", IPT_PRE, NULL }, *const xpre[] = { "-X", IPT_PRE, NULL };
+    int i;
+    /* no -C in older iptables: delete the jump until there is none */
+    for (i = 0; i < 8 && ipt(dpost) == 0; i++) {}
+    for (i = 0; i < 8 && ipt(dpre) == 0; i++) {}
+    ipt(fpost); ipt(xpost); ipt(fpre); ipt(xpre);
+}
+
+static const char *ip_str(uint32_t ip, char *b)
+{
+    snprintf(b, 16, "%u.%u.%u.%u", ip >> 24, (ip >> 16) & 255, (ip >> 8) & 255, ip & 255);
+    return b;
+}
+
+static int ipt_apply(const nat_plan *p)
+{
+    /* our chains first in the nat table: the system's own rules must not see the packets first */
+    static const char *const npost[] = { "-N", IPT_POST, NULL }, *const hpost[] = { "-I", "POSTROUTING", "1", "-j", IPT_POST, NULL };
+    static const char *const npre[] = { "-N", IPT_PRE, NULL }, *const hpre[] = { "-I", "PREROUTING", "1", "-j", IPT_PRE, NULL };
+    char a[16], b[16], c[16], ports[16], to[8];
+    int i, j, bad = 0;
+    if (!ipt_path()) { errno = ENOENT; return -1; }
+    ipt_unhook();
+    if (ipt(npost) || ipt(hpost)) { ipt_unhook(); errno = EIO; return -1; }
+    for (i = 0; i < 2; i++) if (p->masquerade && p->peer[i] && !p->lan[i]) {
+        const char *r[] = { "-A", IPT_POST, "-s", ip_str(p->peer[i], a), "-j", "MASQUERADE", NULL };
+        bad |= ipt(r);
+    }
+    if (p->vpn[0]) {
+        const char *r[] = { "-A", IPT_POST, "-o", p->vpn, "-j", "MASQUERADE", NULL };
+        bad |= ipt(r);
+    }
+    if ((p->peer[0] && (p->archive[0] || p->console[0])) || (p->peer[1] && (p->archive[1] || p->console[1]))) {
+        if (ipt(npre) || ipt(hpre)) { ipt_unhook(); errno = EIO; return -1; }
+        for (i = 0; i < 2; i++) if (p->peer[i] && p->archive[i]) {
+            static const struct { const char *proto, *port; int which; } R[] = {
+                { "udp", "53", 0 }, { "tcp", "80", 1 }, { "tcp", "21", 2 } };
+            for (j = 0; j < 3; j++) {
+                uint16_t t = R[j].which == 0 ? p->dns_port : R[j].which == 1 ? p->http_port : p->ftp_port;
+                const char *r[] = { "-A", IPT_PRE, "-s", ip_str(p->peer[i], a), "-p", R[j].proto, "--dport", R[j].port,
+                                    "-j", "REDIRECT", "--to-ports", to, NULL };
+                snprintf(to, sizeof to, "%u", t);
+                bad |= ipt(r);
+            }
+            if (p->pasv_lo && p->pasv_hi >= p->pasv_lo) {
+                const char *r[] = { "-A", IPT_PRE, "-s", ip_str(p->peer[i], a), "-p", "tcp", "--dport", ports, "-j", "REDIRECT", NULL };
+                snprintf(ports, sizeof ports, "%u:%u", p->pasv_lo, p->pasv_hi);
+                bad |= ipt(r);
+            }
+        }
+        {
+            int opened = 0;
+            for (i = 0; i < 2; i++) if (p->peer[i] && p->console[i]) {
+                for (j = 0; j < p->n_rewrite && j < NAT_REWRITE_MAX; j++) {
+                    const nat_rewrite *w = &p->rewrite[j];
+                    const char *r[16]; int n = 0;
+                    r[n++] = "-A"; r[n++] = IPT_PRE; r[n++] = "-s"; r[n++] = ip_str(p->peer[i], a);
+                    r[n++] = "-d"; r[n++] = ip_str(w->from, b); r[n++] = "-p"; r[n++] = w->proto == 17 ? "udp" : "tcp";
+                    if (w->port) { snprintf(ports, sizeof ports, "%u", w->port); r[n++] = "--dport"; r[n++] = ports; }
+                    r[n++] = "-j"; r[n++] = "DNAT"; r[n++] = "--to-destination"; r[n++] = ip_str(w->to, c); r[n] = NULL;
+                    bad |= ipt(r);
+                }
+                if (!opened && p->wan[0] && !p->lan[i]) {
+                    opened = 1;
+                    for (j = 0; j < p->n_open && j < NAT_OPEN_MAX; j++) {
+                        const nat_open *o = &p->open[j];
+                        const char *r[16]; int m = 0;
+                        r[m++] = "-A"; r[m++] = IPT_PRE; r[m++] = "-i"; r[m++] = p->wan;
+                        r[m++] = "-p"; r[m++] = o->proto == 17 ? "udp" : "tcp";
+                        if (o->lo) {                    /* lo 0: any port, as dnat_msg has it */
+                            if (o->lo == o->hi) snprintf(ports, sizeof ports, "%u", o->lo);
+                            else snprintf(ports, sizeof ports, "%u:%u", o->lo, o->hi);
+                            r[m++] = "--dport"; r[m++] = ports;
+                        }
+                        r[m++] = "-j"; r[m++] = "DNAT"; r[m++] = "--to-destination"; r[m++] = ip_str(p->peer[i], a); r[m] = NULL;
+                        bad |= ipt(r);
+                    }
+                }
+            }
+        }
+    }
+    /* all or nothing, as the nftables batch is */
+    if (bad) { ipt_unhook(); errno = EIO; return -1; }
+    return 0;
+}
+
+static int nft_apply(const nat_plan *p);
+
 int nat_apply(const nat_plan *p)
+{
+    if (ipt_kernel()) return ipt_apply(p);
+    return nft_apply(p);
+}
+
+static int nft_apply(const nat_plan *p)
 {
     static nlbuf m;                 /* not on the stack: 64 kB */
     size_t at, hook;
@@ -359,7 +520,19 @@ int nat_apply(const nat_plan *p)
     return transact(&m, first);
 }
 
+static int nft_remove(void);
+
 int nat_remove(void)
+{
+    if (ipt_kernel()) {
+        if (!ipt_path()) { errno = ENOENT; return -1; }
+        ipt_unhook();
+        return 0;
+    }
+    return nft_remove();
+}
+
+static int nft_remove(void)
 {
     nlbuf m; uint32_t first;
     memset(&m, 0, sizeof m);

@@ -18,15 +18,19 @@ int line_open(line_t *l, const char *spec)
         l->fd = (int)n;
         return 0;
     }
-    if (strncmp(spec, "unix:", 5) == 0) {
+    if (strncmp(spec, "unix:", 5) == 0 || strncmp(spec, "seq:", 4) == 0) {
+        /* seq: is the dev: protocol (one block per read) over a packet
+         * socket, served by a line helper in user space (fw/obi/obiline) */
+        int seq = spec[0] == 's';
+        const char *path = spec + (seq ? 4 : 5);
         struct sockaddr_un sa;
         int fd, err;
-        if (strlen(spec + 5) >= sizeof sa.sun_path) { errno = ENAMETOOLONG; return -1; }
-        fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+        if (strlen(path) >= sizeof sa.sun_path) { errno = ENAMETOOLONG; return -1; }
+        fd = socket(AF_UNIX, (seq ? SOCK_SEQPACKET : SOCK_STREAM) | SOCK_CLOEXEC, 0);
         if (fd < 0) return -1;
-        memset(&sa, 0, sizeof sa); sa.sun_family = AF_UNIX; strcpy(sa.sun_path, spec + 5);
+        memset(&sa, 0, sizeof sa); sa.sun_family = AF_UNIX; strcpy(sa.sun_path, path);
         if (connect(fd, (struct sockaddr *)&sa, sizeof sa) < 0) { err = errno; close(fd); errno = err; return -1; }
-        l->fd = fd;
+        l->fd = fd; l->dev = seq;
         return 0;
     }
     if (strncmp(spec, "dev:", 4) == 0) {

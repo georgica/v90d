@@ -104,8 +104,10 @@
                                      STATUS_JSON_MAX, CFG_TEXT_REDACTED_MAX,
                                      SETTINGS_HTML_MAX) */
 #define HTTPD_TX_MAX       (HTTPD_HDR_RESERVE + HTTPD_BODY_MAX)
+#ifndef HTTPD_FW_UPLOAD_MAX   /* a box whose firmware files are larger sets its own (the OBi200 build: 16 MiB) */
 #define HTTPD_FW_UPLOAD_MAX (4u * 1024u * 1024u + 4096u)  /* largest body of POST
                                      /firmware/upload: it is never read here */
+#endif
 #define HTTPD_FW_STOCK_MAX  64    /* largest body of POST /firmware/stock */
 #define HTTPD_CTYPE_MAX     200   /* a longer Content-Type on those two is refused */
 

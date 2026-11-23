@@ -10,6 +10,11 @@
  *            to us:    1 octet hook (0 on hook, 1 off hook) + 80 codewords
  *            from us:  80 codewords, the answer to that block
  *   unix:PATH  the same over a UNIX stream socket we connect to
+ *   seq:PATH   the dev: protocol below over a UNIX packet socket
+ *            (SOCK_SEQPACKET) we connect to: one message per block or
+ *            command, as one read or write of the device would carry. The
+ *            line helper of boxes whose telephony driver is not ours
+ *            serves it (fw/obi/obiline, the OBi200).
  *
  *   dev:PATH   the same over a character device: the SLIC driver of the box
  *            (fw/drv). One read gives the 81 octets of the next block and
