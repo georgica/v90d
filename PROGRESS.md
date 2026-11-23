@@ -2800,3 +2800,69 @@ release builds and attaches `v90d-ht802fw.bin` (HT802/HT801),
 
 Open: the phone light not yet seen on the unit; the OBi202 (second port,
 its LAN set-up) not done; no Windows MPPE client yet (issue #6).
+
+## Issue #6 again: Windows dial-up callers could not encrypt (2026-11-23)
+
+The first Windows tests of 0.8.0 (Windows 11 and XP, two winmodems and a
+3Com CardBus modem, port 1 encrypting): "require encryption" ended in error
+742 (XP, "the remote computer does not support the required data
+encryption type"), 628 (Windows 11, after "Registering computer on
+network") or 619 (the 3Com); "optional encryption" connected with no
+encryption and dropped 10-20 s later, every time. The daemon log showed no
+"PPP compression" line for any port 1 call: CCP never opened.
+
+Cause: **a Windows client does stateful MPPE only on a modem (or PPPoE)
+link**; stateless (the H bit) is for its VPN links. 0.8.0 offered and
+accepted stateless only, the combination pppd uses. Windows asked for
+stateful, we Nak'd that toward stateless; Windows Nak'd our stateless
+request toward stateful, and we dropped MPPE from our request altogether.
+So CCP could not open with MPPE: Windows gave up (742) or we ended the link
+(628, PPP_END_ENCRYPT_REQUIRED), and with "optional" IPCP came up without
+it until the encryption deadline (CCP's retry span) ended the call. The
+same wall was hit by pppd + Windows XP/7 PPPoE clients (linux-kernel,
+March 2011, "MPPE stateful mode problem and investigation"), which is also
+where the Windows stateful details below come from.
+
+Fixed (ppp/):
+
+- Negotiation: 128-bit only still, either mode. We ask for stateless first
+  (pppd keeps getting what it had), follow a Nak that names 128-bit in
+  either mode, and once the peer has asked for stateful we ask for it too.
+  A peer request with more bits (Windows "require": 0x60, "optional" with
+  software compression: 0x61) is Nak'd to 0x40 in the mode it asked for.
+  A Nak without the 128-bit bit still drops MPPE and the link ends.
+- Stateful MPPE in `ppp_mppe.c` (RFC 3078 7.2/8.2), per direction: one RC4
+  stream; key change on flag packets (count ending 0xFF); FLUSHED received
+  means RC4 again from the current key (Windows sets it on its first packet
+  and after a reset, not on flag packets); a lost packet makes us drop until
+  a FLUSHED or flag packet and send one CCP Reset-Request (again only if
+  undecryptable packets keep coming a Restart period later; never a CCP
+  renegotiation). A Reset-Request to us skips our count to the next flag
+  packet, a new key, instead of 8.2's RC4 restart on the current key, which
+  would repeat a keystream. A Reset-Ack is sent until the peer Code-Rejects
+  it (Windows does; the Linux kernel's receiver waits for one).
+- Something decrypting to a protocol outside 0x21..0xFA counts as out of
+  step.
+
+Daemon: a call log line "PPP ended: ..." when PPP ended for a reason other
+than a hang-up; for the encryption case it gives the caller's option 18
+request and Nak in hex. The compression line says "MPPE stateful".
+
+Proof: `ppp/test/test_ccp.c` has a Windows client modelled from RFC 3078
+apart from ppp_mppe.c (stateful, no FLUSHED on flag packets, FLUSHED after
+a reset, Code-Rejects Reset-Ack): on 0.8.0's code it reproduced the
+failure (Nak toward stateless, then an empty request: 18 failures); now
+"require", "maximum" and "optional" all open MPPE, 700 packets each way
+cross two key changes, a lost packet (and 300 lost across a key change)
+recover with one Reset-Request, and a Reset-Request to us resyncs the
+client on a new key. `test_mppe.c`: the first stateful packet equals RFC
+3079 3.5.3's own "test message" sample; 9000 packets round the counter
+twice with losses, replays and resets; mixed modes. ns_pppd gained a
+seventh call (pppd require-mppe-40 require-mppe-128 mppe-stateful: Nak'd
+down to 128-bit, stateless). ppp `make test` and `test-arm`, srv `make
+test`, `test-ns-pppd` (146 checks) all pass (one run of 3 had an unrelated
+TCP flake in call 5, `noccp`; clean before and after).
+
+Not verified: a real Windows client. The kernel's stateful MPPE differs
+from Windows' (it rekeys on every FLUSHED), so pppd cannot stand in for
+Windows here; the Windows behaviour is from RFC 3078 and that 2011 report.

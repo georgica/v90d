@@ -571,6 +571,19 @@ int main(int argc, char **argv)
         CHECK(http("GET /status.json HTTP/1.0\r\n\r\n", resp, sizeof resp) > 0);
         CHECK(strstr(resp, "\"ppp_encryption\":true") != NULL);
         one_call((int)i, &mppe, log);
+        /* a caller that asks for more than one key length and would take
+         * stateful mode too (as Windows asks): its request is Nak'd down to
+         * 128-bit in the mode it asked for, and pppd still settles on
+         * stateless. (The kernel's stateful mode is not what Windows does,
+         * so stateful itself is checked against a Windows model in
+         * ppp/test/test_ccp.c, not here.) */
+        if (!dead) {
+            static const call_t mppe2 = {
+                "require-mppe-40 require-mppe-128 mppe-stateful (Nak'd down to 128-bit)",
+                "require-mppe-40 require-mppe-128 mppe-stateful refuse-pap refuse-chap refuse-mschap refuse-eap",
+                40000, 10000, 15000, "mppe", "mppe", "MPPE 128-bit stateless compression enabled" };
+            one_call((int)i + 1, &mppe2, log);
+        }
     }
 
     CHECK_EQ_I(dead, 0);

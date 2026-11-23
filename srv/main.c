@@ -388,18 +388,52 @@ static const char *const mod_name[] = { "no carrier", "V.90", "V.34", "V.32bis",
 /* PPP compression (CCP) of the call that ended: one line, only if it was used */
 static void log_ppp_comp(const char *who, const ppp_t *ppp)
 {
-    static const char *const alg[] = { "none", "Deflate", "MPPC", "?", "MPPE" };
+    static const char *const alg[] = { "none", "Deflate", "MPPC", "?", "MPPE", "MPPE stateful" };
     ppp_status_t ps;
     const ppp_counters_t *k = &ps.counters;
+    unsigned at, ar;
     ppp_get_status(ppp, &ps);
     if (!k->ccp_opens) return;
+    at = k->comp_tx < 5 ? k->comp_tx : 0;
+    ar = k->comp_rx < 5 ? k->comp_rx : 0;
+    if (at == PPP_COMP_MPPE && (k->mppe_stateful & 1)) at = 5;
+    if (ar == PPP_COMP_MPPE && (k->mppe_stateful & 2)) ar = 5;
     logf_(CFG_LOG_INFO, "%s  PPP compression: to caller %s %lu -> %lu octets (%lu packets sent as they were), from caller %s %lu -> %lu;"
           " resets asked of us %lu, by us %lu (%lu packets dropped), CCP opened %lu time(s)",
-          who, alg[k->comp_tx < 5 ? k->comp_tx : 0], (unsigned long)k->comp_tx_in, (unsigned long)k->comp_tx_out,
-          (unsigned long)k->comp_tx_native, alg[k->comp_rx < 5 ? k->comp_rx : 0],
+          who, alg[at], (unsigned long)k->comp_tx_in, (unsigned long)k->comp_tx_out,
+          (unsigned long)k->comp_tx_native, alg[ar],
           (unsigned long)k->comp_rx_in, (unsigned long)k->comp_rx_out,
           (unsigned long)k->comp_tx_resets, (unsigned long)k->comp_rx_errors, (unsigned long)k->comp_rx_dropped,
           (unsigned long)k->ccp_opens);
+}
+
+/* How PPP ended, when it was not an ordinary hang-up; with encryption
+ * required and MPPE never agreed, what the caller asked for (option 18) */
+static void log_ppp_end(const char *who, const dce_t *d)
+{
+    static const char *const why[] = {
+        "", "closed here", "the caller hung up", "the line went", "LCP did not converge",
+        "the caller refused every login method allowed", "wrong name or password",
+        "the caller never logged in", "the caller stopped answering echo requests",
+        "looped back (heard our own magic number)", "IPCP did not converge",
+        "encryption is required and MPPE was not agreed" };
+    ppp_status_t ps;
+    const ppp_counters_t *k = &ps.counters;
+    char mppe[96] = "";
+    ppp_get_status(&d->ppp, &ps);
+    if (d->ppp_end == PPP_END_NONE || d->ppp_end == PPP_END_PEER_TERMINATED ||
+        d->ppp_end == PPP_END_LOWER_DOWN || d->ppp_end == PPP_END_LOCAL_CLOSE ||
+        (unsigned)d->ppp_end >= sizeof why / sizeof why[0]) return;
+    if (d->ppp_end == PPP_END_ENCRYPT_REQUIRED) {
+        int n = 0;
+        if (k->mppe_seen & PPP_MPPE_SEEN_REQ)
+            n += snprintf(mppe + n, sizeof mppe - (size_t)n, "; caller asked for option 18 %08lx", (unsigned long)k->mppe_peer_req);
+        if (k->mppe_seen & PPP_MPPE_SEEN_NAK)
+            n += snprintf(mppe + n, sizeof mppe - (size_t)n, "; Nak'd ours with %08lx", (unsigned long)k->mppe_peer_nak);
+        if (!k->mppe_seen)
+            snprintf(mppe, sizeof mppe, "; the caller asked for no MPPE");
+    }
+    logf_(CFG_LOG_INFO, "%s  PPP ended: %s%s", who, why[d->ppp_end], mppe);
 }
 
 static void log_last_call(int port)
@@ -429,6 +463,7 @@ static void log_last_call(int port)
               who, v.k_tx, v.k_rx, v.n401_tx, v.n401_rx, comp,
               v.tx_i, v.tx_i_retx, v.rx_i, v.rx_i_dropped, v.tx_rej, v.rx_rej, v.t401_expiries, v.comp_in, v.comp_out, v.decomp_in, v.decomp_out);
         log_ppp_comp(who, &S[port].dce.ppp);
+        log_ppp_end(who, &S[port].dce);
     }
 }
 
