@@ -81,3 +81,25 @@ jobs:
           sha256sum v90d-ht802fw.bin v90d-obi200.fw > SHA256SUMS
           cat SHA256SUMS
           gh release upload "$TAG" v90d-ht802fw.bin v90d-obi200.fw SHA256SUMS --clobber
+
+      - name: Download links in the release notes
+        run: |
+          # a "Downloads" block between markers, replaced on a run again
+          u="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}"
+          gh release view "$TAG" --json body -q .body > notes.md
+          python3 - "$u" <<'EOF'
+          import re, sys
+          u = sys.argv[1]
+          sums = dict(reversed(l.split()) for l in open("SHA256SUMS") if l.strip())
+          rows = [("v90d-ht802fw.bin", "Grandstream HT802 (V2.5A, V1.6A) and HT801"),
+                  ("v90d-obi200.fw", "Obihai OBi200 on the community firmware (fw/obi/README.md)"),
+                  ("SHA256SUMS", "the checksums")]
+          block = ["<!-- downloads -->", "### Downloads", "", "| file | for | sha256 |", "|---|---|---|"]
+          block += ["| [`%s`](%s/%s) | %s | %s |" % (f, u, f, what, "`%s`" % sums[f] if f in sums else "")
+                    for f, what in rows]
+          block = "\n".join(block + ["<!-- /downloads -->"])
+          body = open("notes.md").read()
+          body = re.sub(r"\n*<!-- downloads -->.*?<!-- /downloads -->", "", body, flags=re.S).rstrip()
+          open("notes.md", "w").write(body + "\n\n" + block + "\n")
+          EOF
+          gh release edit "$TAG" --notes-file notes.md
