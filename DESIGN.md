@@ -293,10 +293,14 @@ front. A port whose own number looks like one of them keeps its number.
   A board that speaks no telnet at all (raw TCP) works the same.
 - **The list** (format in `srv/bbs.h`). The image has a short one,
   `lists/bbs.txt` as `/etc/v90d.bbs`. The first call to the number or the
-  first look at the BBS page makes the box fetch the Telnet BBS Guide's
-  own archive from the guide, then once a day (`fw/bbsfetch.sh`: today's
-  `ibbsMMDDYY.zip`, else the month's `ibbsMMYY.zip`, else last month's;
-  nothing without a clock). `fw/bbsguide.awk` turns its
+  first look at the BBS page makes the box fetch the list, then once a
+  day (`fw/bbsfetch.sh`). First from Netstalgia
+  (`http://api.netstalgia.online/v1/bbs.txt`: the guide's list already in
+  our format, refreshed daily; taken only if its head is `v90d-bbs 2`,
+  so an error or challenge page falls through). Else the Telnet BBS
+  Guide's own archive from the guide (today's `ibbsMMDDYY.zip`, else the
+  month's `ibbsMMYY.zip`, else last month's; nothing without a clock).
+  The OBi200 has no awk, so it has only Netstalgia's list and the short one. `fw/bbsguide.awk` turns its
   `dialdirectory.xml` into our lines: telnet boards only, the login name
   is the board's name in lower case letters and digits without the word
   BBS (what 2600.network calls the same board), a second board of one

@@ -98,8 +98,10 @@ was.
 The **BBS** page of the web interface lists the boards with their numbers,
 a hundred to a page, with a search by name or number.
 The boards are those of the [Telnet BBS Guide](https://www.telnetbbsguide.com),
-more than a thousand of them: a box that uses the numbers fetches the
-guide's own list once a day and stays current without a firmware release.
+more than a thousand of them: a box that uses the numbers fetches the list
+once a day and stays current without a firmware release. It comes from
+[Netstalgia](https://netstalgia.online), which serves the guide's list
+ready for v90d, or else from the guide's own archive.
 They go by the login names 2600.network uses for the same boards
 (`20forbeers` for "20 For Beers BBS"). Where two names begin alike, the
 second board takes the next free number, so look a number up on the page or
