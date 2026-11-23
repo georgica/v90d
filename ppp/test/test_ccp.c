@@ -1777,6 +1777,292 @@ static void test_mppe_edges(void)
     CHECK_EQ_I(status()->end_reason, PPP_END_ENCRYPT_REQUIRED);
 }
 
+/* ---- a Windows dial-up client's MPPE, modelled from RFC 3078 (issue #6) ----
+ *
+ * Windows does stateless ("historyless", H bit) MPPE only on its VPN links;
+ * on a modem or PPPoE link it asks for stateful MPPE, Naks a request for
+ * stateless down to stateful, and cannot be talked into stateless (pppd's
+ * require-mppe-128 without mppe-stateful loses Windows PPPoE clients the
+ * same way: linux-kernel 2011-03, "MPPE stateful mode problem").
+ *
+ * Its stateful data path, as RFC 3078 has it and as that report saw it:
+ * one RC4 stream per key; the key changes on "flag" packets (count low
+ * octet 0xFF), which Windows sends WITHOUT the FLUSHED bit; FLUSHED means
+ * only "RC4 started again from the current key" (set on its first packet
+ * and after a CCP Reset-Request, which it answers with no Reset-Ack and
+ * Code-Rejects one sent to it). Written here apart from ppp_mppe.c; only
+ * the key derivation (proven against the kernel) and RC4 are shared. */
+typedef struct {
+    uint8_t start[16], session[16];
+    uint16_t count;
+    ppp_rc4_t rc4;
+    int flush_next;     /* tx: RC4 again from the current key, FLUSHED set */
+    int discard;        /* rx: lost step, waiting for FLUSHED (RFC 3078 8.2) */
+} win_dir_t;
+
+static void win_begin(win_dir_t *d, const uint8_t start[16])
+{
+    memcpy(d->start, start, 16);
+    ppp_mppe_initial_key(d->start, d->session, 16, PPP_MPPE_FORCE_NONE);
+    ppp_rc4_init(&d->rc4, d->session, 16);
+    d->count = 0xfff;
+    d->flush_next = 1;  /* Windows sets FLUSHED on its first packet */
+    d->discard = 0;
+}
+
+static size_t win_encrypt(win_dir_t *d, const uint8_t *in, size_t n, uint8_t *out)
+{
+    unsigned hdr = PPP_MPPE_ENCRYPT;
+    d->count = (uint16_t)((d->count + 1) & 0xfff);
+    if ((d->count & 0xff) == 0xff) {         /* flag packet: new key, no FLUSHED */
+        ppp_mppe_change_key(d->start, d->session, 16, PPP_MPPE_FORCE_NONE);
+        ppp_rc4_init(&d->rc4, d->session, 16);
+    }
+    if (d->flush_next) {
+        ppp_rc4_init(&d->rc4, d->session, 16);
+        hdr |= PPP_MPPE_FLUSHED;
+        d->flush_next = 0;
+    }
+    hdr |= d->count;
+    out[0] = (uint8_t)(hdr >> 8); out[1] = (uint8_t)hdr;
+    ppp_rc4(&d->rc4, in, out + 2, n);
+    return n + 2;
+}
+
+/* 0 decrypted, -1 dropped (lost step: the caller would send a Reset-Request) */
+static int win_decrypt(win_dir_t *d, const uint8_t *in, size_t n, uint8_t *out)
+{
+    unsigned hdr = (unsigned)in[0] << 8 | in[1], c = hdr & 0xfff;
+    int flushed = (hdr & PPP_MPPE_FLUSHED) != 0;
+    if (!d->discard && c == ((d->count + 1u) & 0xfff)) {
+        d->count = (uint16_t)c;
+        if ((c & 0xff) == 0xff) {
+            ppp_mppe_change_key(d->start, d->session, 16, PPP_MPPE_FORCE_NONE);
+            ppp_rc4_init(&d->rc4, d->session, 16);
+        }
+        if (flushed)
+            ppp_rc4_init(&d->rc4, d->session, 16);
+    } else if (!flushed) {
+        d->discard = 1;
+        return -1;
+    } else {
+        /* the flag packets in between changed the key, and this one if it is one */
+        while (d->count != c) {
+            d->count = (uint16_t)((d->count + 1) & 0xfff);
+            if ((d->count & 0xff) == 0xff)
+                ppp_mppe_change_key(d->start, d->session, 16, PPP_MPPE_FORCE_NONE);
+        }
+        ppp_rc4_init(&d->rc4, d->session, 16);
+        d->discard = 0;
+    }
+    ppp_rc4(&d->rc4, in + 2, out, n - 2);
+    return 0;
+}
+
+/* CCP as a Windows dial-up client negotiates it; `ask` is what its
+ * Configure-Request carries on option 18 (0x60: 40 or 128 bit, "require
+ * encryption"; 0x40: "maximum strength"; 0x61: "optional", with software
+ * compression on), `nak` what it answers a request for stateless with */
+static void win_ccp(uint32_t ask, uint32_t nak)
+{
+    static const uint8_t s128[6] = { 18, 6, 0, 0, 0, 0x40 };   /* stateful 128 */
+    uint8_t req[6] = { 18, 6, 0, 0, 0, 0 }, nk[6] = { 18, 6, 0, 0, 0, 0 };
+    frame_t *f;
+    req[2] = (uint8_t)(ask >> 24); req[3] = (uint8_t)(ask >> 16); req[4] = (uint8_t)(ask >> 8); req[5] = (uint8_t)ask;
+    nk[2] = (uint8_t)(nak >> 24); nk[3] = (uint8_t)(nak >> 16); nk[4] = (uint8_t)(nak >> 8); nk[5] = (uint8_t)nak;
+
+    /* its request: the server Naks it down to one key length, in the mode
+     * it asked for (RFC 3078 section 2: the strongest; stateless only if
+     * the peer asked for it) */
+    push_cp(P_CCP, PPP_CONF_REQ, 5, req, sizeof req);
+    pull();
+    f = find(P_CCP, ask == 0x40 ? PPP_CONF_ACK : PPP_CONF_NAK);   /* stateful 128 as it is */
+    CHECK(f && same(f, s128, 6));
+    if (f && !same(f, s128, 6))
+        printf("    Nak of the Windows request: %02x %02x %02x %02x\n", f->d[6], f->d[7], f->d[8], f->d[9]);
+    /* the server's request for stateless: Windows Naks it toward stateful */
+    CHECK(scr_new);
+    scr_new = 0;
+    push_cp(P_CCP, PPP_CONF_NAK, scr.d[1], nk, sizeof nk);
+    pull();
+    CHECK(scr_new && same(&scr, s128, 6));
+    if (scr_new && !same(&scr, s128, 6))
+        printf("    the server's request after the Nak: %u octets\n", (unsigned)scr.n);
+    /* both sides now agree stateful 128-bit */
+    push_cp(P_CCP, PPP_CONF_REQ, 6, s128, 6);
+    pull();
+    f = find(P_CCP, PPP_CONF_ACK);
+    CHECK(f && same(f, s128, 6));
+    push_cp(P_CCP, PPP_CONF_ACK, scr.d[1], scr.d + 4, scr.n - 4);
+    pull();
+    ppp_tick(&S, 10);
+    pull();
+}
+
+static void test_mppe_windows(void)
+{
+    static const uint32_t asks[3][2] = {
+        { 0x00000060, 0x00000040 },     /* XP / 11 "require encryption" */
+        { 0x00000040, 0x00000040 },     /* "require maximum strength" */
+        { 0x00000061, 0x00000041 },     /* "optional encryption", MPPC asked too */
+    };
+    ppp_config_t cfg;
+    win_dir_t wtx, wrx;     /* the client's send and receive directions */
+    static uint8_t ip[200], plain[202], enc[210], pt[210];
+    unsigned i, k, good, flags;
+    size_t n;
+    frame_t *f;
+
+    for (k = 0; k < 3; k++) {
+        for (i = 0; i < 16; i++) { inj_s[i] = (uint8_t)(i + 1); inj_r[i] = (uint8_t)(i + 101); }
+        base_cfg(&cfg);
+        cfg.encrypt = 1;
+        inject_mppe = 1;
+        up(&cfg);
+        inject_mppe = 0;
+        win_ccp(asks[k][0], asks[k][1]);
+        CHECK_EQ_I(status()->end_reason, PPP_END_NONE);
+        CHECK(status()->ccp_state == PPP_FSM_OPENED);
+        CHECK_EQ_I(status()->comp_tx, PPP_COMP_MPPE);
+        CHECK_EQ_I(status()->comp_rx, PPP_COMP_MPPE);
+    }
+    if (status()->comp_tx != PPP_COMP_MPPE)
+        return;
+
+    win_begin(&wtx, inj_r);     /* the client sends with the server's receive key */
+    win_begin(&wrx, inj_s);
+    for (i = 0; i < sizeof ip; i++) ip[i] = (uint8_t)(i * 7 + 3);
+    ip[0] = 0x45;
+
+    /* 700 packets each way: across the flag packets 0x0FF, 0x1FF, 0x2FF */
+    good = 0; flags = 0;
+    for (k = 0; k < 700; k++) {
+        ip[1] = (uint8_t)k; ip[2] = (uint8_t)(k >> 8);
+        CHECK_EQ_I(ppp_send_ip(&S, ip, sizeof ip), 0);
+        ppp_tick(&S, 50);
+        pull();
+        f = find(P_COMP, 0);
+        if (f && f->n == sizeof ip + 4) {
+            unsigned c = ((unsigned)f->d[0] << 8 | f->d[1]) & 0xfff;
+            if ((c & 0xff) == 0xff) flags++;
+            if (win_decrypt(&wrx, f->d, f->n, pt) == 0 && pt[0] == 0 && pt[1] == 0x21 &&
+                memcmp(pt + 2, ip, sizeof ip) == 0)
+                good++;
+        }
+    }
+    CHECK_EQ_I(good, 700);
+    CHECK_EQ_I(flags, 2);
+    good = 0;
+    for (k = 0; k < 700; k++) {
+        ip[1] = (uint8_t)k; ip[2] = (uint8_t)(k >> 8);
+        plain[0] = 0; plain[1] = 0x21;
+        memcpy(plain + 2, ip, sizeof ip);
+        n = win_encrypt(&wtx, plain, sizeof plain, enc);
+        ip_count = 0;
+        push(P_COMP, enc, n);
+        if (ip_count == 1 && ip_len == sizeof ip && memcmp(ip_got, ip, sizeof ip) == 0) good++;
+    }
+    CHECK_EQ_I(good, 700);
+    pull();
+    CHECK(find(P_CCP, RESET_REQ) == NULL);
+
+    /* a packet from the client is lost (RFC 3078 8.2): the next is dropped,
+     * one Reset-Request goes out, and the client's next packet (FLUSHED)
+     * brings the server back in step. Lost across a flag packet as well. */
+    for (k = 0; k < 2; k++) {
+        unsigned lose = k == 0 ? 1 : 300;
+        for (i = 0; i < lose; i++)
+            (void)win_encrypt(&wtx, plain, sizeof plain, enc);
+        ip_count = 0;
+        n = win_encrypt(&wtx, plain, sizeof plain, enc);
+        push(P_COMP, enc, n);
+        n = win_encrypt(&wtx, plain, sizeof plain, enc);
+        push(P_COMP, enc, n);
+        CHECK_EQ_I(ip_count, 0);
+        pull();
+        CHECK_EQ_I(count(P_CCP), 1);
+        f = find(P_CCP, RESET_REQ);
+        CHECK(f != NULL);
+        /* the client answers by flushing (and with no Reset-Ack) */
+        wtx.flush_next = 1;
+        n = win_encrypt(&wtx, plain, sizeof plain, enc);
+        push(P_COMP, enc, n);
+        CHECK_EQ_I(ip_count, 1);
+        CHECK(ip_count == 1 && memcmp(ip_got, ip, sizeof ip) == 0);
+        n = win_encrypt(&wtx, plain, sizeof plain, enc);
+        push(P_COMP, enc, n);
+        CHECK_EQ_I(ip_count, 2);
+    }
+
+    /* the client lost one of ours and asks for a reset: no Reset-Ack (it
+     * would Code-Reject one), and the server's next packet resynchronises
+     * it. RC4 is not started over on the old key (the same keystream again):
+     * the server moves on to the next flag packet, with a new key. */
+    CHECK_EQ_I(ppp_send_ip(&S, ip, sizeof ip), 0);
+    pull();                                     /* this one is lost */
+    CHECK_EQ_I(ppp_send_ip(&S, ip, sizeof ip), 0);
+    pull();
+    f = find(P_COMP, 0);
+    CHECK(f && win_decrypt(&wrx, f->d, f->n, pt) == -1);
+    push_cp(P_CCP, RESET_REQ, 77, NULL, 0);
+    pull();
+    /* a Reset-Ack goes out (the Linux kernel waits for one) until the
+     * client Code-Rejects it, as Windows does; then no more of them */
+    f = find(P_CCP, RESET_ACK);
+    CHECK(f && f->d[1] == 77);
+    if (f) {
+        uint8_t rej[4];
+        memcpy(rej, f->d, 4);
+        push_cp(P_CCP, PPP_CODE_REJ, 3, rej, 4);
+    }
+    push_cp(P_CCP, RESET_REQ, 78, NULL, 0);     /* the same request again */
+    pull();
+    CHECK(find(P_CCP, RESET_ACK) == NULL);
+    CHECK_EQ_I(status()->ccp_state, PPP_FSM_OPENED);
+    CHECK_EQ_I(ppp_send_ip(&S, ip, sizeof ip), 0);
+    ppp_tick(&S, 50);
+    pull();
+    f = find(P_COMP, 0);
+    CHECK(f != NULL);
+    if (f) {
+        unsigned hdr = (unsigned)f->d[0] << 8 | f->d[1];
+        CHECK(hdr & PPP_MPPE_FLUSHED);
+        CHECK_EQ_I(hdr & 0xff, 0xff);           /* a flag packet: a new key */
+        CHECK_EQ_I(win_decrypt(&wrx, f->d, f->n, pt), 0);
+        CHECK(pt[0] == 0 && pt[1] == 0x21 && memcmp(pt + 2, ip, sizeof ip) == 0);
+    }
+    CHECK_EQ_I(ppp_send_ip(&S, ip, sizeof ip), 0);
+    ppp_tick(&S, 50);
+    pull();
+    f = find(P_COMP, 0);
+    CHECK(f && win_decrypt(&wrx, f->d, f->n, pt) == 0 && memcmp(pt + 2, ip, sizeof ip) == 0);
+    CHECK_EQ_I(status()->end_reason, PPP_END_NONE);
+    CHECK_EQ_I(status()->ip_up, 1);
+
+    /* a client that will not do 128-bit at all (40-bit only): fail closed */
+    base_cfg(&cfg);
+    cfg.encrypt = 1;
+    inject_mppe = 1;
+    up(&cfg);
+    inject_mppe = 0;
+    {
+        static const uint8_t l40[6] = { 18, 6, 0, 0, 0, 0x20 };
+        push_cp(P_CCP, PPP_CONF_NAK, scr.d[1], l40, 6);
+        pull();
+        if (scr_new)
+            push_cp(P_CCP, PPP_CONF_ACK, scr.d[1], scr.d + 4, scr.n - 4);
+        push_cp(P_CCP, PPP_CONF_REQ, 9, l40, 6);
+        pull();
+        CHECK(find(P_CCP, PPP_CONF_ACK) == NULL);
+        for (k = 0; k < 400 && status()->end_reason == PPP_END_NONE; k++) {
+            ppp_tick(&S, 100);
+            pull();
+        }
+        CHECK_EQ_I(status()->end_reason, PPP_END_ENCRYPT_REQUIRED);
+        CHECK(status()->comp_tx != PPP_COMP_MPPE);
+    }
+}
+
 /* MPPE fails closed: with encryption required, no cleartext datagram is sent
  * or accepted, and if the peer will not do MPPE the link is ended. */
 static void test_mppe_required(void)
@@ -1826,6 +2112,7 @@ int main(void)
     test_mppe();
     test_mppe_required();
     test_mppe_edges();
+    test_mppe_windows();
     test_deflate_data();
     test_only_ip_is_compressed();
     test_deflate_reset();

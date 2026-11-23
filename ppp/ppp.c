@@ -42,12 +42,12 @@
 #define CCP_OPT_DEFLATE  26
 #define DEFLATE_METHOD   8   /* RFC 1979 section 3 */
 #define MPPC_BIT         1u  /* RFC 2118 section 2 */
-/* RFC 3078 MPPE bits in the same option 18. We offer/accept 128-bit keys,
- * stateless (historyless) mode -- the combination Windows uses and the one
- * that suits a link with no error control. */
+/* RFC 3078 MPPE bits in the same option 18. We offer and accept 128-bit
+ * keys only, in either mode: we ask for stateless (what pppd does) and go
+ * stateful when the peer Naks toward it or asks for it -- a Windows client
+ * on a modem link does stateful only (issue #6). */
 #define MPPE_BIT_S       0x00000040u  /* 128-bit session keys */
 #define MPPE_BIT_H       0x01000000u  /* stateless */
-#define MPPE_OFFER       (MPPE_BIT_S | MPPE_BIT_H)
 #define RESET_TRIES      3   /* Reset-Requests before CCP is negotiated anew */
 #define CW_NAK_LIMIT     3   /* Naks of one of our options before we drop it */
 
@@ -1326,12 +1326,15 @@ static size_t ccp_build_cr(ppp_fsm_t *f, uint8_t *o, size_t max)
 
     (void)max;
     if (p->cw_opt == CCP_OPT_MPPC) {
-        /* option 18: MPPE 128-bit stateless when we encrypt and have keys
-         * (RFC 3078), otherwise MPPC (RFC 2118 section 2) */
+        /* option 18: MPPE 128-bit when we encrypt and have keys (RFC 3078;
+         * stateless unless the peer has asked for stateful), otherwise MPPC
+         * (RFC 2118 section 2) */
         o[0] = CCP_OPT_MPPC;
         o[1] = 6;
         p->cw_mppe = (uint8_t)(p->cfg.encrypt && p->mppe_have);
-        put32(o + 2, p->cw_mppe ? MPPE_OFFER : MPPC_BIT);
+        /* the mode is that of this request: what an Ack of it agrees */
+        p->cw_mppe_h = p->cw_want_h;
+        put32(o + 2, p->cw_mppe ? (MPPE_BIT_S | (p->cw_mppe_h ? MPPE_BIT_H : 0)) : MPPC_BIT);
         return 6;
     }
     if (p->cw_opt) {
@@ -1356,16 +1359,35 @@ static int ccp_judge(ppp_t *p, uint8_t type, const uint8_t *val, size_t vlen,
         return PPP_CONF_REJ;
     if (type == CCP_OPT_MPPC) {
         /* Option 18 carries MPPC (RFC 2118) and/or the MPPE encryption bits
-         * (RFC 3078). We accept exactly 128-bit stateless MPPE (when we
-         * encrypt and have keys), or plain MPPC; anything else is Nak'd
-         * toward what we do. Every copy of the option is judged here, not
-         * only the one ccp_recv_cr chose, so the length is checked here. */
+         * (RFC 3078). We accept exactly 128-bit MPPE, stateless or stateful
+         * (when we encrypt and have keys), or plain MPPC; anything else is
+         * Nak'd toward what we do. Every copy of the option is judged here,
+         * not only the one ccp_recv_cr chose, so the length is checked here. */
         uint32_t v = vlen == 4 ? get32(val) : 0;
-        if (p->cfg.encrypt && p->mppe_have && v == MPPE_OFFER) {
-            p->cpend_opt = type;
-            p->cpend_wbits = 0;
-            p->cpend_mppe = 1;
-            return PPP_CONF_ACK;
+        if (p->cfg.encrypt && p->mppe_have) {
+            uint32_t h = v & MPPE_BIT_H;
+            if (vlen == 4) {
+                p->cnt.mppe_peer_req = v;
+                p->cnt.mppe_seen |= PPP_MPPE_SEEN_REQ;
+            }
+            if (vlen == 4 && (v & (MPPE_BIT_S | 0xa0u)) && !h)
+                /* a peer that asks for stateful MPPE (Windows on a modem
+                 * link) gets asked for the same from now on: it would Nak
+                 * stateless down to it anyway */
+                p->cw_want_h = 0;
+            if (vlen == 4 && (v & ~MPPE_BIT_H) == MPPE_BIT_S) {
+                p->cpend_opt = type;
+                p->cpend_wbits = 0;
+                p->cpend_mppe = 1;
+                p->cpend_mppe_h = (uint8_t)(h != 0);
+                return PPP_CONF_ACK;
+            }
+            /* RFC 3078 section 2: Nak with the one key length we do, in the
+             * mode the peer asked for; 40/56-bit, MPPC and the obsolete D
+             * bit come off */
+            put32(sugg, MPPE_BIT_S | h);
+            *slen = 4;
+            return PPP_CONF_NAK;
         }
         /* plain MPPC is a downgrade when encryption is required: only when
          * we are not encrypting do we accept compression alone */
@@ -1375,7 +1397,7 @@ static int ccp_judge(ppp_t *p, uint8_t type, const uint8_t *val, size_t vlen,
             p->cpend_mppe = 0;
             return PPP_CONF_ACK;
         }
-        put32(sugg, (p->cfg.encrypt && p->mppe_have) ? MPPE_OFFER : MPPC_BIT);
+        put32(sugg, MPPC_BIT);
         *slen = 4;
         return PPP_CONF_NAK;
     }
@@ -1440,6 +1462,22 @@ static void ccp_recv_nak(ppp_fsm_t *f, const uint8_t *opts, size_t len)
         if (type != p->cw_opt)
             continue;
         ours = 1;
+        if (type == CCP_OPT_MPPC && p->cw_mppe) {
+            /* RFC 3078 section 2: the Nak names the one MPPE setting the
+             * peer will do. 128-bit in either mode is ours too: ask for
+             * that. Without the S bit (40/56-bit only) it is not with us,
+             * and with encryption required the link will end. */
+            uint32_t v = vlen == 4 ? get32(val) : 0;
+            if (vlen == 4) {
+                p->cnt.mppe_peer_nak = v;
+                p->cnt.mppe_seen |= PPP_MPPE_SEEN_NAK;
+            }
+            if ((v & MPPE_BIT_S) && ++p->cw_naks <= CW_NAK_LIMIT)
+                p->cw_want_h = (uint8_t)((v & MPPE_BIT_H) != 0);
+            else
+                ccp_drop_wish(p);
+            continue;
+        }
         if (type != CCP_OPT_MPPC && vlen == 2 && (val[0] & 0x0f) == DEFLATE_METHOD &&
             val[1] == 0 && (val[0] >> 4) + 8 <= p->cw_wbits) {
             /* the peer compresses with a smaller window than we offered */
@@ -1488,6 +1526,10 @@ static void ccp_up(ppp_fsm_t *f)
             return;
         }
         ppp_mppe_begin(&p->mppe, p->mppe_send, p->mppe_recv, 16, PPP_MPPE_FORCE_NONE);
+        /* the mode of each direction is the one its Ack agreed: the peer's
+         * request is our transmit direction, ours our receive */
+        ppp_mppe_stateful(&p->mppe, !p->cpend_mppe_h, !p->cw_mppe_h);
+        p->cnt.mppe_stateful = (uint8_t)((p->cpend_mppe_h ? 0 : 1) | (p->cw_mppe_h ? 0 : 2));
         p->mppe_started = 1;
         p->tx_alg = p->rx_alg = PPP_COMP_MPPE;
         p->tx_seq = p->rx_seq = 0;
@@ -1582,6 +1624,28 @@ static void comp_reset_again(ppp_t *p)
     tx_cp_next(p, PPP_PROTO_CCP, CCP_RESET_REQ, p->rr_id);
 }
 
+/* An MPPE packet that could not be used. Stateful and out of step: one CCP
+ * Reset-Request (RFC 3078 8.2), repeated a Restart period later only while
+ * packets keep coming that cannot be decrypted. The peer's next FLUSHED
+ * packet, or its next flag packet if it has no Reset-Request, brings us
+ * back. No Reset-Ack is waited for. */
+static void mppe_rx_error(ppp_t *p)
+{
+    p->cnt.comp_rx_errors++;
+    if (!ppp_mppe_rx_out_of_step(&p->mppe))
+        return;
+    p->cnt.comp_rx_dropped++;
+    if (p->rx_wait && p->rr_timer > 0)
+        return;
+    if (p->ccp.rejected_codes & (1u << CCP_RESET_REQ))
+        return;
+    if (!p->rx_wait)
+        p->rr_id = ppp_fsm_new_id(&p->ccp);
+    p->rx_wait = 1;
+    p->rr_timer = p->cfg.comp_reset_ms ? p->cfg.comp_reset_ms : p->ccp.restart_ms;
+    tx_cp_next(p, PPP_PROTO_CCP, CCP_RESET_REQ, p->rr_id);
+}
+
 /* Encryption required: MPPE must be up both ways within CCP's own retry
  * span (a request every restart_ms, max_configure of them, and one more for
  * slack) of the network phase starting. CCP that never converges, a peer
@@ -1635,6 +1699,22 @@ static int ccp_ext_code(ppp_fsm_t *f, uint8_t code, uint8_t id,
     case CCP_RESET_REQ:
         if (f->state != PPP_FSM_OPENED)
             return PPP_FSM_EXT_NONE;
+        if (p->tx_alg == PPP_COMP_MPPE) {
+            /* RFC 3078 8.2: the next packet resynchronises the peer
+             * (stateful; stateless packets all do). What waits in the
+             * buffer the peer would only drop. MPPE needs no Reset-Ack,
+             * but the Linux kernel's receiver stays in its error state
+             * until it sees one; Windows Code-Rejects it (which the FSM
+             * notes), after which none is sent. */
+            p->cnt.comp_tx_resets++;
+            if (p->mppe.tx.stateful) {
+                tx_purge_compressed(p);
+                ppp_mppe_tx_resync(&p->mppe);
+            }
+            if (!(f->rejected_codes & (1u << CCP_RESET_ACK)))
+                f->ops->send(f, CCP_RESET_ACK, id, NULL, 0, NULL, 0);
+            return PPP_FSM_EXT_NONE;
+        }
         /* RFC 1962 3.1: reset the compressor, and a Reset-Ack MUST go out
          * with the request's identifier, every time. */
         if (p->tx_alg == PPP_COMP_DEFLATE) {
@@ -1687,6 +1767,7 @@ static void network_start(ppp_t *p)
     ppp_fsm_up(&p->ipcp);
     /* RFC 1962 section 2: CCP belongs to the Network-Layer Protocol phase */
     p->cw_tried = 0;
+    p->cw_want_h = 1;           /* stateless first, as pppd asks */
     p->enc_wait_ms = 0;
     if (ccp_wanted(p)) {
         ppp_fsm_open(&p->ccp);
@@ -1772,18 +1853,17 @@ static void comp_input(ppp_t *p, const uint8_t *info, size_t n)
     hdr = (unsigned)info[0] << 8 | info[1];
     if (p->rx_alg == PPP_COMP_MPPE) {
         /* RFC 3078: decrypt; the plaintext begins with the PPP protocol
-         * field, parsed below as for the compressors. The stateless cipher
-         * resynchronises itself from the coherency count, so there is no
-         * wait-for-reset state here. */
+         * field, parsed below as for the compressors. */
         r = ppp_mppe_decrypt(&p->mppe, info, n, p->cbuf_rx, sizeof p->cbuf_rx);
         if (r < 1) {
             /* a bad coherency count or header: drop it and count it. The
-             * stateless cipher resynchronises on the next good packet, so we
-             * do NOT send a CCP Reset-Request -- a CCP renegotiation would
-             * re-key MPPE and reuse the keystream. */
-            p->cnt.comp_rx_errors++;
+             * stateless cipher resynchronises on the next good packet; a
+             * stateful one asks the peer for a FLUSHED packet. Never a CCP
+             * renegotiation: that would re-key MPPE and reuse the keystream. */
+            mppe_rx_error(p);
             return;
         }
+        p->rx_wait = 0;
         d = p->cbuf_rx;
     } else if (p->rx_alg == PPP_COMP_DEFLATE) {
         /* RFC 1979 section 2: everything is discarded between an error
@@ -1847,6 +1927,13 @@ static void comp_input(ppp_t *p, const uint8_t *info, size_t n)
         off = 2;
     } else {
         p->cnt.rx_bad_header++;
+        return;
+    }
+    if (p->rx_alg == PPP_COMP_MPPE && (proto < 0x21 || proto > 0xfa)) {
+        /* RFC 3078 section 3: MPPE carries 0x0021..0x00FA only. Anything
+         * else decrypted with the wrong key: out of step */
+        ppp_mppe_rx_lost(&p->mppe);
+        mppe_rx_error(p);
         return;
     }
     p->cnt.comp_rx_out += (uint32_t)((size_t)r - off);

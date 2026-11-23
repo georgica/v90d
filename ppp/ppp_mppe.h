@@ -1,8 +1,18 @@
 /* MPPE (Microsoft Point-to-Point Encryption, RFC 3078): the packet path.
  * Keyed from the MS-CHAPv2 exchange (ppp_crypto's master keys); negotiated
- * inside CCP option 18. Stateless (historyless) mode only: the key changes
- * before every packet, which suits a link with no error control (the same
- * reason CCP runs MPPC historyless here).
+ * inside CCP option 18. Both modes, per direction:
+ *
+ * Stateless (historyless, the H bit): the key changes before every packet.
+ * What pppd asks for, and Windows on its VPN links.
+ *
+ * Stateful: one RC4 stream runs on from packet to packet; the key changes
+ * on "flag" packets, whose count ends in 0xFF (RFC 3078 7.2). It is what a
+ * Windows client asks for on a modem link, and the only mode it does there
+ * (issue #6). FLUSHED means "RC4 started again from the current key"
+ * (RFC 3078 section 3), not a key change: Windows sets it on its first
+ * packet and after a Reset-Request, and leaves it off its flag packets.
+ * A receiver that loses step drops packets and sends one CCP Reset-Request
+ * until a FLUSHED (or flag) packet comes (8.2); no Reset-Ack is used.
  *
  * The key schedule is the one the Linux kernel's ppp_mppe uses, which is
  * what pppd and the Windows clients interoperate with: each direction starts
@@ -24,6 +34,10 @@ typedef struct {
     size_t   keylen;        /* 8 (40- or 56-bit) or 16 (128-bit) */
     int      force;         /* PPP_MPPE_FORCE_* for the short keys */
     uint16_t coherency;     /* 12-bit count of the last packet sent / received */
+    uint8_t  stateful;      /* this direction runs stateful (H bit clear) */
+    uint8_t  discard;       /* stateful receive: lost step, dropping until a
+                               FLUSHED or flag packet (RFC 3078 8.2) */
+    ppp_rc4_t rc4;          /* stateful: the running RC4 stream */
 } ppp_mppe_dir_t;
 
 typedef struct {
@@ -32,7 +46,7 @@ typedef struct {
 } ppp_mppe_t;
 
 /* MPPE packet header flags (the two octets after PPP protocol 0x00FD) */
-#define PPP_MPPE_FLUSHED 0x8000u   /* A: table re-initialised (always set, stateless) */
+#define PPP_MPPE_FLUSHED 0x8000u   /* A: RC4 table re-initialised (always set, stateless) */
 #define PPP_MPPE_ENCRYPT 0x1000u   /* D: the packet is encrypted */
 #define PPP_MPPE_COUNT   0x0fffu   /* coherency count */
 
@@ -51,6 +65,26 @@ typedef struct {
  * key length 8 or 16, with the short-key forcing (PPP_MPPE_FORCE_*). */
 void ppp_mppe_begin(ppp_mppe_t *m, const uint8_t send_start[16], const uint8_t recv_start[16],
                     size_t keylen, int force);
+/* Make either direction stateful (RFC 3078 7.2); right after ppp_mppe_begin,
+ * before any packet. The first stateful packet (count 0) is encrypted with
+ * the initial key itself, as the Linux kernel does. */
+void ppp_mppe_stateful(ppp_mppe_t *m, int tx, int rx);
+
+/* The peer sent a CCP Reset-Request. Stateless: nothing to do (every packet
+ * is FLUSHED). Stateful: the next packet goes out FLUSHED so the peer can
+ * resynchronise. RFC 3078 8.2 restarts RC4 on the CURRENT key for that,
+ * which would send the start of a keystream already used; instead the
+ * count skips ahead to the next flag packet, which changes the key (the
+ * skipped counts look like lost packets to the peer, who is already
+ * waiting for a FLUSHED one). */
+void ppp_mppe_tx_resync(ppp_mppe_t *m);
+
+/* Stateful receive: nonzero while out of step (a packet was lost; the peer
+ * should be sent a CCP Reset-Request). ppp_mppe_rx_lost puts the receiver
+ * out of step by hand, for a packet that decrypted to nonsense. */
+int ppp_mppe_rx_out_of_step(const ppp_mppe_t *m);
+void ppp_mppe_rx_lost(ppp_mppe_t *m);
+
 /* Forget both directions' keys (wiped). */
 void ppp_mppe_reset(ppp_mppe_t *m);
 
@@ -62,7 +96,10 @@ size_t ppp_mppe_encrypt(ppp_mppe_t *m, const uint8_t *in, size_t len, uint8_t *o
 /* Decrypt one received MPPE datagram (2-octet header then ciphertext).
  * Writes the plaintext to out; returns its length, or -1 on a bad header, a
  * frame that does not fit, or a count outside the window (nothing changes
- * then: the next good packet is still followed). */
+ * then: the next good packet is still followed). Stateful, -1 also when the
+ * count shows a lost packet, and for every packet after it until one that
+ * can be decrypted again (FLUSHED or a flag packet): see
+ * ppp_mppe_rx_out_of_step. */
 int ppp_mppe_decrypt(ppp_mppe_t *m, const uint8_t *in, size_t len, uint8_t *out, size_t max);
 
 #endif

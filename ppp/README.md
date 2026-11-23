@@ -47,9 +47,9 @@ the caller Acks governs what we send.
   insists on encryption runs into Max-Failure and gets a Reject, so no
   compression and IP stays up. When `[ppp] encryption = on` it is the
   opposite: `comp` is empty (no Deflate, no MPPC), we request and require
-  128-bit stateless MPPE (option 18, bits 0x00000040 | 0x01000000), and if
-  MPPE is not agreed in both directions the link is closed rather than run in
-  the clear. That path is detailed under "RFC 2759 / 3078 / 3079" below.
+  128-bit MPPE (option 18, bit 0x00000040), stateless (| 0x01000000) unless
+  the caller wants stateful, as Windows does on a modem; and if MPPE is not
+  agreed in both directions the link is closed rather than run in the clear. That path is detailed under "RFC 2759 / 3078 / 3079" below.
 
 ## Bounds
 
@@ -249,9 +249,9 @@ RFC 2759 / 3078 / 3079 (MS-CHAPv2 and MPPE):
     change (RFC 3078 7.3) is GetNewKeyFromSHA(start, current), truncated,
     then RC4-encrypted under itself; then the short keys are forced (40-bit:
     D1 26 9E; 56-bit: D1).
-30. MPPE on the wire (`ppp_mppe.c`) is stateless only (bit H, 0x01000000),
-    with the Linux kernel's schedule, which is what pppd and the Windows
-    clients it was matched against do: the coherency count starts at 4095,
+30. MPPE on the wire (`ppp_mppe.c`), stateless (bit H, 0x01000000) with
+    the Linux kernel's schedule, which is what pppd and Windows VPN clients
+    do: the coherency count starts at 4095,
     and a key change comes before every packet, the first one (number 0)
     included -- so no packet is ever sent under the initial key. The header
     is A (FLUSHED, always) | D (ENCRYPT) | the 12-bit count, then RC4 of the
@@ -260,13 +260,34 @@ RFC 2759 / 3078 / 3079 (MS-CHAPv2 and MPPE):
     `PPP_MPPE_WINDOW` (2047, under half the counts, as the kernel does); a
     count at or behind the last one (a replay) or further ahead is dropped
     and changes nothing. A frame without D is refused. We offer 128-bit (S,
-    0x40) only. The per-packet vectors in `test/test_mppe.c` and
+    0x40) only.
+30a. Stateful MPPE (H clear; RFC 3078 7.2, 8.2), per direction, which is
+    the only mode a Windows client does on a modem or PPPoE link (issue #6;
+    Windows does stateless on its VPN links only). We ask for stateless
+    first, take stateful when the peer Naks toward it, and once the peer has
+    asked for stateful we ask for it too. One RC4 stream runs from packet to
+    packet; the first packet (count 0) is under the initial key with no
+    FLUSHED (as the kernel sends it); the key changes on flag packets (count
+    ending in 0xFF), which we send FLUSHED. FLUSHED received means "RC4 again
+    from the current key", not a key change (RFC 3078 3; Windows sets it on
+    its first packet and after a Reset-Request, and not on its flag
+    packets). A gap in the counts puts the receiver out of step: one CCP
+    Reset-Request, everything dropped until a FLUSHED or flag packet, then
+    one key change per flag packet missed. A Reset-Request from the peer is
+    answered with a Reset-Ack (the kernel's receiver waits for one) until the
+    peer Code-Rejects that, as Windows does, and does NOT
+    restart RC4 on the current key as 8.2 has it (that would send a used
+    keystream again): the count jumps to the next flag packet, which changes
+    the key and goes out FLUSHED; the peer sees the skipped counts as lost.
+    `test/test_mppe.c` starts from RFC 3079's own "test message" sample
+    (exactly a stateful packet 0); `test/test_ccp.c` has a Windows client
+    modelled apart from ppp_mppe.c. The per-packet vectors in `test/test_mppe.c` and
     `test/test_crypto.c` come from a separate reference (Python's SHA-1 and
     an RC4 written apart from ours) that reproduces RFC 3079's samples, and
     `srv/test/ns_pppd.c` runs a whole call against pppd with
     `require-mppe-128` and the kernel's `ppp_mppe`.
 31. Fails closed. With `cfg.encrypt`: CCP offers and accepts option 18 with
-    128-bit stateless MPPE only (`comp` is cleared at `ppp_init`, so no
+    128-bit MPPE only (`comp` is cleared at `ppp_init`, so no
     Deflate or MPPC to fall back to); if MPPE is not agreed in both
     directions when CCP opens, if the peer Protocol-Rejects CCP, if the login
     gave no keys, or if MPPE is still not up after CCP's whole retry span
@@ -279,9 +300,10 @@ RFC 2759 / 3078 / 3079 (MS-CHAPv2 and MPPE):
 32. A CCP re-open does not re-key. Starting the schedule again from the
     master key would reuse the keystream, so MPPE is keyed once per
     authentication; a CCP re-open after it has run ends the link. A bad or
-    short MPPE frame is dropped and counted, never answered with a
-    Reset-Request (which would renegotiate). The keys of a login are wiped
-    when LCP goes down.
+    short MPPE frame is dropped and counted; stateless, never answered with a
+    Reset-Request; stateful, only out of step (30a), and a Reset-Request
+    never leads to a CCP renegotiation. The keys of a login are wiped when
+    LCP goes down.
 
 ## Windows callers: assumed, not tested
 
@@ -296,8 +318,14 @@ and the behaviour described in it:
 - it resynchronizes on the A bit and may or may not send a Reset-Ack;
 - it accepts native IP packets while MPPC is on;
 - with encryption, it authenticates with MS-CHAPv2, requests option 18 with
-  128-bit stateless MPPE, derives the same keys, and sends every IP packet
-  encrypted with the ENCRYPT bit and a rising coherency count.
+  stateful MPPE (H clear; 0x60 for "require", 0x40 for "maximum strength",
+  0x61 with software compression on), Naks our stateless request down to
+  stateful, derives the same keys, and sends every IP packet encrypted with
+  the ENCRYPT bit and a rising coherency count (30a). This was learnt the
+  hard way: 0.8.0 offered stateless only and no Windows caller could
+  encrypt (issue #6: errors 742, 628, and "optional" calls dropped after
+  CCP's retry span). Stateful Windows behaviour is from RFC 3078 and a
+  2011 linux-kernel report of Windows XP/7 PPPoE clients against pppd.
 
 The models of these in `test/pppc.c` (`PPPC_CCP_WINDOWS`,
 `PPPC_CCP_WINDOWS_MPPE`) encode exactly these assumptions and nothing more.

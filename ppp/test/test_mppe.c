@@ -1,6 +1,6 @@
-/* ppp_mppe.c (RFC 3078 stateless): the first packet against RFC 3079's RC4
- * sample, a long two-way exchange that must round-trip, and recovery across a
- * lost packet. */
+/* ppp_mppe.c (RFC 3078): the first packet against RFC 3079's RC4 sample, a
+ * long two-way exchange that must round-trip, and recovery across a lost
+ * packet; stateless, and stateful (what Windows does on a modem link). */
 #include <string.h>
 #include "test.h"
 #include "ppp_mppe.h"
@@ -141,9 +141,137 @@ static void test_window(void)
     CHECK(eq(pt, msg, 8));
 }
 
+/* ---- stateful (RFC 3078 7.2, 8.2) ---- */
+
+/* The first stateful packet is RC4 under the initial key itself, from the
+ * start of its stream: exactly RFC 3079 3.5.3's "test message" sample. The
+ * second continues the same stream (no key change, no FLUSHED). */
+static void test_stateful_vector(void)
+{
+    static const uint8_t ct128[12] = { 0x81,0x84,0x83,0x17,0xDF,0x68,0x84,0x62,0x72,0xFB,0x5A,0xBE };
+    ppp_mppe_t m, rx;
+    ppp_rc4_t r;
+    uint8_t out[64], pt[64], zero[16] = { 0 }, ks[16], two[24];
+    size_t n;
+
+    ppp_mppe_begin(&m, START128, zero, 16, PPP_MPPE_FORCE_NONE);
+    ppp_mppe_begin(&rx, zero, START128, 16, PPP_MPPE_FORCE_NONE);
+    ppp_mppe_stateful(&m, 1, 1);
+    ppp_mppe_stateful(&rx, 1, 1);
+    n = ppp_mppe_encrypt(&m, (const uint8_t *)"test message", 12, out, sizeof out);
+    CHECK_EQ_I((int)n, 14);
+    CHECK_EQ_I(out[0], 0x10);        /* ENCRYPT only, count 0 */
+    CHECK_EQ_I(out[1], 0);
+    CHECK(eq(out + 2, ct128, 12));
+    CHECK_EQ_I(ppp_mppe_decrypt(&rx, out, n, pt, sizeof pt), 12);
+    CHECK(eq(pt, (const uint8_t *)"test message", 12));
+    /* packet 1: octets 12..23 of the same keystream */
+    n = ppp_mppe_encrypt(&m, (const uint8_t *)"test message", 12, out, sizeof out);
+    CHECK_EQ_I(out[0], 0x10);
+    CHECK_EQ_I(out[1], 1);
+    ppp_mppe_initial_key(START128, ks, 16, PPP_MPPE_FORCE_NONE);
+    ppp_rc4_init(&r, ks, 16);
+    memcpy(two, "test messagetest message", 24);
+    ppp_rc4(&r, two, two, 24);
+    CHECK(eq(out + 2, two + 12, 12));
+    CHECK_EQ_I(ppp_mppe_decrypt(&rx, out, n, pt, sizeof pt), 12);
+    CHECK(eq(pt, (const uint8_t *)"test message", 12));
+}
+
+/* 9000 packets one way (twice round the 4096 counts, 35 key changes) with
+ * losses, replays and resets on the way; every packet that is accepted
+ * must decrypt to what was sent, and the stream must come back each time */
+static void test_stateful_long(void)
+{
+    ppp_mppe_t a, b;
+    uint8_t msg[100], ct[200], pt[200], old[200];
+    unsigned i, sent = 0, ok = 0, bad = 0, resets = 0, flags = 0, flushed = 0;
+    size_t n, oldn = 0;
+    int d;
+
+    pair(&a, &b, 16, PPP_MPPE_FORCE_NONE);
+    ppp_mppe_stateful(&a, 1, 1);
+    ppp_mppe_stateful(&b, 1, 1);
+    for (i = 0; i < 9000; i++) {
+        msg[0] = (uint8_t)i; msg[1] = (uint8_t)(i >> 8);
+        memset(msg + 2, (int)(i * 13), sizeof msg - 2);
+        n = ppp_mppe_encrypt(&a, msg, sizeof msg, ct, sizeof ct);
+        sent++;
+        if ((ct[1] == 0xff)) flags++;
+        if (ct[0] & 0x80) flushed++;
+        if (i % 997 == 500 || (i >= 3000 && i < 3400)) {
+            /* lost (one, or a run of 400 across key changes) */
+            continue;
+        }
+        if (i == 7000) {
+            memcpy(old, ct, n);
+            oldn = n;
+        }
+        d = ppp_mppe_decrypt(&b, ct, n, pt, sizeof pt);
+        if (d == (int)sizeof msg && eq(pt, msg, sizeof msg)) ok++;
+        else if (d >= 0) bad++;
+        if (d < 0 && ppp_mppe_rx_out_of_step(&b)) {
+            /* the receiver asks (once) for a reset; the sender resyncs */
+            ppp_mppe_tx_resync(&a);
+            resets++;
+        }
+        if (i == 7100) {
+            /* an old packet again: dropped, and the stream goes on */
+            CHECK_EQ_I(ppp_mppe_decrypt(&b, old, oldn, pt, sizeof pt), -1);
+            CHECK_EQ_I(ppp_mppe_rx_out_of_step(&b), 0);
+        }
+    }
+    CHECK_EQ_I(bad, 0);
+    CHECK(resets >= 9 && resets <= 12);
+    CHECK(ok > sent - 400 - 9 * 2 - 9 * 256);
+    CHECK(flags > 0 && flushed == flags);  /* FLUSHED only on flag packets */
+    /* the last packet came through */
+    CHECK_EQ_I(ppp_mppe_rx_out_of_step(&b), 0);
+
+    /* a resync is a key change, never RC4 again on a key already used: the
+     * packet after a reset is a flag packet */
+    pair(&a, &b, 16, PPP_MPPE_FORCE_NONE);
+    ppp_mppe_stateful(&a, 1, 1);
+    for (i = 0; i < 10; i++)
+        (void)ppp_mppe_encrypt(&a, msg, 8, ct, sizeof ct);
+    ppp_mppe_tx_resync(&a);
+    n = ppp_mppe_encrypt(&a, msg, 8, ct, sizeof ct);
+    CHECK_EQ_I(ct[0], 0x90);
+    CHECK_EQ_I(ct[1], 0xff);
+    ppp_mppe_tx_resync(&a);                  /* again: to the next one */
+    n = ppp_mppe_encrypt(&a, msg, 8, ct, sizeof ct);
+    CHECK_EQ_I(ct[0], 0x91);
+    CHECK_EQ_I(ct[1], 0xff);
+    (void)n;
+}
+
+/* stateful one way, stateless the other: each direction keeps its own mode */
+static void test_mixed(void)
+{
+    ppp_mppe_t a, b;
+    uint8_t msg[40], ct[80], pt[80];
+    unsigned i;
+    size_t n;
+
+    memset(msg, 0x5a, sizeof msg);
+    pair(&a, &b, 16, PPP_MPPE_FORCE_NONE);
+    ppp_mppe_stateful(&a, 1, 0);
+    ppp_mppe_stateful(&b, 0, 1);
+    for (i = 0; i < 600; i++) {
+        n = ppp_mppe_encrypt(&a, msg, sizeof msg, ct, sizeof ct);
+        CHECK_EQ_I(ppp_mppe_decrypt(&b, ct, n, pt, sizeof pt), (int)sizeof msg);
+        n = ppp_mppe_encrypt(&b, msg, sizeof msg, ct, sizeof ct);
+        CHECK_EQ_I(ct[0] & 0x80, 0x80);      /* stateless: every packet FLUSHED */
+        CHECK_EQ_I(ppp_mppe_decrypt(&a, ct, n, pt, sizeof pt), (int)sizeof msg);
+    }
+}
+
 int main(void)
 {
     test_vector();
+    test_stateful_vector();
+    test_stateful_long();
+    test_mixed();
     test_roundtrip();
     test_loss();
     test_window();

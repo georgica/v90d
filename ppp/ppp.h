@@ -166,8 +166,10 @@ typedef struct {
     uint8_t  encrypt;          /* nonzero: offer and accept MPPE encryption
                                   (RFC 3078) in CCP, keyed from MS-CHAPv2
                                   (needs cfg.auth & PPP_AUTH_MSCHAPV2). When
-                                  on, option 18 carries the 128-bit stateless
-                                  MPPE bits in place of MPPC. Default off. */
+                                  on, option 18 carries the 128-bit MPPE bits
+                                  in place of MPPC: stateless asked for first,
+                                  stateful taken when the peer wants it (a
+                                  Windows client on a modem). Default off. */
     uint8_t  comp_no_rx;       /* nonzero: compress what we send only; ask
                                   the peer for nothing */
     uint8_t  deflate_wbits;    /* Deflate window we ask the peer to use
@@ -228,7 +230,15 @@ typedef struct {
     uint32_t comp_rx_errors;   /* out of step: Reset-Request sent */
     uint32_t comp_rx_dropped;  /* compressed packets discarded for it */
     uint32_t ccp_opens;        /* times CCP reached Opened */
+    /* MPPE negotiation, for the log of a call that did not encrypt: the
+     * peer's last option 18 request, and its last Nak of ours (each valid
+     * when its PPP_MPPE_SEEN_* bit is set in mppe_seen) */
+    uint32_t mppe_peer_req, mppe_peer_nak;
+    uint8_t  mppe_seen;
+    uint8_t  mppe_stateful;    /* MPPE agreed stateful: 1 towards, 2 from the peer */
 } ppp_counters_t;
+#define PPP_MPPE_SEEN_REQ 1u
+#define PPP_MPPE_SEEN_NAK 2u
 
 typedef struct {
     ppp_phase_t phase;
@@ -302,6 +312,9 @@ typedef struct ppp {
     uint8_t  cpend_opt, cpend_wbits, cchosen;
     uint8_t  tx_alg, rx_alg;   /* PPP_COMP_* */
     uint8_t  cw_mppe, cpend_mppe;  /* our request / the peer's offers MPPE on option 18 */
+    uint8_t  cw_want_h;        /* ask for stateless MPPE (H bit) in our next request */
+    uint8_t  cw_mppe_h, cpend_mppe_h;  /* the H bit of our last request / of the
+                                  peer's request we accepted */
     uint8_t  mppe_started;     /* MPPE was keyed once this authentication; a CCP
                                   re-open must not re-key it (RC4 keystream reuse) */
     ppp_mppe_t mppe;           /* the encryption session, keyed at ccp_up */
