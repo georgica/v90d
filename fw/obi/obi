@@ -1,8 +1,16 @@
 #!/bin/sh
 # v90d on the Obihai OBi200: this file is /obi/obi, which the maker's
-# /etc/rc starts at boot in place of the maker's application. The kernel,
-# U-Boot and the root file system are the maker's (or the community
-# firmware's) and stay as they were; only the /obi partition is ours.
+# /etc/rc starts at boot in place of the maker's application. U-Boot, the
+# kernel in the flash and the root file system are the maker's (or the
+# community firmware's) and stay as they were; only the /obi partition is
+# ours.
+#
+# Two kernels. Started by the maker's kernel, this first starts v90d's own
+# Linux kernel (kernel.xz) from RAM (kjump), unless that did not come up
+# twice in a row since the power came on (bootcount) or
+# /scratch/v90d/maker-kernel exists: the box then stays on the maker's
+# kernel, with the maker's modules below. v90d's own kernel runs this again
+# (from kinit) and the same programs run on it.
 #
 #   ffxav_*.ko    the maker's telephony, LED and watchdog modules, taken
 #                 from the owner's own firmware file by mkobifw.py
@@ -21,11 +29,30 @@ say() { echo "v90d: $*"; logger -t v90d "$*" 2>/dev/null; }
 sysctl -w kernel.sched_rt_runtime_us=-1 >/dev/null 2>&1
 
 cd $D || exit 1
-# the maker's modules, in the maker's order (its start script loads the
-# watchdog's too; we never open the watchdog device, and the box runs on)
-for m in ffxav_mp ffxav_led ffxav_wdt; do
-    grep -q "^$m " /proc/modules || insmod $D/$m.ko || say "cannot load $m.ko"
-done
+# which kernel: the maker's is 2.6.30
+OWN=1
+case "$(uname -r)" in 2.*) OWN= ;; esac
+
+if [ -z "$OWN" ]; then
+    # the maker's modules, in the maker's order (its start script loads the
+    # watchdog's too; we never open the watchdog device, and the box runs on)
+    for m in ffxav_mp ffxav_led ffxav_wdt; do
+        grep -q "^$m " /proc/modules || insmod $D/$m.ko || say "cannot load $m.ko"
+    done
+    # v90d's own kernel, if it is here and may start (see above). kjump
+    # needs the LED module (it runs its last step through /dev/led); the
+    # telephony module's audio keeps running and the new kernel takes it over.
+    if [ -f $D/kernel.xz ] && [ ! -e /scratch/v90d/maker-kernel ]; then
+        if $D/bootcount try; then
+            say "starting v90d's own kernel"
+            sync
+            $D/kjump $D/kernel.xz $D/kjump.stub 2>&1 | logger -t kjump
+            say "v90d's own kernel did not start: the maker's kernel this time"
+        else
+            say "v90d's own kernel did not come up twice: the maker's kernel until the power goes off"
+        fi
+    fi
+fi
 
 # settings: kept in /scratch, the factory ones until the first save
 mkdir -p /scratch/v90d
@@ -43,12 +70,19 @@ chmod 600 $CONF
 # the unit's MAC, as the maker's application does at boot (unicfg -gwadd ...
 # and two switch register writes, read off a box starting up). The MAC is in
 # the factory block of the flash, after "OB100 UNIT INFO" at 0x40000.
-LAN=eth1
+# Under v90d's own kernel the port is eth0 (fw/kernel ffxav_eth.c, which sets
+# the switch up itself) and the factory block is its own partition, mtd1.
+LAN=eth1 FACTORY=/dev/mtdblock6 AT=262144 MACAT=262400
+[ -n "$OWN" ] && LAN=eth0 FACTORY=/dev/mtdblock1 AT=0 MACAT=256
 unit_mac() {
-    [ "$(hexdump -s 262144 -n 15 -e '15/1 "%c"' /dev/mtdblock6 2>/dev/null)" = "OB100 UNIT INFO" ] || return 1
-    hexdump -s 262400 -n 6 -e '5/1 "%02x:" 1/1 "%02x"' /dev/mtdblock6 2>/dev/null
+    [ "$(hexdump -s $AT -n 15 -e '15/1 "%c"' $FACTORY 2>/dev/null)" = "OB100 UNIT INFO" ] || return 1
+    hexdump -s $MACAT -n 6 -e '5/1 "%02x:" 1/1 "%02x"' $FACTORY 2>/dev/null
 }
-if [ ! -d /sys/class/net/$LAN ]; then
+if [ -n "$OWN" ]; then
+    MAC=$(unit_mac) || { MAC=02:90:d0:00:00:01; say "no unit MAC in the flash: $MAC for now"; }
+    ifconfig $LAN down
+    ifconfig $LAN hw ether $MAC
+elif [ ! -d /sys/class/net/$LAN ]; then
     MAC=$(unit_mac) || { MAC=02:90:d0:00:00:01; say "no unit MAC in the flash: $MAC for now"; }
     ifconfig unm down 2>/dev/null
     unicfg -gwadd $LAN 0 $MAC 0x2f >/dev/null 2>&1 || say "cannot make $LAN"
@@ -72,6 +106,13 @@ fi
 # the box has no battery clock: the call history wants the time of day
 ( sleep 15; rdate -s time.nist.gov ) >/dev/null 2>&1 &
 
+# The Firmware page's flash tool. Under v90d's own kernel the whole chip
+# (mtd7) is read only; what obinv writes goes through the "firmware"
+# partition (mtd8, from 0x50000: never U-Boot or the factory block).
+if [ -n "$OWN" ]; then
+    OBINV_FLASH=/dev/mtd7 OBINV_FLASH_WR=/dev/mtd8 OBINV_FLASH_WR_AT=0x50000
+    export OBINV_FLASH OBINV_FLASH_WR OBINV_FLASH_WR_AT
+fi
 # what the Firmware page shows about how this box keeps its firmware
 $D/obinv where > /tmp/v90d.where 2>/dev/null
 
@@ -85,6 +126,8 @@ sleep 2
 # leave a note: restart then (the settings are written as they are saved).
 ( while sleep 2; do
     [ -f /tmp/v90d.restart ] || continue
-    say "restart asked"; sync; sleep 1; reboot
+    say "restart asked"; sync; sleep 1
+    # under v90d's own kernel process 1 is kinit, not an init that restarts
+    if [ -n "$OWN" ]; then reboot -f; else reboot; fi
   done ) &
 say "started"

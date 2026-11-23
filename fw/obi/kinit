@@ -1,0 +1,54 @@
+#!/bin/sh
+# /obi/kinit: the start of the system under v90d's own Linux kernel on the
+# OBi200. The kernel's oinit (oinit.c) has made the box's own root file
+# system the root and mounted /obi on it, and runs this as process 1 with
+# that system's shell, in place of the maker's /etc/rc: the parts of it this
+# box needs (no udev, USB, Bluetooth, switch set-up or ssh: the kernel does
+# what it needs), then /obi/obi, as /etc/rc would.
+# Ours; written for this image.
+
+PATH=/sbin:/usr/sbin:/bin:/usr/bin
+export PATH
+say() { echo "kinit: $*" > /dev/kmsg; }
+
+mount -t proc proc /proc
+mount -t sysfs sys /sys
+mount -t ramfs none /var
+mkdir -p /var/lib /var/run /var/log /var/tmp /var/lock /var/ppp /var/run/ppp
+touch /var/tmp/resolv.conf
+mkdir -p /dev/pts /dev/shm
+mount -t devpts none /dev/pts
+hostname v90d
+# the power light blinks until the line is up (obiline makes it steady)
+echo timer > "/sys/class/leds/obi200:green:power/trigger" 2>/dev/null
+touch /var/log/messages
+syslogd
+klogd 2>/dev/null
+
+# what the last start of this kernel logged about the flash and errors
+# (its console, kept in RAM by pstore), now in this start's kernel log:
+# the status pages show it
+mkdir -p /var/pstore
+if mount -t pstore pstore /var/pstore 2>/dev/null; then
+    for f in /var/pstore/console-ramoops*; do
+        [ -f "$f" ] || continue
+        grep -i -E "error|fail|overrun|timed out|ran dry|went through|oops|panic|bug|warn" "$f" | grep -v -e "panic=" -e ramoops | tail -n 20 | while read -r l; do say "last start: $l"; done
+    done
+fi
+
+# the settings partition, as the maker's rc mounts it. Never erased here:
+# if it does not mount, the maker's system repairs it on its next start.
+mount -t jffs2 mtd4 /scratch -o rw,sync || say "/scratch does not mount: settings for this start only"
+
+cd /obi && ./obi
+
+# No ssh (as on the HT802: the status and settings pages are the way in).
+# The maker's rc starts dropbear with the firmware's well-known root
+# password; under this kernel nothing does.
+
+# the own kernel came up: the next start may use it again (bootcount.c).
+# Counted as up once the daemon has run for a minute.
+( sleep 60; pidof v90d >/dev/null && /obi/bootcount ok && say "up: v90d runs" ) &
+
+# process 1: never ends; takes the processes left without a parent
+while :; do wait; sleep 1; done

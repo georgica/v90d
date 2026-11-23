@@ -119,11 +119,29 @@ static void fxs_msleep(void *ctx, unsigned ms) { (void)ctx; sleep_ms(ms); }
 #define LED_BLINK 4
 static int led_fd = -1;
 
+/* Under v90d's own kernel the lights are LED class devices (fw/kernel
+ * leds-ffxav-phy.c and gpio-leds): kinit starts the power light blinking
+ * (timer trigger), steady once the line is up, as on the maker's system. */
+#define SYS_LED "/sys/class/leds/obi200:green:"
+static void sys_led(const char *name, const char *file, const char *v)
+{
+    char p[96];
+    int fd;
+    snprintf(p, sizeof p, SYS_LED "%s/%s", name, file);
+    if ((fd = open(p, O_WRONLY | O_CLOEXEC)) < 0) return;
+    (void)!write(fd, v, strlen(v));
+    close(fd);
+}
+
 static void power_led(void)
 {
     struct { uint8_t led, a, b, pad; uint32_t count, period; } arg = { 0, 0, 1, 0, 0x7fffffffu, 100 };
     if (led_fd < 0) led_fd = open("/dev/led", O_RDONLY | O_CLOEXEC);
-    if (led_fd < 0) return;
+    if (led_fd < 0) {
+        sys_led("power", "trigger", "none");
+        sys_led("power", "brightness", "1");
+        return;
+    }
     (void)ioctl(led_fd, LED_BLINK, &arg);
     (void)ioctl(led_fd, LED_OFF, &arg);
 }
@@ -139,6 +157,7 @@ static void phone_led(int on)
     struct { uint8_t led, a, b, pad; uint32_t count, period; } arg = { 1, 0, 0, 0, 0, 0 };
     if (led_fd < 0) led_fd = open("/dev/led", O_RDONLY | O_CLOEXEC);
     if (led_fd >= 0) (void)ioctl(led_fd, on ? LED_ON : LED_OFF, &arg);
+    else sys_led("phone", "brightness", on ? "1" : "0");
 }
 
 /* ---- shared state, under lk ---- */

@@ -7,8 +7,8 @@ CFLAGS  ?= -std=gnu99 -O2 -Wall -Wextra -Werror
 DRV     := ../drv
 BUILD   := build
 VERSION := $(shell cat ../VERSION)
-.PHONY: all image test clean
-all: $(BUILD)/obiline $(BUILD)/obinv
+.PHONY: all image test clean kernel
+all: $(BUILD)/obiline $(BUILD)/obinv $(BUILD)/kernel.xz
 $(BUILD):
 	@mkdir -p $(BUILD)
 $(BUILD)/obiline: obiline.c compat26.c $(DRV)/pump.c $(DRV)/proslic.c $(DRV)/slic.c $(wildcard $(DRV)/*.h) | $(BUILD)
@@ -17,13 +17,39 @@ $(BUILD)/obiline: obiline.c compat26.c $(DRV)/pump.c $(DRV)/proslic.c $(DRV)/sli
 $(BUILD)/obinv: obinv.c compat26.c ../../ppp/ppp_md5.c ../../cfg/page.h ../../cfg/sbuf.h | $(BUILD)
 	$(ARM_CC) $(CFLAGS) -static -I../../ppp -I../../cfg -o $@ obinv.c compat26.c ../../ppp/ppp_md5.c
 	$(dir $(ARM_CC))arm-linux-strip $@
+$(BUILD)/oinit $(BUILD)/bootcount: $(BUILD)/%: %.c | $(BUILD)
+	$(ARM_CC) $(CFLAGS) -static -Os -o $@ $<
+	$(dir $(ARM_CC))arm-linux-strip $@
+
+# v90d's own kernel (fw/kernel), started from RAM by kjump (ramboot/):
+# its Image with oinit as the whole initramfs and the board's device tree
+# behind the RAM boot shim, packed as .xz (kjump unpacks it).
+KSRC    := ../build/linux-6.6.63
+KOUT    := $(CURDIR)/../build/k-obi200-rel
+KMAKE    = $(MAKE) -s -C $(KSRC) O=$(KOUT) ARCH=arm CROSS_COMPILE=$(patsubst %gcc,%,$(ARM_CC))
+kernel: $(BUILD)/kernel.xz
+$(BUILD)/kernel.xz: $(BUILD)/oinit FORCE | $(BUILD)
+	cd .. && ./kernel/apply.sh build/linux-6.6.63 >/dev/null
+	cp ../kernel/obi200_defconfig $(KSRC)/arch/arm/configs/obi200_defconfig
+	printf 'dir /dev 755 0 0\nnod /dev/console 600 0 0 c 5 1\ndir /root 755 0 0\nfile /init %s 755 0 0\n' $(CURDIR)/$(BUILD)/oinit > $(BUILD)/initramfs.list
+	@mkdir -p $(KOUT)
+	$(KMAKE) obi200_defconfig
+	$(KSRC)/scripts/config --file $(KOUT)/.config --set-str INITRAMFS_SOURCE $(CURDIR)/$(BUILD)/initramfs.list
+	$(KMAKE) olddefconfig
+	$(KMAKE) -j$$(nproc) Image dtbs
+	$(MAKE) -C ramboot build/kjump build/stub.bin build/shim_image.bin
+	./ramboot/mkpayload.py ramboot/build/shim_image.bin $(KOUT)/arch/arm/boot/Image \
+	    $(KOUT)/arch/arm/boot/dts/obihai/ffxav-obi200.dtb $@
+
 ../../srv/build/v90d-obi: FORCE
 	$(MAKE) -C ../../srv v90d-obi
 FORCE:
-image: $(BUILD)/obiline $(BUILD)/obinv ../../srv/build/v90d-obi obi udhcpc.script ../v90d.conf ../VERSION mkobifw.py
+image: $(BUILD)/obiline $(BUILD)/obinv $(BUILD)/bootcount $(BUILD)/kernel.xz ../../srv/build/v90d-obi obi kinit udhcpc.script ../v90d.conf ../VERSION mkobifw.py
 	@test -n "$(BASE)" || { echo "make image BASE=your-OBi-firmware.fw"; exit 1; }
 	@rm -rf $(BUILD)/image && mkdir -p $(BUILD)/image
-	cp obi udhcpc.script $(BUILD)/obiline $(BUILD)/obinv ../v90d.conf $(BUILD)/image/
+	cp obi kinit udhcpc.script $(BUILD)/obiline $(BUILD)/obinv $(BUILD)/bootcount $(BUILD)/kernel.xz ../v90d.conf $(BUILD)/image/
+	cp ramboot/build/kjump $(BUILD)/image/kjump
+	cp ramboot/build/stub.bin $(BUILD)/image/kjump.stub
 	cp ../../srv/build/v90d-obi $(BUILD)/image/v90d
 	cp ../VERSION $(BUILD)/image/VERSION
 	python3 mkobifw.py --full --files $(BUILD)/image "$(BASE)" $(BUILD)/v90d-obi200.fw

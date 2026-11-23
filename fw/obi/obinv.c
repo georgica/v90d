@@ -83,12 +83,25 @@ static uint32_t le32(const uint8_t *p) { return p[0] | p[1] << 8 | p[2] << 16 | 
 
 /* ---- the flash ---- */
 
-static int flash_fd = -1;
+/* Reads go to the whole chip (OBINV_FLASH). Erases and writes go to
+ * OBINV_FLASH_WR, which starts OBINV_FLASH_WR_AT octets into the chip: under
+ * v90d's own kernel the whole chip is read only and the writable partition
+ * starts after U-Boot and the factory block (0x50000); under the maker's
+ * kernel both are the whole chip. */
+static int flash_fd = -1, wr_fd = -1;
+static uint32_t wr_at;
 
 static int flash_open(int wr)
 {
-    flash_fd = open(env_or("OBINV_FLASH", FLASH_DEV), (wr ? O_RDWR : O_RDONLY) | O_CLOEXEC);
-    return flash_fd < 0 ? -1 : 0;
+    const char *w = getenv("OBINV_FLASH_WR");
+    flash_fd = open(env_or("OBINV_FLASH", FLASH_DEV), (wr && !w ? O_RDWR : O_RDONLY) | O_CLOEXEC);
+    if (flash_fd < 0) return -1;
+    if (!wr) return 0;
+    if (!w) { wr_fd = flash_fd; wr_at = 0; return 0; }
+    wr_at = (uint32_t)strtoul(env_or("OBINV_FLASH_WR_AT", "0"), 0, 0);
+    if (wr_at % SECTOR) return -1;
+    wr_fd = open(w, O_RDWR | O_CLOEXEC);
+    return wr_fd < 0 ? -1 : 0;
 }
 
 static int flash_read(uint32_t at, uint8_t *p, uint32_t n)
@@ -102,13 +115,17 @@ static int flash_read(uint32_t at, uint8_t *p, uint32_t n)
     return 0;
 }
 
-/* does the flash hold these octets at `at` */
+/* does the flash hold these octets at `at`. A sector that reads wrong is
+ * read twice more before the answer is no: a read can fail on the way (the
+ * bus busy) while the flash holds the right octets. */
 static int flash_same(uint32_t at, const uint8_t *p, uint32_t n)
 {
     static uint8_t buf[SECTOR];
     while (n) {
         uint32_t k = n < SECTOR ? n : SECTOR;
-        if (flash_read(at, buf, k) || memcmp(buf, p, k)) return 0;
+        int t;
+        for (t = 0; t < 3; t++) if (!flash_read(at, buf, k) && !memcmp(buf, p, k)) break;
+        if (t == 3) return 0;
         at += k; p += k; n -= k;
     }
     return 1;
@@ -118,14 +135,16 @@ static int flash_erase(uint32_t at, uint32_t n)
 {
     struct erase_info_user e;
     struct stat st;
-    if (fstat(flash_fd, &st) == 0 && S_ISREG(st.st_mode)) {      /* a test file stands for the chip */
+    if (wr_fd < 0 || at < wr_at) return -1;                     /* not ours to write */
+    at -= wr_at;
+    if (fstat(wr_fd, &st) == 0 && S_ISREG(st.st_mode)) {        /* a test file stands for the chip */
         static uint8_t ff[SECTOR];
         memset(ff, 0xff, sizeof ff);
-        for (; n; at += SECTOR, n -= SECTOR) if (pwrite(flash_fd, ff, SECTOR, at) != SECTOR) return -1;
+        for (; n; at += SECTOR, n -= SECTOR) if (pwrite(wr_fd, ff, SECTOR, at) != SECTOR) return -1;
         return 0;
     }
     e.start = at; e.length = n;
-    return ioctl(flash_fd, MEMERASE, &e);
+    return ioctl(wr_fd, MEMERASE, &e);
 }
 
 /* erase the sectors under [at, at+n), write, read back */
@@ -136,7 +155,7 @@ static int flash_write(uint32_t at, const uint8_t *p, uint32_t n)
     if (flash_erase(at, span)) return -1;
     while (done < n) {
         uint32_t k = n - done < SECTOR ? n - done : SECTOR;
-        if (pwrite(flash_fd, p + done, k, at + done) != (ssize_t)k) return -1;
+        if (pwrite(wr_fd, p + done, k, at + done - wr_at) != (ssize_t)k) return -1;
         done += k;
     }
     return flash_same(at, p, n) ? 0 : -1;
