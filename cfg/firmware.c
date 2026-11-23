@@ -38,6 +38,7 @@ static int scheme_of(const char *where, char *set, size_t cap)
     if (!firmware_value(where, "scheme", s, sizeof s)) return 0;
     if (strcmp(s, "loader") == 0) return 2;
     if (strcmp(s, "old") == 0) return 1;
+    if (strcmp(s, "obi") == 0) return 3;      /* the OBi200: our /obi partition (fw/obi/obinv) */
     return 0;
 }
 
@@ -56,7 +57,9 @@ int firmware_render_html(const char *version, const char *where, const char *sta
     sb_puts(&b, "<section><h2>This firmware</h2>\n<table>\n");
     row(&b, "Version", version ? version : V90D_VERSION);
     sb_puts(&b, "<tr><th>Started</th><td>");
-    if (scheme == 2) {
+    if (scheme == 3) {
+        sb_puts(&b, "from the /obi part of the flash, in the system of the OBi firmware it was built from");
+    } else if (scheme == 2) {
         sb_puts(&b, "by the v90d loader, from set "); sb_html(&b, set, sizeof set, 0);
         sb_puts(&b, " of the flash");
     } else if (scheme == 1) {
@@ -95,7 +98,10 @@ int firmware_render_html(const char *version, const char *where, const char *sta
         sb_puts(&b, " has been released. <a href=\"https://github.com/georgica/v90d/releases/tag/v");
         sb_html(&b, v, sizeof v, 0);
         sb_puts(&b, "\">Release notes</a>.</p>\n");
-        if (can_write && scheme) {
+        if (scheme == 3) {
+            sb_puts(&b, "<p>On this box an update is built from your own OBi firmware file (fw/obi in the v90d"
+                        " sources) and uploaded below.</p>\n");
+        } else if (can_write && scheme) {
             sb_puts(&b, "<p>Install it: the box downloads the release from GitHub, checks it in full (a damaged"
                         " file or one for another box is refused), writes the spare flash copy and restarts into"
                         " it. The stock firmware and your settings are kept. Not while a call is in progress.</p>\n"
@@ -114,7 +120,19 @@ int firmware_render_html(const char *version, const char *where, const char *sta
     }
 
     sb_puts(&b, "<section><h2>Upload new firmware</h2>\n");
-    if (can_write && scheme) {
+    if (can_write && scheme == 3) {
+        sb_puts(&b, "<form method=\"post\" action=\"/firmware/upload\" enctype=\"multipart/form-data\">\n"
+                    "<p>A whole OBi firmware file: a v90d image built from your OBi firmware file, or that OBi"
+                    " firmware file itself to go back to the maker's application. It is checked in full first, then"
+                    " only the parts that differ from the flash are written (/obi, and the system or kernel if they"
+                    " differ). A file whose boot loader or recovery images differ from the box's is refused, so the"
+                    " box's recovery mode always stays. Not while a call is in progress.</p>\n"
+                    "<p>Writing takes a minute or two, then the box restarts by itself. Leave the power on: if it"
+                    " goes while the flash is written, the box starts in its recovery mode, whose page takes the"
+                    " same file again. The settings are kept.</p>\n"
+                    "<p><input type=\"file\" name=\"image\" required> <input type=\"submit\" value=\"Upload and write\"></p>\n"
+                    "</form>\n");
+    } else if (can_write && scheme) {
         sb_puts(&b, "<form method=\"post\" action=\"/firmware/upload\" enctype=\"multipart/form-data\">\n"
                     "<p>The v90d firmware file (the same file that goes on the stock firmware's upgrade page), or a"
                     " bare system image &mdash; a v90d image of a few megabytes, <strong>not</strong> a Grandstream"
@@ -136,7 +154,10 @@ int firmware_render_html(const char *version, const char *where, const char *sta
     sb_puts(&b, "</section>\n");
 
     sb_puts(&b, "<section><h2>Back to the stock firmware</h2>\n");
-    if (can_write && scheme) {
+    if (scheme == 3) {
+        sb_puts(&b, "<p>Upload your OBi firmware file (the one this v90d image was built from) above: it differs from"
+                    " the flash in /obi only, and writing it brings the maker's application back.</p>\n");
+    } else if (can_write && scheme) {
         sb_puts(&b, "<p>The stock firmware is still in the box, untouched, and one change makes the box start it"
                     " again. The next page says what that means and asks before it does it.</p>\n"
                     "<p><a href=\"/firmware/stock\">Back to the stock firmware&hellip;</a></p>\n");
