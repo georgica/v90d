@@ -1,5 +1,8 @@
 # Putting v90d on an HT802, and taking it off again
 
+(The Obihai OBi200 goes a different way: see
+[The Obihai OBi200](#the-obihai-obi200) at the end.)
+
 Tried on: HT802 hardware V2.5A (part number 9610003725A) with stock firmware
 1.0.65. Read "If something goes wrong" before you start.
 
@@ -88,3 +91,81 @@ file from the releases page and uploading it yourself.
 No serial cable should be needed for any of this. The pulled-power cases
 have been tested against models of the box's boot loader, not yet by pulling
 the plug on a real one.
+
+## The Obihai OBi200
+
+Tried on: OBi200 hardware 1.4, from the community firmware
+8680EX-arrynrob13. Not the OBi202 (two phone ports): v90d does not run there
+yet.
+
+### What you need
+
+- **An OBi200 that takes firmware the maker did not sign.** `v90d-obi200.fw`
+  is the community firmware (arrynrob13, from obifirmware.com) with v90d in
+  it, so it goes on wherever that firmware goes, by the community's route.
+  Follow their install instructions and upload `v90d-obi200.fw` where they
+  say arrynrob13. In short:
+  - **stock before build 5853:** upload it directly;
+  - **5853 to 6258:** install their `bypass-uboot-mod` first;
+  - **6259 and later:** install stock 5921EX, then `bypass-uboot-mod`, then
+    this file (`bypass-uboot-mod` straight from 6259 or later ends in
+    recovery mode).
+
+  A box already on the community firmware is ready. That is the path tested
+  here; the stock routes have not been tried with v90d yet.
+- **The community firmware file** (`OBi2xx-3-2-2-8680EX-arrynrob13.fw`, md5
+  `b438e5161220e1e7c161e005de1d6bb6`). Keep it: it is your way back.
+
+### Install
+
+1. Get `v90d-obi200.fw` from the releases page (or build it:
+   [fw/obi/README.md](fw/obi/README.md)).
+2. On the OBi's own web page (System Management, Device Update), upload
+   `v90d-obi200.fw` as you would any firmware.
+3. Leave the power on. The box writes the flash and restarts by itself. It
+   then starts twice over: first the maker's kernel, then v90d's own, which
+   the maker's starts from memory. Give it about three minutes.
+4. Open the address the box gets by DHCP (your router's list of clients
+   shows it). The page is now "Nestaliga". Log in with `admin` / `admin` and
+   change the password on the System page.
+
+Plug a modem into the PHONE port and dial the number shown on the Line page,
+with any PPP user from the Users page (the factory user is `guest` /
+`guest`).
+
+### What the install does
+
+Only the box's `/obi` part of the flash is replaced (the maker's
+application). The boot loader, the maker's kernel, the system files and the
+recovery mode stay as they are. At every start the maker's kernel boots
+first and starts v90d's own kernel, which v90d keeps in `/obi`. There is no
+SSH under v90d's kernel, as on the HT802.
+
+### Upgrading v90d
+
+On the v90d pages: Firmware, upload the new `v90d-obi200.fw`. The page checks
+the whole file, writes only what differs from the flash (normally `/obi`
+alone) and restarts the box. Settings are kept.
+
+### Back to the stock firmware
+
+On the v90d pages: Firmware, upload the community firmware file itself. It
+differs from the flash in `/obi` only, so that is all that is written, and
+the box restarts into the maker's application with its old settings.
+
+### If something goes wrong
+
+- **v90d's kernel does not come up.** The box restarts on the maker's kernel
+  and tries again. After two starts in a row that did not come up, it stays
+  on the maker's kernel, where v90d runs too, until the power is cut. So the
+  pages are back either way; please open an issue and say what happened.
+- **The power went while the flash was written**, or the box cannot start
+  for another reason. It comes up in the maker's **recovery mode**: a plain
+  page titled "OBi202 Firmware Update" at the box's address. It takes any
+  firmware file: upload `v90d-obi200.fw` again, or the community firmware
+  to go back. v90d never writes the boot loader or the recovery images, so
+  that mode is always there.
+- **The page says the write failed.** The system that runs is in memory and
+  still whole: upload the file again before you restart the box.
+
+No serial cable should be needed for any of this.
