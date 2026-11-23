@@ -20,7 +20,7 @@ enum {
     K_NUMBER, K_TONES, K_BUSY, K_DROP, K_SESSION, K_IDLE, K_SERVICE, K_DCNOW, K_DCLAN, K_DCUPNP, K_DCIWANGO, K_SATMATCH,
     K_LISTEN, K_PORT, K_ADMINPW,
     K_LEVEL,
-    K_PPP_PEER2, K_ARCHIVE, K_COMPRESSION, K_UPDATE_CHECK,
+    K_PPP_PEER2, K_ARCHIVE, K_COMPRESSION, K_ENCRYPTION, K_ENCRYPTION2, K_UPDATE_CHECK,
     /* port 2: the keys of [modem] and [line] again, in the same order */
     K2_MODS, K2_MAXDOWN, K2_MAXUP, K2_TXLEVEL, K2_V42, K2_V42BIS, K2_V92, K2_X2, K2_K56, K2_RINGS, K2_LAW,
     K2_NUMBER, K2_TONES, K2_BUSY, K2_DROP, K2_SESSION, K2_IDLE, K2_SERVICE, K2_DCNOW, K2_DCLAN, K2_DCUPNP, K2_DCIWANGO, K2_SATMATCH,
@@ -40,7 +40,7 @@ static const struct { int sec; const char *name; } keydefs[K_COUNT] = {
     { S_LINE, "service" }, { S_LINE, "dreamcast_now" }, { S_LINE, "dreamcast_lan" }, { S_LINE, "dreamcast_upnp" }, { S_LINE, "dreamcast_iwango" }, { S_LINE, "saturn_matchmaking" },
     { S_STATUS, "listen" }, { S_STATUS, "port" }, { S_STATUS, "admin_password" },
     { S_LOG, "level" },
-    { S_NETWORK, "ppp_peer2" }, { S_NETWORK, "archive" }, { S_PPP, "compression" }, { S_SYSTEM, "update_check" },
+    { S_NETWORK, "ppp_peer2" }, { S_NETWORK, "archive" }, { S_PPP, "compression" }, { S_PPP, "encryption" }, { S_PPP, "encryption2" }, { S_SYSTEM, "update_check" },
     { S_MODEM2, "modulations" }, { S_MODEM2, "max_downstream" }, { S_MODEM2, "max_upstream" },
     { S_MODEM2, "tx_level" }, { S_MODEM2, "v42" }, { S_MODEM2, "v42bis" }, { S_MODEM2, "v92" }, { S_MODEM2, "x2" }, { S_MODEM2, "k56" },
     { S_MODEM2, "rings" }, { S_MODEM2, "law" },
@@ -74,6 +74,7 @@ static const char l_mods[]   = "v90, v34, v32bis, v22bis, v22, v21";
 static void port_take(cfg_port_t *p, const cfg_t *c)
 {
     p->ppp_peer = c->ppp_peer;
+    p->encryption = c->encryption;
     p->modulations = c->modulations; p->max_down = c->max_down; p->max_up = c->max_up;
     p->tx_level = c->tx_level; p->v42 = c->v42; p->v42bis = c->v42bis; p->v92 = c->v92; p->x2 = c->x2; p->k56 = c->k56;
     p->rings = c->rings; p->law = c->law;
@@ -86,6 +87,7 @@ static void port_take(cfg_port_t *p, const cfg_t *c)
 static void port_give(const cfg_port_t *p, cfg_t *c)
 {
     c->ppp_peer = p->ppp_peer;
+    c->encryption = p->encryption;
     c->modulations = p->modulations; c->max_down = p->max_down; c->max_up = p->max_up;
     c->tx_level = p->tx_level; c->v42 = p->v42; c->v42bis = p->v42bis; c->v92 = p->v92; c->x2 = p->x2; c->k56 = p->k56;
     c->rings = p->rings; c->law = p->law;
@@ -123,6 +125,7 @@ void cfg_default(cfg_t *c)
     c->mru           = 1500;
     c->echo_interval = 30;
     c->compression   = 1;
+    c->encryption    = 0;
     c->modulations   = CFG_MOD_ALL;
     c->max_down      = 56000;
     c->max_up        = 33600;
@@ -270,6 +273,7 @@ static int validate(const cfg_t *c, char *msg, int *k1, int *k2)
     *k1 = K_MRU;       if (rng(msg, K_MRU, c->mru, 68, 1500)) return -1;
     *k1 = K_ECHO;      if (rng(msg, K_ECHO, c->echo_interval, 0, 3600)) return -1;
     *k1 = K_COMPRESSION; if (en(msg, K_COMPRESSION, c->compression, 2)) return -1;
+    *k1 = K_ENCRYPTION; if (en(msg, K_ENCRYPTION, c->encryption, 2)) return -1;
 
     if (validate_port(c, 0, msg, k1)) return -1;
     *k1 = K_LISTEN;    if (en(msg, K_LISTEN, c->status_listen, 2)) return -1;
@@ -326,6 +330,11 @@ static int validate(const cfg_t *c, char *msg, int *k1, int *k2)
         *k1 = K_AUTH; *k2 = K_USER;
         return kerr(msg, K_AUTH, "%s needs at least one user", n_auth[c->auth]);
     }
+    if ((c->encryption || c->port2.encryption) && c->n_users == 0) {
+        /* the user list is shared, so either port needing MPPE needs a user */
+        *k1 = c->encryption ? K_ENCRYPTION : K_ENCRYPTION2; *k2 = K_USER;
+        return kerr(msg, *k1, "encryption needs MS-CHAPv2, so at least one user");
+    }
     if (c->v42bis && !c->v42) {
         *k1 = K_V42BIS; *k2 = K_V42;
         snprintf(msg, MSG_MAX, "[modem] v42bis = on needs v42 = on (set v42bis = off)");
@@ -347,6 +356,7 @@ static int validate(const cfg_t *c, char *msg, int *k1, int *k2)
         cfg_t two;
         cfg_for_port(c, 1, &two);
         *k2 = -1;
+        *k1 = K_ENCRYPTION2; if (en(msg, K_ENCRYPTION2, two.encryption, 2)) return -1;
         if (validate_port(&two, K2_OFF, msg, k1)) return -1;
         if (two.v42bis && !two.v42) {
             *k1 = K2_V42BIS; *k2 = K2_V42;
@@ -670,6 +680,8 @@ static int set_value(cfg_t *c, pctx_t *px, int k, int mk, int line, const char *
     case K_MRU:       return set_int(&c->mru, mk, v, msg);
     case K_ECHO:      return set_int(&c->echo_interval, mk, v, msg);
     case K_COMPRESSION: return set_enum(&c->compression, mk, v, n_onoff, 2, l_onoff, msg);
+    case K_ENCRYPTION: return set_enum(&c->encryption, mk, v, n_onoff, 2, l_onoff, msg);
+    case K_ENCRYPTION2: return set_enum(&px->two.encryption, mk, v, n_onoff, 2, l_onoff, msg);
     case K_USER:      return set_user(c, px, line, v, msg);
     case K_MODS:      return set_mods(c, mk, v, msg);
     case K_MAXDOWN:   return set_int(&c->max_down, mk, v, msg);
@@ -981,6 +993,8 @@ int cfg_write(const cfg_t *c, int with_secrets, char *buf, size_t cap)
     w_int(&s, K_MRU, c->mru);
     w_int(&s, K_ECHO, c->echo_interval);
     w_str(&s, K_COMPRESSION, nm(n_onoff, 2, c->compression));
+    w_str(&s, K_ENCRYPTION, nm(n_onoff, 2, c->encryption));
+    w_str(&s, K_ENCRYPTION2, nm(n_onoff, 2, c->port2.encryption));
     n = c->n_users < 0 ? 0 : c->n_users > CFG_MAX_USERS ? CFG_MAX_USERS : c->n_users;
     for (i = 0; i < n; i++) {
         w_key(&s, K_USER);

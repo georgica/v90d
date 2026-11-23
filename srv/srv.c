@@ -120,6 +120,7 @@ static void adopt(srv_t *s, const cfg_t *cfg)
     s->status.service = cfg->service;
     s->status.v92 = cfg->v92 && !for_console(cfg) && !for_link(cfg);
     s->status.ppp_compression = cfg->compression && !for_console(cfg) && !for_link(cfg);
+    s->status.ppp_encryption = cfg->encryption && !for_console(cfg) && !for_link(cfg);
     for (i = 0; i < CFG_MAX_USERS; i++) {
         s->users[i].name = s->cfg.users[i].name;
         s->users[i].secret = s->cfg.users[i].secret;
@@ -257,14 +258,22 @@ static void call_start(srv_t *s)
         d.v42.lapm.v42bis_tx = 0; d.v42.lapm.v42bis_rx = 0;
         d.v42.lapm.v44_tx = 0; d.v42.lapm.v44_rx = 0;
     }
-    d.ppp.auth = c->auth == CFG_AUTH_CHAP ? PPP_AUTH_CHAP : c->auth == CFG_AUTH_PAP ? PPP_AUTH_PAP : PPP_AUTH_NONE;
+    if (c->encryption)
+        /* MPPE needs the MS-CHAPv2 keys and must not fall back: force the
+         * authentication regardless of the [ppp] auth setting */
+        d.ppp.auth = PPP_AUTH_MSCHAPV2;
+    else
+        d.ppp.auth = c->auth == CFG_AUTH_CHAP ? PPP_AUTH_CHAP : c->auth == CFG_AUTH_PAP ? PPP_AUTH_PAP : PPP_AUTH_NONE;
+    d.ppp.encrypt = c->encryption;
     d.ppp.users = s->users; d.ppp.n_users = (size_t)c->n_users;
     d.ppp.our_ip = c->ppp_local; d.ppp.peer_ip = c->ppp_peer;
     d.ppp.dns1 = c->dns[0]; d.ppp.dns2 = c->dns[1];
     d.ppp.mru = (uint16_t)c->mru;
     d.ppp.echo_interval_ms = (uint32_t)c->echo_interval * 1000u;
-    /* [ppp] compression: CCP with Deflate and MPPC, or no CCP at all */
-    d.ppp.comp = c->compression ? (PPP_COMP_DEFLATE | PPP_COMP_MPPC) : PPP_COMP_NONE;
+    /* [ppp] compression: CCP with Deflate and MPPC, or no CCP at all. When
+     * encryption is required, CCP carries only MPPE (no plain compression to
+     * fall back to), so drop Deflate/MPPC. */
+    d.ppp.comp = (c->encryption || !c->compression) ? PPP_COMP_NONE : (PPP_COMP_DEFLATE | PPP_COMP_MPPC);
     if (for_console(c) && !bbs) {
         /* The number and the login are the port's, as for every service.
          * Whatever [ppp] and [network] say: no CCP (one game is known to
@@ -272,6 +281,7 @@ static void call_start(srv_t *s)
          * servers that know where the games' servers are today. V.92 is
          * left out above: the console's modem is older than it. */
         d.ppp.comp = PPP_COMP_NONE;
+        d.ppp.encrypt = 0;      /* a console cannot do MS-CHAPv2/MPPE */
         d.ppp.dns1 = CONSOLE_DNS1; d.ppp.dns2 = CONSOLE_DNS2;
         console_init(&s->console);
     }

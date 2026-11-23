@@ -160,14 +160,14 @@ shown as "Bell 212A". Bell 103 has no error control, as V.21.
   parameters from XID, V.44 or V.42bis in both directions (V.44 where the
   caller offers it; `v42/README.md`), and an asynchronous
   start-stop fallback for callers without error control.
-- `ppp/`: server only. LCP, PAP and CHAP-MD5 against a static user table,
-  IPCP with address and DNS assignment. VJ compression, IPv6CP and
-  multilink are rejected.
+- `ppp/`: server only. LCP, PAP, CHAP-MD5 and MS-CHAPv2 against a static
+  user table, IPCP with address and DNS assignment. VJ compression, IPv6CP
+  and multilink are rejected.
 - PPP compression (CCP, RFC 1962) is in `ppp/` too, on by default
   (`[ppp] compression`). Two algorithms written from the RFCs:
   Deflate (RFC 1979 over RFC 1951, `ppp_deflate.c`), which is what Linux
   pppd takes, with windows from 256 octets to 32 KiB, and MPPC (RFC 2118,
-  `ppp_mppc.c`, 8 KiB history, no MPPE) for Windows callers. Deflate is
+  `ppp_mppc.c`, 8 KiB history) for Windows callers. Deflate is
   preferred. Each direction is negotiated on its own; only IP is
   compressed; a packet that does not shrink goes out as it is; loss is
   repaired with Reset-Request / Reset-Ack, so it works on calls without
@@ -179,6 +179,12 @@ shown as "Bell 212A". Bell 103 has no error control, as V.21.
   packets, above V.42 bis / V.44, which then find nothing left to remove;
   the gain over V.44 alone comes from the larger window and the Huffman
   coding. Readings and figures: `ppp/README.md`.
+- PPP encryption (MPPE, RFC 3078/3079) is optional, off by default, and set
+  per port (`[ppp] encryption` and `encryption2`). On, it forces MS-CHAPv2,
+  keys 128-bit stateless MPPE from the authentication, replaces CCP
+  compression, and fails closed: a caller that will not do MPPE is refused,
+  never carried in the clear. Clean-room from the RFCs (`ppp_crypto.c`,
+  `ppp_mppe.c`).
 - `dce/`: pumps bits and octets between the three, converts the sample clock
   to milliseconds, turns carrier loss into a clean PPP teardown and a call-end
   reason.

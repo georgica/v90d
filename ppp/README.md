@@ -1,18 +1,22 @@
 # ppp/: the PPP server
 
 HDLC framing (`ppp_hdlc.c`), the option negotiation automaton (`ppp_fsm.c`),
-LCP, PAP, CHAP-MD5, IPCP and CCP (`ppp.c`), and the two compression
-algorithms CCP can agree on: Deflate (`ppp_deflate.c`) and MPPC
-(`ppp_mppc.c`). Portable C99, integer only, no allocation, no OS calls.
+LCP, PAP, CHAP-MD5, MS-CHAPv2, IPCP and CCP (`ppp.c`); the two compression
+algorithms CCP can agree on, Deflate (`ppp_deflate.c`) and MPPC
+(`ppp_mppc.c`); and encryption: MS-CHAPv2 with the MPPE cipher
+(`ppp_crypto.c`, `ppp_mppe.c`). Portable C99, integer only, no allocation,
+no OS calls.
 
-This file is about the compression part: what was built, from what, how it
-is bounded, and every place where the RFCs leave a choice.
+This file is about the compression and encryption part: what was built, from
+what, how it is bounded, and every place where the RFCs leave a choice. The
+encryption readings are near the end, under "RFC 2759 / 3078 / 3079".
 
 ## Sources
 
 Only these, kept in `refs/rfc/`: RFC 1962 (CCP), RFC 1979 (PPP Deflate),
-RFC 1951 (the deflate format), RFC 2118 (MPPC), together with RFC 1661 for
-the automaton. No other implementation was read. Python's `zlib` module is
+RFC 1951 (the deflate format), RFC 2118 (MPPC), RFC 1994 (CHAP), RFC 2759
+(MS-CHAPv2), RFC 3078 (MPPE) and RFC 3079 (deriving the MPPE keys), together
+with RFC 1661 for the automaton. No other implementation was read. Python's `zlib` module is
 used as a black box in `test/zlib_check.py`; a real pppd 2.5.1 is used as a
 black box in `srv/test/ns_pppd.c`, and its packet log is the source of the
 "observed" remarks below.
@@ -36,11 +40,16 @@ the caller Acks governs what we send.
   nothing sent compressed towards the caller, which RFC 1962 allows.
 - In the caller's request we Ack the first option we can use in the order
   Deflate 26, Deflate 24, MPPC, and Reject the others in the same answer
-  (pppd sends 26, 24 and BSD together and expects exactly that). MPPC with
-  encryption bits (MPPE, 0x00000020 / 0x00000040 / 0x00000080 / 0x01000000)
-  is answered with a Nak that carries 0x00000001 only. A caller that insists
-  on encryption runs into Max-Failure and gets a Reject: no compression,
-  IP stays up.
+  (pppd sends 26, 24 and BSD together and expects exactly that).
+- Encryption changes option 18. When `[ppp] encryption = off` the MPPE bits
+  (0x00000020 / 0x00000040 / 0x00000080 / 0x01000000) are not something we do:
+  a caller's option 18 is Nak'd down to MPPC's 0x00000001, and a caller that
+  insists on encryption runs into Max-Failure and gets a Reject, so no
+  compression and IP stays up. When `[ppp] encryption = on` it is the
+  opposite: `comp` is empty (no Deflate, no MPPC), we request and require
+  128-bit stateless MPPE (option 18, bits 0x00000040 | 0x01000000), and if
+  MPPE is not agreed in both directions the link is closed rather than run in
+  the clear. That path is detailed under "RFC 2759 / 3078 / 3079" below.
 
 ## Bounds
 
@@ -208,7 +217,45 @@ RFC 2118 (MPPC):
     only when a packet without A arrives after the waiting time, never
     while the peer is silent, and never leads to a renegotiation.
 26. The option is four octets of supported bits, 0x00000001 for MPPC. The
-    other bits are encryption and are never Ack'd.
+    other bits are encryption (MPPE); the MPPC module itself never Acks them,
+    and they are handled one layer up in `ppp.c` (see below) only when
+    `[ppp] encryption = on`.
+
+RFC 2759 / 3078 / 3079 (MS-CHAPv2 and MPPE):
+
+27. MS-CHAPv2 (`ppp_crypto.c`) is offered through LCP as CHAP with algorithm
+    0x81. On the caller's 49-octet response we form the NT-Response from the
+    MD4 of the UTF-16LE password and check it, then return "S=" and the
+    40-hex authenticator. The vectors of RFC 2759 section 9.2 are in
+    `test/test_crypto.c`. The password is bounded at `PPP_CRYPTO_PASS_MAX`
+    (64). MS-CHAPv2 is required (not merely offered) whenever encryption is
+    on, because MPPE is keyed from it.
+28. The MPPE keys (RFC 3079) come from the NT-Response and the hash of the
+    NT-hash: the master key, then one send and one receive start key. The
+    session key for a direction is `SHA1(start || pad1 || current || pad2)`
+    truncated to the key length, with the first octets forced (40-bit: the
+    three octets D1 26 9E; 56-bit: D1 alone). RFC 3079's 128/40-bit RC4
+    samples reproduce; its one 56-bit sample is internally inconsistent in the
+    RFC and is not asserted. The reported SendSessionKey is that SHA-1 digest
+    truncated and forced, *not* an RC4 self-encryption of it; the RC4 "test
+    message" samples of section 3.5 confirm which it is.
+29. MPPE on the wire (RFC 3078, `ppp_mppe.c`) is stateless only (bit H,
+    0x01000000): each packet rekeys. The two-octet header is A (FLUSHED,
+    always, since stateless) | the 12-bit coherency count, then RC4 of the
+    protocol-and-data. A gap in the count means loss: the receiver rekeys
+    forward over the missed packets (at most 256, else the packet is dropped).
+    A frame without the ENCRYPT bit is refused. We offer 128-bit (S, 0x40)
+    and never the 40- or 56-bit forms.
+30. Fails closed. If encryption is required and MPPE is not agreed in both
+    directions by the time CCP opens, the link is terminated with
+    `PPP_END_ENCRYPT_REQUIRED`; no cleartext IP is sent (`ppp_send_ip`
+    refuses) or accepted (a cleartext network datagram is dropped and
+    counted) in the meantime.
+31. A CCP re-open does not re-key. Re-running the key schedule from the master
+    key would restart RC4 at coherency 0 and reuse the keystream, so MPPE is
+    keyed once per authentication; a CCP re-open after it has run ends the
+    link instead, and a decrypt error drops the packet rather than sending a
+    Reset-Request (which would renegotiate and re-key).
 
 ## Windows callers: assumed, not tested
 
@@ -221,10 +268,16 @@ and the behaviour described in it:
 - it accepts a Nak that reduces its encryption bits to 0x00000001 unless
   the user demanded encryption, in which case it gives up CCP or the call;
 - it resynchronizes on the A bit and may or may not send a Reset-Ack;
-- it accepts native IP packets while MPPC is on.
+- it accepts native IP packets while MPPC is on;
+- with encryption, it authenticates with MS-CHAPv2, requests option 18 with
+  128-bit stateless MPPE, derives the same keys, and sends every IP packet
+  encrypted with the ENCRYPT bit and a rising coherency count.
 
 The models of these in `test/pppc.c` (`PPPC_CCP_WINDOWS`,
 `PPPC_CCP_WINDOWS_MPPE`) encode exactly these assumptions and nothing more.
+The MPPE packet path and key derivation are also checked directly, end to
+end, against the RFC 3079 vectors in `test/test_mppe.c` and
+`test/test_crypto.c`.
 
 ## Tests
 
@@ -241,5 +294,12 @@ the full length), `make bench` (ratios on the sample files).
   history wrap, the count wrap at 4095, expansion, garbage.
 - `test/test_ccp.c`: the negotiation table (pppd, old pppd, small windows,
   Windows with and without MPPE, unknown options, rejects, Naks), data both
-  ways, resets, loss, renegotiation, MRU limits, the processor budget.
+  ways, resets, loss, renegotiation, MRU limits, the processor budget, and
+  the MPPE path: a full encrypted session, the fail-closed cases (peer
+  refuses MPPE, cleartext refused in and out), and a CCP re-open ending the
+  link rather than re-keying.
+- `test/test_crypto.c`: the RFC 2759 and 3079 vectors (NT-Response,
+  authenticator, master and session keys).
+- `test/test_mppe.c`: the RFC 3079 RC4 sample, round trips at 128/40/56-bit,
+  loss recovery, and a plaintext frame refused.
 - `test/test_e2e.c`: client and server over the HDLC framing with loss.

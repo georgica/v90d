@@ -255,6 +255,17 @@ static void test_values(void)
     s.ppp_comp_tx = ST_COMP_MPPC;
     CHECK(status_render_html(&s, html, sizeof html) > 0);
     CHECK(has(html, "<tr><th>Compressed to caller</th><td>MPPC</td></tr>"));
+    /* MPPE encryption: the setting, and the per-direction report (no ratio) */
+    s.ppp_encryption = 1; s.ppp_comp_tx = s.ppp_comp_rx = ST_COMP_MPPE;
+    s.comp_tx_in = s.comp_tx_out = 0;
+    CHECK(status_render_json(&s, json, sizeof json) > 0);
+    CHECK(json_ok(json));
+    CHECK(has(json, "\"ppp_encryption\":true,"));
+    CHECK(has(json, "\"comp_tx\":\"mppe\",\"comp_rx\":\"mppe\","));
+    CHECK(status_render_html(&s, html, sizeof html) > 0);
+    CHECK(has(html, "<tr><th>PPP encryption</th><td>required (MPPE)</td></tr>"));
+    CHECK(has(html, "<tr><th>Compressed to caller</th><td>MPPE (128-bit, encrypted)</td></tr>"));
+    s.ppp_encryption = 0;
     s.ppp_compression = 0; s.ppp_comp_tx = s.ppp_comp_rx = 0; s.comp_rx_in = s.comp_rx_out = 0;
     CHECK(status_render_json(&s, json, sizeof json) > 0);
     CHECK(has(json, "\"line\":\"connected\""));

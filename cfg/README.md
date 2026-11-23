@@ -59,6 +59,8 @@ daemon's decision.
 | ppp | `mru` | 68..1500 | `1500` |
 | ppp | `echo_interval` | seconds, 0..3600, 0 = off | `30` |
 | ppp | `compression` | `on`, `off`: PPP compression (CCP) with callers that ask for it, Deflate (RFC 1979, Linux pppd) or MPPC (RFC 2118, Windows); independent of `v42bis` and useful together with it | `on` |
+| ppp | `encryption` | `on`, `off`: require 128-bit MPPE (RFC 3078) on port 1. `on` forces MS-CHAPv2 (so a `user` is needed), drops plain compression, and refuses a caller that will not encrypt | `off` |
+| ppp | `encryption2` | the same for port 2. Encryption is set per port (unlike the rest of `[ppp]`); the `user` list is shared | `off` |
 | ppp | `user` | `NAME SECRET`, up to 16 lines | none |
 | modem | `modulations` | comma list out of `v90`, `v34`, `v32bis`, `v22bis`, `v22`, `v21` | all six |
 | modem | `max_downstream` | bit/s, 300..56000 | `56000` |
@@ -186,6 +188,10 @@ echo_interval = 30
 # PPP compression (CCP) with callers that ask for it: Deflate (Linux pppd)
 # or MPPC (Windows). Works on top of v42bis; off = never negotiated.
 compression = on
+# require 128-bit MPPE encryption, set per port. on = force MS-CHAPv2 (a user
+# is needed), drop plain compression, refuse a caller that will not do MPPE.
+encryption = off
+encryption2 = off
 # up to 16 users: name, then secret. Quote anything with blanks; inside
 # quotes use \" \\ and \xHH.
 user = alice wonderland
@@ -369,9 +375,10 @@ The box has two telephone ports. Port 1 is configured by `[line]` and
 `[modem]`, port 2 by `[line2]` and `[modem2]`, with the same keys, value
 ranges and defaults (so each port has its own `number`, tones, rings, limits,
 modulations, rate ceilings and `v92` switch). `[network] ppp_peer2` (default `10.64.64.3`)
-is the address handed to the caller on port 2. Network, PPP users, status and
-log settings are shared. `modulations` takes, fastest first: `v90, v34,
-v32bis, v22bis, v22, v21`.
+is the address handed to the caller on port 2, and `[ppp] encryption2` is
+port 2's MPPE requirement. Network, the rest of PPP (auth, mru, the user
+list) status and log settings are shared. `modulations` takes, fastest
+first: `v90, v34, v32bis, v22bis, v22, v21`.
 
 In C, `cfg_t` holds port 1 in its old fields and port 2 in `port2`;
 `cfg_for_port(c, 2, &view)` gives a `cfg_t` whose line and modem fields are
@@ -395,14 +402,16 @@ memory only, so a restart of the box empties it.
 - `GET /` is a page of three tables (line, PPP, counters; the calls are on `/calls`) with
   a link to the settings page. No script, no external resource, a
   `meta refresh` every 5 seconds.
-- `GET /status.json` is one object: `uptime_s`, `service`, `v92` and
-  `ppp_compression` (the settings `service` of the port, `v92` and `[ppp] compression`,
+- `GET /status.json` is one object: `uptime_s`, `service`, `v92`,
+  `ppp_compression` and `ppp_encryption` (the settings `service` of the port,
+  `v92`, `[ppp] compression` and `[ppp] encryption`,
   `true` or `false`), `line`, `modulation` (`none`,
   `v90`, `v34`, `v32bis`, `v22bis`, `v22`, `v21` or `v92`),
   `down_bps`, `up_bps`, `rtd_ms`, `rx_level_dbm0`, `snr_db`, `v42`,
   `compression` (the modem's: V.42bis or V.44 in use), `ppp` (`phase`,
   `peer_name`, `peer_ip`, `local_ip`, and for PPP compression in this call
-  `comp_tx` and `comp_rx`: `none`, `deflate` or `mppc` towards and from the
+  `comp_tx` and `comp_rx`: `none`, `deflate`, `mppc` or `mppe` (encryption)
+  towards and from the
   caller, `comp_tx_in` / `comp_tx_out`: octets of IP given to the compressor
   and octets sent for them, `comp_rx_in` / `comp_rx_out`: octets received
   compressed and the IP in them),
@@ -485,7 +494,7 @@ in the config file only.
 current value, so `curl -d busy_chance=50 http://box/settings` works. The
 field names are the config keys (`number`, `tones`, `rings`, `busy_chance`,
 `drop_mean`, `session_limit`, `idle_timeout`, `auth`, `max_downstream`,
-`max_upstream`, `v92`, `compression`, `admin_password`), plus `user0`..`user15`, `pass0`..`pass15`,
+`max_upstream`, `v92`, `compression`, `encryption`, `admin_password`), plus `user0`..`user15`, `pass0`..`pass15`,
 `mod_v90`, `mod_v34`, `mod_v32bis`, `mod_v22bis`, `mod_v22`, `mod_v21` (1 or 0), `mods` (1: the
 `mod_` fields present are the whole set, as with the browser's checkboxes)
 and `admin_clear` (1: remove the admin password). The server decodes the

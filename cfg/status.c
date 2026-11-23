@@ -143,7 +143,7 @@ static void j_ip(sbuf_t *b, const char *k, uint32_t a, const char *tail)
     sb_puts(b, tail);
 }
 
-static const char *const comp_json[] = { "none", "deflate", "mppc" };
+static const char *const comp_json[] = { "none", "deflate", "mppc", "unknown", "mppe" };
 
 int status_render_json(const status_t *s, char *buf, size_t cap)
 {
@@ -156,6 +156,7 @@ int status_render_json(const status_t *s, char *buf, size_t cap)
     j_key(&b, "service"); sb_puts(&b, s->service == 1 ? "\"archive\"," : s->service == 2 ? "\"dreamcast\"," : s->service == 3 ? "\"saturn\"," : "\"internet\",");
     j_key(&b, "v92"); sb_puts(&b, s->v92 ? "true," : "false,");
     j_key(&b, "ppp_compression"); sb_puts(&b, s->ppp_compression ? "true," : "false,");
+    j_key(&b, "ppp_encryption"); sb_puts(&b, s->ppp_encryption ? "true," : "false,");
     j_str(&b, "line", name_of(line_names, COUNT(line_names), (long)s->line), ",");
     j_str(&b, "modulation", name_of(mod_json, COUNT(mod_json), (long)s->modulation), ",");
     j_num(&b, "down_bps", s->down_bps, ",");
@@ -233,7 +234,10 @@ static void h_num(sbuf_t *b, const char *label, uint64_t v, const char *unit)
 static void h_comp(sbuf_t *b, const char *label, int alg, uint64_t plain, uint64_t packed, const char *verb)
 {
     h_open(b, label);
-    if (alg != ST_COMP_DEFLATE && alg != ST_COMP_MPPC) {
+    if (alg == ST_COMP_MPPE) {
+        /* MPPE encrypts, it does not compress: there is no ratio to show */
+        sb_puts(b, "MPPE (128-bit, encrypted)");
+    } else if (alg != ST_COMP_DEFLATE && alg != ST_COMP_MPPC) {
         sb_puts(b, "no");
     } else {
         sb_puts(b, alg == ST_COMP_DEFLATE ? "Deflate" : "MPPC");
@@ -515,6 +519,7 @@ static int render(const status_t *s, const status_t *const *ports, int sel, char
     h_str(&b, "Service", s->service == 1 ? "Archive (Protoweb)" : s->service == 2 ? "Dreamcast" : s->service == 3 ? "Saturn (console to console)" : "Internet");
     h_str(&b, "V.92", s->v92 ? "on" : "off");
     h_str(&b, "PPP compression", s->ppp_compression ? "on" : "off");
+    h_str(&b, "PPP encryption", s->ppp_encryption ? "required (MPPE)" : "off");
     h_open(&b, "Uptime");
     sb_u64(&b, s->uptime_s / 86400u); sb_puts(&b, "d ");
     put_hms(&b, s->uptime_s % 86400u, 1);

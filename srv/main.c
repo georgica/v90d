@@ -387,15 +387,15 @@ static const char *const mod_name[] = { "no carrier", "V.90", "V.34", "V.32bis",
 /* PPP compression (CCP) of the call that ended: one line, only if it was used */
 static void log_ppp_comp(const char *who, const ppp_t *ppp)
 {
-    static const char *const alg[] = { "none", "Deflate", "MPPC" };
+    static const char *const alg[] = { "none", "Deflate", "MPPC", "?", "MPPE" };
     ppp_status_t ps;
     const ppp_counters_t *k = &ps.counters;
     ppp_get_status(ppp, &ps);
     if (!k->ccp_opens) return;
     logf_(CFG_LOG_INFO, "%s  PPP compression: to caller %s %lu -> %lu octets (%lu packets sent as they were), from caller %s %lu -> %lu;"
           " resets asked of us %lu, by us %lu (%lu packets dropped), CCP opened %lu time(s)",
-          who, alg[k->comp_tx < 3 ? k->comp_tx : 0], (unsigned long)k->comp_tx_in, (unsigned long)k->comp_tx_out,
-          (unsigned long)k->comp_tx_native, alg[k->comp_rx < 3 ? k->comp_rx : 0],
+          who, alg[k->comp_tx < 5 ? k->comp_tx : 0], (unsigned long)k->comp_tx_in, (unsigned long)k->comp_tx_out,
+          (unsigned long)k->comp_tx_native, alg[k->comp_rx < 5 ? k->comp_rx : 0],
           (unsigned long)k->comp_rx_in, (unsigned long)k->comp_rx_out,
           (unsigned long)k->comp_tx_resets, (unsigned long)k->comp_rx_errors, (unsigned long)k->comp_rx_dropped,
           (unsigned long)k->ccp_opens);

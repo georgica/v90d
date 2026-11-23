@@ -26,6 +26,12 @@ echo_interval = 30
 # PPP compression (CCP) with callers that ask for it: Deflate (Linux pppd)
 # or MPPC (Windows). Works on top of v42bis; off = never negotiated.
 compression = on
+# require 128-bit MPPE encryption (RFC 3078), set per port. on = force
+# MS-CHAPv2 (so a user is needed), drop plain compression, and refuse a caller
+# that will not do MPPE. off = no encryption. For Windows "require data
+# encryption" dial-up. encryption = port 1, encryption2 = port 2.
+encryption = off
+encryption2 = off
 # up to 16 users: name, then secret. Quote anything with blanks; inside
 # quotes use \" \\ and \xHH.
 user = alice wonderland

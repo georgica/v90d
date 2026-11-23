@@ -24,8 +24,9 @@ the stock firmware stays in the box, one click away.
 - Can also offer the two pre-V.90 56k schemes to a modem that speaks one:
   x2 (U.S. Robotics, 1997) and K56flex (1996, experimental). Both are
   answering only, off by default, and share one call at a time; see "Modems".
-- PPP server with users and passwords, MPPC compression for Windows
-  callers, NAT to the network on the Ethernet port, DNS handed to the
+- PPP server with users and passwords, MPPC compression and optional
+  MS-CHAPv2 with 128-bit MPPE encryption for Windows callers, NAT to the
+  network on the Ethernet port, DNS handed to the
   caller.
 - Telephony the way an exchange does it: dial tone, tone or pulse dialling,
   ringing tone, busy, a number per port (North American or European tones).

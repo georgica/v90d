@@ -48,8 +48,8 @@ typedef enum {
     ST_V42_ASYNC        /* start-stop fallback */
 } st_v42_t;
 
-/* PPP compression (CCP) in one direction; the values of PPP_COMP_* */
-typedef enum { ST_COMP_NONE = 0, ST_COMP_DEFLATE, ST_COMP_MPPC } st_comp_t;
+/* PPP compression/encryption (CCP) in one direction; the values of PPP_COMP_* */
+typedef enum { ST_COMP_NONE = 0, ST_COMP_DEFLATE, ST_COMP_MPPC, ST_COMP_MPPE = 4 } st_comp_t;
 
 typedef enum {
     ST_PPP_DEAD = 0, ST_PPP_ESTABLISH, ST_PPP_AUTHENTICATE, ST_PPP_NETWORK,
@@ -117,6 +117,7 @@ typedef struct {
     uint32_t  peer_ip;
     uint32_t  local_ip;
     int       ppp_compression;  /* PPP compression is allowed (the setting, not a measurement) */
+    int       ppp_encryption;   /* MPPE encryption is required (the setting, not a measurement) */
     int       ppp_comp_tx, ppp_comp_rx;     /* ST_COMP_*: agreed towards / from the caller */
     uint64_t  comp_tx_in, comp_tx_out;      /* this call: octets of IP given to the compressor,
                                                and what went out for them */

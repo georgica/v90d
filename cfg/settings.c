@@ -13,6 +13,7 @@ enum {
     F_NUMBER, F_TONES, F_RINGS, F_BUSY, F_DROP, F_SESSION, F_IDLE, F_AUTH,
     F_MODS, F_V90, F_V34, F_V32BIS, F_V22BIS, F_V22, F_V21, F_DOWN, F_UP, F_ADMINPW, F_ADMINCLR,
     F_LAN, F_ADDRESS, F_NETMASK, F_GATEWAY, F_DNS1, F_DNS2, F_PORT, F_SERVICE, F_V92, F_COMPRESSION,
+    F_ENCRYPTION,
     F_DCNOW, F_DCLAN, F_DCUPNP, F_DCIWANGO, F_SATMATCH, F_UPDATE_CHECK, F_X2, F_K56,
     F_COUNT,
     F_USER = 100, F_PASS = 200      /* plus the row */
@@ -30,6 +31,7 @@ static const struct { const char *name; const char *sec; } fields[F_COUNT] = {
     { "lan", "network" }, { "address", "network" }, { "netmask", "network" },
     { "gateway", "network" }, { "dns1", "network" }, { "dns2", "network" },
     { "port", "line" }, { "service", "line" }, { "v92", "modem" }, { "compression", "ppp" },
+    { "encryption", "ppp" },
     { "dreamcast_now", "line" }, { "dreamcast_lan", "line" }, { "dreamcast_upnp", "line" }, { "dreamcast_iwango", "line" }, { "saturn_matchmaking", "line" },
     { "update_check", "system" }, { "x2", "modem" }, { "k56", "modem" },
 };
@@ -61,6 +63,8 @@ static const char *const t_update[] = { "Off: the box never contacts GitHub",
 static const char *const n_comp[]  = { "off", "on" };
 static const char *const t_comp[]  = { "Off: no PPP compression",
                                        "On: Deflate or MPPC, whichever the caller asks for" };
+static const char *const t_enc[]   = { "Off: no encryption required",
+                                       "On: require 128-bit MPPE (forces MS-CHAPv2; a user is needed, and plain compression is dropped)" };
 static const char *const t_mods[]  = { "V.90", "V.34", "V.32bis", "V.22bis", "V.22", "V.21" };     /* bit i */
 
 /* ---- the page -------------------------------------------------------------- */
@@ -320,11 +324,13 @@ int settings_render_page(const cfg_t *c, int page, int saved, const char *error,
     in_select(&b, "x2", F_X2, c->x2, n_v92, t_x2, 2);
     in_select(&b, "K56flex", F_K56, c->k56, n_v92, t_k56, 2);
     in_select(&b, "PPP compression", F_COMPRESSION, c->compression, n_comp, t_comp, 2);
+    in_select(&b, "PPP encryption", F_ENCRYPTION, c->encryption, n_comp, t_enc, 2);
     sb_puts(&b, "</table>\n<p>With V.92 on, PCM upstream is used when the caller's modem asks for it (for"
                 " example AT+PIG=0 on Conexant modems); set Max upstream above 33600 to let"
                 " it go faster. A caller that does not ask gets V.90. PPP compression (for both ports) works on"
                 " top of the modem's own: web pages and text arrive about three times as fast"
-                " as the line rate.</p></section>\n");
+                " as the line rate. PPP encryption is set per port: on, this port requires MS-CHAPv2 and"
+                " 128-bit MPPE, drops plain compression, and refuses a caller that will not encrypt.</p></section>\n");
 
     }
     if (ON(SETTINGS_USERS)) {
@@ -617,6 +623,7 @@ static void set_field(form_t *f, int fi, const char *v, size_t len)
     case F_DCIWANGO: set_enum(f, fi, &c->dc_iwango, v, n_v92, 2, "on, off"); break;
     case F_SATMATCH: set_enum(f, fi, &c->sat_match, v, n_v92, 2, "on, off"); break;
     case F_COMPRESSION: set_enum(f, fi, &c->compression, v, n_comp, 2, "on, off"); break;
+    case F_ENCRYPTION: set_enum(f, fi, &c->encryption, v, n_comp, 2, "on, off"); break;
     case F_UPDATE_CHECK: set_enum(f, fi, &c->update_check, v, n_v92, 2, "on, off"); break;
     case F_ADDRESS: set_addr(f, fi, &c->lan_addr, v, 0); break;
     case F_NETMASK: set_addr(f, fi, &c->lan_netmask, v, 0); break;
