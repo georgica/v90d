@@ -60,14 +60,16 @@ CONFIG_STMMAC_ETH=y
 CONFIG_STMMAC_PLATFORM=y
 CONFIG_DWMAC_GENERIC=y
 # Ethernet PHY: the stock kernel drives every HT80x PHY through the generic
-# PHY path, which is passive and leaves the bootloader's RMII clock setup
-# alone. We do the same. We do NOT build the Micrel (KSZ8081) driver: binding
-# it actively reconfigures the KSZ8081's RMII reference-clock mode (reg 0x1F
-# bit 7) from a device-tree "rmii-ref" clock we do not provide, which breaks
-# the link on the V1.x boards (issue #4) where genphy works. Motorcomm's
-# YT8512H (HT802 V2.5A) needs its own driver, so keep that one; the rest fall
-# back to genphy.
-CONFIG_MOTORCOMM_PHY=y
+# PHY path, which is passive and leaves the boot loader's RMII set-up alone.
+# We do the same and build no PHY-specific driver:
+# - Micrel (KSZ8081, the V1.x boards): 0.7.2 built it and the V1.6A of issue
+#   #4 then did not boot; 0.7.3 without it does. Why is not established: the
+#   "rmii-ref" clock path does not run (our device tree has no such clock);
+#   candidates are its BMCR soft reset undoing the boot loader's reg 0x1F
+#   set-up, and its broadcast-disable.
+# - Motorcomm: its 6.6 driver knows the YT8511/8521/8531/8531S, not the
+#   YT8512H of the HT802 V2.5A, which the generic driver has always driven.
+# CONFIG_MOTORCOMM_PHY is not set
 # CONFIG_WLAN is not set
 # CONFIG_INPUT is not set
 # CONFIG_SERIO is not set

@@ -15,7 +15,7 @@ stock as before.
 | Board | Hardware | Part number | SoC | FXS ports | SLIC | Status |
 |---|---|---|---|---|---|---|
 | HT802 | V2.5A | `9610003725A` | DSPG DVF9918 | 2 | 2 × Si3217x | **Tested** |
-| HT802 | V1.6A | `9610003716A` | DVF99 (same device tree) | 2 | 1 × Si3226x (Si32260, dual-channel) | **Tested** (issue #4) |
+| HT802 | V1.6A | `9610003716A` | DVF99 (same device tree) | 2 | 1 × Si3226x (Si32260, dual-channel) | **Confirmed by its owner** (issue #4) |
 | HT802 | other V2.x | not yet known | DVF9918 (expected) | 2 | 2 × Si3217x (expected) | **Expected, untested** |
 | HT801 | V1.0A | `9611003610A` | DVF99 (same device tree) | 1 | 1 × Si3217x (factory data) | **Accepted by the loader, untested** |
 | HT801 | V1.1C | `9610003611C` | DVF99 (same device tree) | 1 | 1 × Si3217x (factory data) | **Accepted by the loader, untested** |
@@ -27,6 +27,12 @@ stock as before.
 - **Tested** — v90d has been installed on a real unit of this board and a
   dial-up call made through it. This is the reference unit, from stock
   firmware 1.0.65; its facts are in `HARDWARE.md`.
+- **Confirmed by its owner** — v90d has been installed on a real unit of
+  this board by someone outside the project, who reported the network and
+  both phone ports working (battery, dial tone). No dial-up call through it
+  has been reported yet, and the unit is not here to measure. The loader
+  still treats the board as untried (`LD_BOARDS_TRIED`): a start is
+  confirmed only once the network has been heard.
 - **Expected, untested** — Grandstream ships one firmware for the HT801 and
   HT802 (the stock image branches on the model for the number of ports
   only), and the stock board tables give these boards the same DSPG DVF9918
@@ -262,9 +268,9 @@ What is not known, and matters before anyone flashes one:
    received something: a box whose Ethernet does not work goes back to the
    stock firmware by itself after three starts. (So does one that is
    started three times in a row with no cable in.)
-2. **SLIC revision.** The driver starts a Si3217x of revision C only. Another
-   revision is refused cleanly (no battery voltage, a line in the log), and
-   the port stays dead.
+2. **SLIC revision.** The driver starts revision C of the Si3217x and of the
+   dual-channel Si3226x only. Another revision is refused cleanly (no battery
+   voltage, a line in the log), and the port stays dead.
 3. **V2.x HT801 units** have a part number that is not in the list yet.
 
 Whoever can should make the first start on an HT801 from RAM
@@ -284,16 +290,19 @@ clean code, `refs/qspi-chips.md`):
   GigaDevice GD25Q128 (`c84018`), Micron N25Q128 (`20ba18`). The loader reads
   the JEDEC id and drives each one's quad mode; a flash chip it does not know
   is handled like an unknown board (hands back to stock, no brick).
-- **Ethernet PHY:** the stock kernel uses the generic/fixed PHY path, so most
-  IEEE PHYs work without a chip-specific driver; we keep that and also build
-  the drivers for the parts seen in the field (Motorcomm YT8512H on the HT802
-  V2.5A, Micrel KSZ8081 on V1.x) plus a few common 10/100 parts.
+- **Ethernet PHY:** the stock kernel uses the generic PHY path, so every IEEE
+  PHY works without a chip-specific driver, and we build none: the Micrel
+  driver stopped the V1.x boards (KSZ8081) from booting (0.7.2, issue #4),
+  and Linux's Motorcomm driver does not cover the HT802 V2.5A's YT8512H,
+  which the generic driver has always run (`fw/kernel/ht802_defconfig`).
 
 The **SLIC** is the exception: the vendor's line bring-up and its RAM patch are
 in closed userspace, not in the GPL, so v90d's SLIC support is written from the
-Silicon Labs Si3217x documentation and confirmed on the bench, per revision. It
-drives Si3217x **rev C** (patch-free, the reference unit). Another revision is a
-separate bring-up: it needs that revision's data and a unit to measure battery
+Silicon Labs documentation and confirmed on a unit, per part and revision. It
+drives the Si3217x **rev C** (patch-free, the reference unit) and the
+dual-channel Si3226x **rev C** (patch-free; the issue #4 HT802 V1.6A, both
+channels started together, `slic_dual_init` in `fw/drv/slic.c`). Another
+revision is a separate bring-up: it needs that revision's data and a unit to measure battery
 and ring voltage on, and it fails safe until then (the port stays dead, logged).
 
 ## Adding a board
