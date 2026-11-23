@@ -4,7 +4,9 @@
  * shim marks 0x03f01000). "try": exit 1 if two starts in a row failed,
  * else count this one and exit 0 (the launcher then jumps); "ok": the own
  * kernel is up (kinit), back to 0; "show": print it. After a power cut the
- * magic is gone and the count starts again at 0. */
+ * magic is gone and the count starts again at 0. Built into kjump
+ * ("kjump --count try|ok|show"), which is static already: one C library in
+ * /obi instead of two. */
 #define _FILE_OFFSET_BITS 64
 #include <fcntl.h>
 #include <stdint.h>
@@ -17,12 +19,12 @@
 #define MAGIC  0x4b303956u          /* "V90K" */
 #define TRIES  2u
 
-int main(int argc, char **argv)
+int bootcount_main(int argc, char **argv)
 {
     int fd = open("/dev/mem", O_RDWR | O_SYNC);
     volatile uint32_t *p;
     uint8_t *m;
-    if (argc != 2) { fprintf(stderr, "usage: bootcount try|ok|show\n"); return 2; }
+    if (argc != 2) { fprintf(stderr, "usage: kjump --count try|ok|show\n"); return 2; }
     if (fd < 0) { perror("/dev/mem"); return 2; }
     m = mmap(0, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, fd, AT);
     if (m == MAP_FAILED) { perror("mmap"); return 2; }
@@ -36,7 +38,7 @@ int main(int argc, char **argv)
     } else if (!strcmp(argv[1], "show")) {
         printf("%u\n", (unsigned)p[1]);
     } else {
-        fprintf(stderr, "usage: bootcount try|ok|show\n");
+        fprintf(stderr, "usage: kjump --count try|ok|show\n");
         return 2;
     }
     msync(m, 4096, MS_SYNC);

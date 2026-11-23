@@ -7,7 +7,7 @@
 #
 # Two kernels. Started by the maker's kernel, this first starts v90d's own
 # Linux kernel (kernel.xz) from RAM (kjump), unless that did not come up
-# twice in a row since the power came on (bootcount) or
+# twice in a row since the power came on (kjump --count) or
 # /scratch/v90d/maker-kernel exists: the box then stays on the maker's
 # kernel, with the maker's modules below. v90d's own kernel runs this again
 # (from kinit) and the same programs run on it.
@@ -43,7 +43,7 @@ if [ -z "$OWN" ]; then
     # needs the LED module (it runs its last step through /dev/led); the
     # telephony module's audio keeps running and the new kernel takes it over.
     if [ -f $D/kernel.xz ] && [ ! -e /scratch/v90d/maker-kernel ]; then
-        if $D/bootcount try; then
+        if $D/kjump --count try; then
             say "starting v90d's own kernel"
             sync
             $D/kjump $D/kernel.xz $D/kjump.stub 2>&1 | logger -t kjump

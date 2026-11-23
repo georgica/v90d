@@ -32,7 +32,7 @@ mkdir -p /var/pstore
 if mount -t pstore pstore /var/pstore 2>/dev/null; then
     for f in /var/pstore/console-ramoops*; do
         [ -f "$f" ] || continue
-        grep -i -E "error|fail|overrun|timed out|ran dry|went through|oops|panic|bug|warn" "$f" | grep -v -e "panic=" -e ramoops | tail -n 20 | while read -r l; do say "last start: $l"; done
+        grep -i -E "error|fail|overrun|timed out|ran dry|went through|oops|panic|bug|warn" "$f" | grep -v -e "panic=" -e ramoops -e "initial console" | tail -n 20 | while read -r l; do say "last start: $l"; done
     done
 fi
 
@@ -46,9 +46,9 @@ cd /obi && ./obi
 # The maker's rc starts dropbear with the firmware's well-known root
 # password; under this kernel nothing does.
 
-# the own kernel came up: the next start may use it again (bootcount.c).
+# the own kernel came up: the next start may use it again (kjump --count: bootcount.c).
 # Counted as up once the daemon has run for a minute.
-( sleep 60; pidof v90d >/dev/null && /obi/bootcount ok && say "up: v90d runs" ) &
+( sleep 60; pidof v90d >/dev/null && /obi/kjump --count ok && say "up: v90d runs" ) &
 
 # process 1: never ends; takes the processes left without a parent
 while :; do wait; sleep 1; done

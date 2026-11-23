@@ -17,7 +17,7 @@ $(BUILD)/obiline: obiline.c compat26.c $(DRV)/pump.c $(DRV)/proslic.c $(DRV)/sli
 $(BUILD)/obinv: obinv.c compat26.c ../../ppp/ppp_md5.c ../../cfg/page.h ../../cfg/sbuf.h | $(BUILD)
 	$(ARM_CC) $(CFLAGS) -static -I../../ppp -I../../cfg -o $@ obinv.c compat26.c ../../ppp/ppp_md5.c
 	$(dir $(ARM_CC))arm-linux-strip $@
-$(BUILD)/oinit $(BUILD)/bootcount: $(BUILD)/%: %.c | $(BUILD)
+$(BUILD)/oinit: $(BUILD)/%: %.c | $(BUILD)
 	$(ARM_CC) $(CFLAGS) -static -Os -o $@ $<
 	$(dir $(ARM_CC))arm-linux-strip $@
 
@@ -44,10 +44,10 @@ $(BUILD)/kernel.xz: $(BUILD)/oinit FORCE | $(BUILD)
 ../../srv/build/v90d-obi: FORCE
 	$(MAKE) -C ../../srv v90d-obi
 FORCE:
-image: $(BUILD)/obiline $(BUILD)/obinv $(BUILD)/bootcount $(BUILD)/kernel.xz ../../srv/build/v90d-obi obi kinit udhcpc.script ../v90d.conf ../VERSION mkobifw.py
+image: $(BUILD)/obiline $(BUILD)/obinv $(BUILD)/kernel.xz ../../srv/build/v90d-obi obi kinit udhcpc.script ../v90d.conf ../VERSION mkobifw.py
 	@test -n "$(BASE)" || { echo "make image BASE=your-OBi-firmware.fw"; exit 1; }
 	@rm -rf $(BUILD)/image && mkdir -p $(BUILD)/image
-	cp obi kinit udhcpc.script $(BUILD)/obiline $(BUILD)/obinv $(BUILD)/bootcount $(BUILD)/kernel.xz ../v90d.conf $(BUILD)/image/
+	cp obi kinit udhcpc.script $(BUILD)/obiline $(BUILD)/obinv $(BUILD)/kernel.xz ../v90d.conf $(BUILD)/image/
 	cp ramboot/build/kjump $(BUILD)/image/kjump
 	cp ramboot/build/stub.bin $(BUILD)/image/kjump.stub
 	cp ../../srv/build/v90d-obi $(BUILD)/image/v90d

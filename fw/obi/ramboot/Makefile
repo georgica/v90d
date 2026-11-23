@@ -15,8 +15,8 @@ KSRC   ?= $(CURDIR)/../../build/linux-6.6.63
 XZ_SRC := $(addprefix $(KSRC)/lib/xz/,xz_crc32.c xz_dec_stream.c xz_dec_lzma2.c xz_dec_bcj.c)
 $(BUILD)/xz.h: $(KSRC)/include/linux/xz.h | $(BUILD)
 	cp $< $@
-$(BUILD)/kjump: kjump.c xz/xz_config.h $(BUILD)/xz.h | $(BUILD)
-	$(ARM)gcc -static -O2 -std=gnu99 -Wall -Wextra -I$(BUILD) -Ixz -o $@ kjump.c $(XZ_SRC)
+$(BUILD)/kjump: kjump.c ../bootcount.c xz/xz_config.h $(BUILD)/xz.h | $(BUILD)
+	$(ARM)gcc -static -O2 -std=gnu99 -Wall -Wextra -I$(BUILD) -Ixz -o $@ kjump.c ../bootcount.c $(XZ_SRC)
 	$(ARM)strip $@
 $(BUILD)/%: %.c | $(BUILD)
 	$(ARM)gcc -static -O2 -std=gnu99 -Wall -Wextra -o $@ $<

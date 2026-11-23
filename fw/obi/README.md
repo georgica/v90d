@@ -1,8 +1,13 @@
 # v90d on the Obihai OBi200
 
-The OBi200 (one telephone port) runs v90d with the maker's kernel and the
-community firmware's system around it. Only the box's `/obi` part of the flash
-(the maker's application) is replaced.
+The OBi200 (one telephone port) runs v90d on **our own Linux 6.6 kernel**,
+with drivers for this box written for v90d (`fw/kernel`), and the community
+firmware's file system around it. Only the box's `/obi` part of the flash
+(the maker's application) is replaced: U-Boot, the maker's kernel in the
+flash, the root file system and the recovery mode stay as they are. At every
+start the maker's kernel boots first and `/obi/obi` then starts ours from RAM
+(see "Two kernels" below). If ours does not come up, the box stays on the
+maker's kernel, where the same v90d runs too.
 
 Each release carries **`v90d-obi200.fw`**, ready to install. It is built by
 the release CI from the community firmware file arrynrob13 (fetched and
@@ -15,13 +20,15 @@ Verified on a unit (OBi200 hardware 1.4, community firmware arrynrob13, build
 
 - a U.S. Robotics 56K (5.4.62) calls in at **V.92 54 666 / 33 333 bit/s**, LAPM
   with V.42bis, and gets PPP and the Internet through the box's NAT
-- updates through v90d's own Firmware page, and back again (see below)
-- the power light is steady as under the maker's application; the phone light
-  is on while the telephone is off hook
+- the box starts our kernel by itself from the flash, also after the power
+  is cut and comes back
+- updates through v90d's own Firmware page under either kernel, and back
+  again (see below)
+- the power light blinks while the box starts and is steady once the line
+  is up; the phone light is on while the telephone is off hook
 
 Not tried: the OBi202 (two ports), other OBi models, other base firmware
-files. The phone light's position (light 1 of the maker's LED module) is
-inferred, not yet seen on the unit.
+files.
 
 ## What you need
 
@@ -45,7 +52,9 @@ and `unsquashfs` (squashfs-tools) and Python 3:
     make -C fw/obi image BASE=$(sh fw/obi/getbase.sh)
 
 gives `fw/obi/build/v90d-obi200.fw`, the same file as the release's: the
-whole firmware file (about 12 MB), identical to the base except for `/obi`.
+whole firmware file (about 14 MB), identical to the base except for `/obi`.
+It builds our kernel too (in `fw/build/k-obi200-rel`, from the Linux sources
+`fw/setup.sh` fetched); `make -C fw/obi kernel` builds only that.
 `make -C fw/obi test BASE=...` also runs the flash tool's tests.
 
 ## Install
@@ -57,8 +66,9 @@ DHCP, with v90d's pages (user `admin`, password `admin` until you change it
 on the Settings page). The telephone port is v90d's line; the settings live in
 the box's writable flash (`/scratch/v90d`) and survive updates.
 
-SSH (dropbear, root) keeps working: it belongs to the community firmware's
-system, not to `/obi`.
+There is no SSH under our kernel, as on the HT80x: the status and settings
+pages are the way in. (Under the maker's kernel the community firmware's own
+start script still starts its dropbear.)
 
 ## Update
 
@@ -78,11 +88,42 @@ titled "OBi202 Firmware Update" at the box's address, which takes any firmware
 file (BASE, or v90d's). v90d never writes the boot loader or the recovery
 images, so that mode is always there.
 
+## Two kernels
+
+U-Boot only checks the flash's checksums before it boots a kernel and has no
+fallback, so our kernel is not written to the maker's kernel slot: a kernel
+that stopped half way would leave a box that only a serial cable could save.
+Instead:
+
+1. U-Boot boots the maker's kernel; its `/etc/rc` runs `/obi/obi`.
+2. `/obi/obi` loads the maker's modules, then starts `/obi/kernel.xz` from
+   RAM with `kjump` (fw/obi/ramboot), unless it did not come up twice in a
+   row since the power came on (a count in RAM, `kjump --count`) or the file
+   `/scratch/v90d/maker-kernel` exists. `kjump` unpacks the kernel while the
+   maker's kernel still runs (and feeds the watchdog), then jumps.
+3. Our kernel's whole initramfs is `oinit`: it mounts the box's own root file
+   system (its BusyBox and libraries) and `/obi`, and runs `/obi/kinit` as
+   process 1, which does what this box needs of the maker's `/etc/rc` (no
+   ssh) and runs `/obi/obi` again.
+4. `/obi/obi` sees the newer kernel and runs the same programs: the LAN port
+   is `eth0`, the switch is set up by the kernel, and the Firmware page writes
+   through a flash partition that starts after U-Boot and the factory block.
+5. A minute after the daemon runs, `kinit` resets the count.
+
+A start takes about 70 s from power on to a ready line. The kernel drivers
+(Ethernet and switch, SPI flash, watchdog, LEDs, GPIO, the SLIC and the audio
+DMA, which ours takes over from the maker's kernel as it runs) were
+reconstructed from the maker's kernel and modules; `fw/kernel/*-NOTES.md`
+say what is verified and what is inferred.
+
 ## How it works
 
 | piece | what it is |
 | --- | --- |
-| `obi` | the launcher, run by the system's `/etc/rc` at boot: loads the maker's modules, makes the LAN port, starts the line and the daemon, restarts the box when the Firmware page or the Restart button asks |
+| `obi` | the launcher, run by the system's `/etc/rc` at boot (and by `kinit` under our kernel): loads the maker's modules and starts our kernel, or under ours makes the LAN port, starts the line and the daemon, restarts the box when the Firmware page or the Restart button asks |
+| `kernel.xz` | our kernel (fw/kernel, `make -C fw/obi kernel`): the Image with `oinit` as its initramfs and the device tree, packed for `kjump` |
+| `kjump` | starts `kernel.xz` from RAM under the maker's kernel (fw/obi/ramboot/kjump.c); `kjump --count` is the start count (bootcount.c) |
+| `oinit.c`, `kinit` | our kernel's first steps: the root file system, then the part of the maker's `/etc/rc` the box needs |
 | `obiline.c` | the telephone line in user space: SLIC bring-up (fw/drv/slic.c, patch-free), the 10 ms audio loop, the hook, the lights; serves the daemon on `/var/run/v90line` (`seq:` in srv/line.h) |
 | `obinv.c` | the Firmware page's flash tool on this box (the HT80x has fw/tools/v90nv) |
 | `compat26.c` | `rename` and `accept4` for Linux 2.6.30, older than our C library expects |
@@ -90,11 +131,11 @@ images, so that mode is always there.
 | `udhcpc.script` | the LAN address by DHCP |
 
 The daemon itself is the same as on the HT80x (`make -C srv v90d-obi`), built
-with `compat26.c` and a 16 MiB Firmware page upload. Where this kernel lacks
-something, the daemon falls back by itself: no TUN driver, so the PPP link's
-network device is the kernel's own PPP unit over a pseudo-terminal
-(srv/tun.c); no nftables, so NAT goes through the system's `iptables`
-(srv/nat.c).
+with `compat26.c` and a 16 MiB Firmware page upload. Under our kernel it uses
+TUN and nftables as on the HT80x. Under the maker's kernel, which lacks both,
+it falls back by itself: the PPP link's network device is the kernel's own
+PPP unit over a pseudo-terminal (srv/tun.c), and NAT goes through the
+system's `iptables` (srv/nat.c).
 
 ## Facts about the box
 

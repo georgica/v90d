@@ -47,8 +47,8 @@ OBI_PART = 0x240000             # size of the /obi partition (mtd7)
 FIRST_SEG = 0x400
 KEEP_FROM_BASE = ("ffxav_mp.ko", "ffxav_led.ko", "ffxav_wdt.ko")
 OURS = ("obi", "kinit", "udhcpc.script", "obiline", "obinv", "v90d", "v90d.conf", "VERSION",
-        "kernel.xz", "kjump", "kjump.stub", "bootcount")
-EXEC = ("obi", "kinit", "udhcpc.script", "obiline", "obinv", "v90d", "kjump", "bootcount")
+        "kernel.xz", "kjump", "kjump.stub")
+EXEC = ("obi", "kinit", "udhcpc.script", "obiline", "obinv", "v90d", "kjump")
 
 
 def segments(fw):

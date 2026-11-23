@@ -64,6 +64,8 @@ static size_t payload(const char *p, uint8_t *out, size_t max)
     return b.out_pos;
 }
 
+int bootcount_main(int argc, char **argv);   /* ../bootcount.c */
+
 int main(int argc, char **argv)
 {
     static uint8_t pay[LOAD_MAX], stub[512], evict[2 << 20];
@@ -71,7 +73,8 @@ int main(int argc, char **argv)
     uint32_t ioc, br, *sw;
     int mem, km, led;
     volatile uint8_t *dst;
-    if (argc < 3) { fprintf(stderr, "usage: kjump PAYLOAD STUB [R1 [R2]]\n"); return 2; }
+    if (argc > 1 && !strcmp(argv[1], "--count")) return bootcount_main(argc - 1, argv + 1);
+    if (argc < 3) { fprintf(stderr, "usage: kjump PAYLOAD STUB [R1 [R2]] | kjump --count try|ok|show\n"); return 2; }
     np = payload(argv[1], pay, sizeof pay);
     ns = slurp(argv[2], stub, sizeof stub);
     /* the stub's literals: check them against this kernel, set r1, r2 */
