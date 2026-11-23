@@ -1,0 +1,83 @@
+# Every board's firmware, built from the tagged sources and attached to the
+# release when it is published:
+#   v90d-ht802fw.bin   the Grandstream HT802 and HT801 (all revisions the
+#                      loader knows: one image, BOARDS.md)
+#   v90d-obi200.fw     the Obihai OBi200, built from the community firmware
+#                      (fw/obi/getbase.sh fetches it, checked by SHA-256)
+#   SHA256SUMS
+# Everything the build fetches is pinned by SHA-256 (fw/setup.sh,
+# fw/obi/getbase.sh). The host test suites run first; a failure leaves the
+# release without files rather than with untested ones.
+# A release published without its files (a failed run) can be built again
+# from the Actions tab: "Run workflow" with the tag.
+name: release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "the release tag to build and attach to, e.g. v0.9.0"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  firmware:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Host packages
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq build-essential bc bison flex libssl-dev libelf-dev \
+            cpio xz-utils bzip2 lz4 python3 curl squashfs-tools
+
+      - name: Downloads (cached by their pins)
+        uses: actions/cache@v4
+        with:
+          path: |
+            fw/dl
+            toolchain/*.tar.bz2
+            fw/obi/dl
+          key: dl-${{ hashFiles('fw/setup.sh', 'fw/obi/getbase.sh') }}
+
+      - name: Set up (toolchain, Linux, busybox, OpenVPN, libv90modem)
+        run: sh fw/setup.sh
+
+      - name: Host tests
+        run: |
+          make -C fw/drv test
+          make -C cfg test
+          make -C srv test
+
+      - name: The version is the tag
+        run: |
+          v=$(cat fw/VERSION)
+          [ "v$v" = "$TAG" ] || { echo "fw/VERSION says $v, the tag is $TAG"; exit 1; }
+
+      - name: HT802 / HT801 image
+        run: |
+          make -C fw release
+          cp fw/build/release/v90d-ht802fw.bin .
+
+      - name: OBi200 image (and its tests)
+        run: |
+          BASE=$(sh fw/obi/getbase.sh)
+          make -C fw/obi test BASE="$BASE"
+          cp fw/obi/build/v90d-obi200.fw .
+
+      - name: Attach to the release
+        run: |
+          sha256sum v90d-ht802fw.bin v90d-obi200.fw > SHA256SUMS
+          cat SHA256SUMS
+          gh release upload "$TAG" v90d-ht802fw.bin v90d-obi200.fw SHA256SUMS --clobber
