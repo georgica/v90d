@@ -1303,7 +1303,7 @@ static void test_bbsdial6(void)
         { "2001::1", 0, 0 }, { "2001:2::1", 0, 0 }, { "2001:10::1", 0, 0 }, { "2001:20::1", 0, 0 },
         { "2001:4860:4860::8888", 0, 1 }, { "2606:4700:4700::1111", 0, 1 }, { "2a00:1450:4001::1", 0, 1 },
         { "3ffe::1", 0, 1 }, { "3fff:1000::1", 0, 1 }, { "3fff:0fff::1", 0, 0 },
-        { "2002:0808:0808::1", 0, 1 }, { "2002:0a00:0001::1", 0, 0 }, { "2002:7f00:0001::1", 0, 0 },   /* 6to4 by its IPv4 */
+        { "2002:0808:0808::1", 0, 1 }, { "2002:0a00:0001::1", 0, 0 }, { "2002:7f00:0001::1", 1, 0 },   /* 6to4 by its IPv4 */
         { "64:ff9b::8.8.8.8", 0, 1 }, { "64:ff9b::10.0.0.1", 0, 0 }, { "64:ff9b::192.168.1.1", 0, 0 },  /* NAT64 */
         { "64:ff9b:1::8.8.8.8", 0, 0 },                                         /* NAT64's local-use */
         { "4000::1", 0, 0 }, { "100::1", 0, 0 },                               /* not global unicast */
@@ -1318,6 +1318,48 @@ static void test_bbsdial6(void)
             printf("  %s: self %d public %d\n", t[i].a, bbsdial_is_self6(a), bbsdial_is_public6(a));
         CHECK_EQ_I(bbsdial_is_self6(a), t[i].self);
         CHECK_EQ_I(bbsdial_is_public6(a), t[i].pub);
+    }
+    /* addresses that carry the box's own IPv4 address are the box */
+    ip6(a, "64:ff9b::127.0.0.1"); CHECK_EQ_I(bbsdial_is_self6(a), 1);
+    ip6(a, "2002:7f00:1::1"); CHECK_EQ_I(bbsdial_is_self6(a), 1);
+    /* the network's own NAT64 prefix (PREF64): its addresses by the IPv4
+     * inside, at each length RFC 6052 has, whatever range it is in */
+    {
+        static const struct { const char *pre; int len; const char *lan, *net; } q[] = {
+            { "2a01:4f8:64::", 96, "2a01:4f8:64::192.168.1.1", "2a01:4f8:64::8.8.8.8" },
+            { "2a01:4f8:64:1::", 64, "2a01:4f8:64:1:c0:a801:100::", "2a01:4f8:64:1:8:808:800::" },
+            { "2a01:4f8:6400::", 56, "2a01:4f8:6400:c0:a8:101::", "2a01:4f8:6400:8:8:808::" },
+            { "2a01:4f8:6400::", 48, "2a01:4f8:6400:c0a8:1:1::", "2a01:4f8:6400:808:8:8::" },
+            { "2a01:4f8:6400::", 40, "2a01:4f8:64c0:a801:1:100::", "2a01:4f8:6408:808:8::" },
+            { "2a01:4f8::", 32, "2a01:4f8:c0a8:101::", "2a01:4f8:808:808::" },
+        };
+        uint8_t pf[16];
+        for (i = 0; i < sizeof q / sizeof q[0]; i++) {
+            ip6(pf, q[i].pre);
+            bbsdial_set_pref64(pf, q[i].len);
+            ip6(a, q[i].lan);
+            if (bbsdial_is_public6(a)) printf("  /%d: %s taken as public\n", q[i].len, q[i].lan);
+            CHECK_EQ_I(bbsdial_is_public6(a), 0);
+            ip6(a, q[i].net);
+            if (!bbsdial_is_public6(a)) printf("  /%d: %s not taken as public\n", q[i].len, q[i].net);
+            CHECK_EQ_I(bbsdial_is_public6(a), 1);
+        }
+        ip6(pf, "2a01:4f8:64::");
+        bbsdial_set_pref64(pf, 96);
+        ip6(a, "2a01:4f8:64::127.0.0.1"); CHECK_EQ_I(bbsdial_is_self6(a), 1);
+        /* an advertised prefix only narrows: one in unique local or
+         * documentation space makes nothing in it public */
+        ip6(pf, "fd00::"); bbsdial_set_pref64(pf, 96);
+        ip6(a, "fd00::8.8.8.8"); CHECK_EQ_I(bbsdial_is_public6(a), 0);
+        ip6(pf, "2001:db8:64::"); bbsdial_set_pref64(pf, 96);
+        ip6(a, "2001:db8:64::8.8.8.8"); CHECK_EQ_I(bbsdial_is_public6(a), 0);
+        ip6(pf, "::"); bbsdial_set_pref64(pf, 32);
+        ip6(a, "::808:808"); CHECK_EQ_I(bbsdial_is_public6(a), 0);
+        ip6(pf, "2a01:4f8:64::");
+        bbsdial_set_pref64(pf, 0);                          /* none: an ordinary global address again */
+        ip6(a, "2a01:4f8:64::192.168.1.1"); CHECK_EQ_I(bbsdial_is_public6(a), 1);
+        bbsdial_set_pref64(pf, 33);                         /* no such length: none */
+        CHECK_EQ_I(bbsdial_is_public6(a), 1);
     }
     /* a board on ::1: reached by its address when allowed (the tests'
      * listener), not when the box itself is not to be connected to */

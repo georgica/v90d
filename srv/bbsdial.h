@@ -48,5 +48,12 @@ int bbsdial_is_public(uint32_t a);
  * fc00::/7, NAT64's local 64:ff9b:1::/48, site-local, ...). */
 int bbsdial_is_self6(const uint8_t a[16]);
 int bbsdial_is_public6(const uint8_t a[16]);
+/* The network's own NAT64 prefix (PREF64, srv/ra6.h; len 32, 40, 48, 56,
+ * 64 or 96; 0 = none): its addresses carry an IPv4 address (RFC 6052) and
+ * are also judged by it: one that is public by its own range must carry a
+ * public IPv4 address too (a prefix only narrows: anyone on the LAN can
+ * advertise one). The box itself by it, as for 64:ff9b::/96.
+ * The daemon sets it when the router says; a connection's child has it. */
+void bbsdial_set_pref64(const uint8_t p[16], int len);
 
 #endif

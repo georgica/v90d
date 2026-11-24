@@ -56,7 +56,7 @@ static struct {
     uint32_t rebind_at[LIS_MAX];
     uint32_t up_set[DNSRELAY_UP_MAX];
     struct { int fam; uint8_t a[16]; } up[DNSRELAY_SRV_MAX];   /* IPv4 in a[0..4) */
-    int nup;
+    int nup, nown;              /* up[0..nown): the settings'; the rest the system's */
     uint32_t peer[DNSRELAY_PEERS_MAX]; int npeer;
     uint32_t resolv_at; int resolv_read;
     int urnd;                   /* /dev/urandom */
@@ -127,9 +127,10 @@ void dnsrelay_set(int on, const uint32_t listen[], int n_listen, const uint32_t 
 }
 
 /* The servers to ask: the settings' (IPv4), or with none set the system's
- * (DHCP's); then, either way, the system's IPv6 ones (the router's, ra6.h):
- * on a network with IPv6 alone the settings' are not reached, and a server
- * that cannot be sent to is passed over at once (ask). */
+ * (DHCP's and the router's, ra6.h). With the settings', the system's IPv6
+ * ones are kept as a fallback, asked only when none of the settings' can be
+ * sent to (a network with IPv6 alone): a router advertisement, which anyone
+ * on the LAN can send, does not stand beside servers the owner chose. */
 static void servers(uint32_t now)
 {
     int i, own = R.up_set[0] || R.up_set[1];
@@ -144,6 +145,7 @@ static void servers(uint32_t now)
         R.up[R.nup].a[0] = (uint8_t)(v >> 24); R.up[R.nup].a[1] = (uint8_t)(v >> 16); R.up[R.nup].a[2] = (uint8_t)(v >> 8); R.up[R.nup].a[3] = (uint8_t)v;
         R.nup++;
     }
+    R.nown = R.nup;
     f = fopen(getenv("V90D_RESOLV") ? getenv("V90D_RESOLV") : "/etc/resolv.conf", "r");   /* ra6.c writes the same */
     while (f && R.nup < DNSRELAY_SRV_MAX && fgets(l, sizeof l, f)) {
         char a[64];
@@ -184,14 +186,23 @@ static void bind_all(uint32_t now)
 /* ask the question's current server, on a new socket connected to it: a
  * random port of the kernel's, and nothing from any other address is
  * taken on it */
+static int ask_in(int k, int from, int n);
 static void ask(int k)
 {
-    int tried;
     close_fd(&R.p[k].fd);
-    /* from its current server on: the first that can be sent to (no route
-     * to one, an IPv4 server on a network with IPv6 alone: the next) */
-    for (tried = 0; tried < R.nup; tried++, R.p[k].srv++) {
-        int i = R.p[k].srv % R.nup;
+    /* the settings' servers if there are any, else the system's; the
+     * system's after the settings' only when none of those can be sent to */
+    if (R.nown) { if (ask_in(k, 0, R.nown) || R.nup == R.nown) return; ask_in(k, R.nown, R.nup - R.nown); }
+    else ask_in(k, 0, R.nup);
+}
+
+/* from the question's current server on, among up[from..from+n): the first
+ * that can be sent to (no route to one: the next); 1 = sent */
+static int ask_in(int k, int from, int n)
+{
+    int tried;
+    for (tried = 0; tried < n; tried++, R.p[k].srv++) {
+        int i = from + R.p[k].srv % n;
         struct sockaddr_in a4; struct sockaddr_in6 a6;
         const struct sockaddr *sa; socklen_t sl;
         if (R.up[i].fam == AF_INET) {
@@ -205,9 +216,10 @@ static void ask(int k)
         }
         R.p[k].fd = socket(R.up[i].fam, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
         if (R.p[k].fd < 0) continue;
-        if (connect(R.p[k].fd, sa, sl) == 0 && send(R.p[k].fd, R.p[k].q, R.p[k].qn, 0) >= 0) return;
+        if (connect(R.p[k].fd, sa, sl) == 0 && send(R.p[k].fd, R.p[k].q, R.p[k].qn, 0) >= 0) return 1;
         close_fd(&R.p[k].fd);
     }
+    return 0;
 }
 
 /* the answer's question is the one asked (the id alone is 16 bits) */

@@ -83,6 +83,37 @@ int bbsdial_is_public(uint32_t a)
 
 static uint32_t v4_at(const uint8_t *a, int at) { return (uint32_t)a[at] << 24 | (uint32_t)a[at + 1] << 16 | (uint32_t)a[at + 2] << 8 | a[at + 3]; }
 
+static uint8_t pref64[16];
+static int pref64_len;
+void bbsdial_set_pref64(const uint8_t p[16], int len)
+{
+    pref64_len = (len == 32 || len == 40 || len == 48 || len == 56 || len == 64 || len == 96) ? len : 0;
+    memset(pref64, 0, sizeof pref64);
+    if (pref64_len) memcpy(pref64, p, 16);
+}
+
+/* the IPv4 address in a, if a is in the NAT64 prefix p/len (RFC 6052 2.2:
+ * the octets past the prefix, octet 8 skipped) */
+static int in_nat64(const uint8_t a[16], const uint8_t *p, int len, uint32_t *v4)
+{
+    static const int at[6][4] = { { 4, 5, 6, 7 }, { 5, 6, 7, 9 }, { 6, 7, 9, 10 }, { 7, 9, 10, 11 }, { 9, 10, 11, 12 }, { 12, 13, 14, 15 } };
+    int k = len == 32 ? 0 : len == 40 ? 1 : len == 48 ? 2 : len == 56 ? 3 : len == 64 ? 4 : len == 96 ? 5 : -1;
+    if (k < 0 || memcmp(a, p, (size_t)len / 8) != 0) return 0;
+    *v4 = (uint32_t)a[at[k][0]] << 24 | (uint32_t)a[at[k][1]] << 16 | (uint32_t)a[at[k][2]] << 8 | a[at[k][3]];
+    return 1;
+}
+
+/* an address that carries an IPv4 one: NAT64's (well-known or the
+ * network's) and 6to4; 1 with it in *v4 */
+static int carries_v4(const uint8_t a[16], uint32_t *v4)
+{
+    static const uint8_t wk[12] = { 0, 0x64, 0xff, 0x9b, 0, 0, 0, 0, 0, 0, 0, 0 };
+    if (in_nat64(a, wk, 96, v4)) return 1;
+    if (pref64_len && in_nat64(a, pref64, pref64_len, v4)) return 1;
+    if (a[0] == 0x20 && a[1] == 0x02) { *v4 = v4_at(a, 2); return 1; }
+    return 0;
+}
+
 int bbsdial_is_self6(const uint8_t a[16])
 {
     static const uint8_t zero[12] = { 0 }, mapped[12] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff };
@@ -91,6 +122,10 @@ int bbsdial_is_self6(const uint8_t a[16])
     if (memcmp(a, mapped, 12) == 0) return bbsdial_is_self(v4_at(a, 12));
     if (a[0] == 0xfe && (a[1] & 0xc0) == 0x80) return 1;       /* link-local */
     if (a[0] == 0xff) return 1;                                 /* multicast */
+    {   /* NAT64 or 6to4 to the box itself */
+        uint32_t v4;
+        if (carries_v4(a, &v4) && bbsdial_is_self(v4)) return 1;
+    }
     u = socket(AF_INET6, SOCK_DGRAM, 0);                        /* one of ours? (as for IPv4) */
     if (u < 0) return 0;
     memset(&s, 0, sizeof s);
@@ -103,10 +138,13 @@ int bbsdial_is_self6(const uint8_t a[16])
 
 int bbsdial_is_public6(const uint8_t a[16])
 {
-    static const uint8_t nat64[12] = { 0, 0x64, 0xff, 0x9b, 0, 0, 0, 0, 0, 0, 0, 0 };
-    if (memcmp(a, nat64, 12) == 0) return bbsdial_is_public(v4_at(a, 12));    /* NAT64's well-known prefix */
+    static const uint8_t wk[12] = { 0, 0x64, 0xff, 0x9b, 0, 0, 0, 0, 0, 0, 0, 0 };
+    uint32_t v4;
+    /* the well-known NAT64 prefix and 6to4 (fixed, not anyone's say): by the
+     * IPv4 address they carry */
+    if (in_nat64(a, wk, 96, &v4)) return bbsdial_is_public(v4);
+    if (a[0] == 0x20 && a[1] == 0x02) return bbsdial_is_public(v4_at(a, 2));
     if ((a[0] & 0xe0) != 0x20) return 0;                        /* global unicast is 2000::/3 */
-    if (a[0] == 0x20 && a[1] == 0x02) return bbsdial_is_public(v4_at(a, 2));   /* 6to4 */
     if (a[0] == 0x20 && a[1] == 0x01) {
         if (a[2] == 0x0d && a[3] == 0xb8) return 0;             /* documentation */
         if (a[2] == 0 && a[3] == 0) return 0;                   /* Teredo */
@@ -115,6 +153,10 @@ int bbsdial_is_public6(const uint8_t a[16])
         if (a[2] == 0 && (a[3] & 0xf0) == 0x20) return 0;      /* ORCHIDv2 */
     }
     if (a[0] == 0x3f && a[1] == 0xff && (a[2] & 0xf0) == 0) return 0;  /* documentation 3fff::/20 */
+    /* the network's own NAT64 prefix comes in an advertisement anyone on the
+     * LAN can send: it may only make an address less public. One that has
+     * passed the above and is in it must also carry a public IPv4 address. */
+    if (pref64_len && in_nat64(a, pref64, pref64_len, &v4)) return bbsdial_is_public(v4);
     return 1;
 }
 

@@ -74,6 +74,7 @@
 #include "actsvc.h"
 #include "dnsrelay.h"
 #include "ra6.h"
+#include "bbsdial.h"
 #include "update.h"
 #include "netsvc.h"
 #include "vpn.h"
@@ -219,6 +220,7 @@ static void ra6_log(void)
         snprintf(p, sizeof p, "%s/%d", a, r->pref64_len);
     }
     logf_(CFG_LOG_INFO, "ipv6: the router gives name servers %s; NAT64 prefix %s", r->n_dns ? d : "none", p);
+    bbsdial_set_pref64(r->pref64, r->pref64_len);     /* its addresses are judged by their IPv4 */
 }
 
 static int menu_wanted(const cfg_t *c)

@@ -477,9 +477,10 @@ address as its only name server, and `srv/dnsrelay.c` answers there.
   trying addresses it cannot reach, issue #7. Every other standard query
   with one question goes to the servers.
 - **The servers**: `[network] dns1` and `dns2`, or with both empty those of
-  `/etc/resolv.conf` (DHCP), and then either way the IPv6 ones there (the
-  router's, 5h), read again every 5 s; a server that cannot be sent to (an
-  IPv4 one on a network with IPv6 alone) is passed over at once. A question without an
+  `/etc/resolv.conf` (DHCP and the router's, 5h), read again every 5 s; a
+  server that cannot be sent to is passed over at once, and with the
+  settings' set, the system's IPv6 ones are asked only when none of those
+  can be (5h). A question without an
   answer in 2 s goes to the other one, three tries in all.
 - **Against forged answers**: each question goes out with a fresh id from
   `/dev/urandom` on a socket of its own, connected to the server asked (a
@@ -508,17 +509,26 @@ as the OBi's script already did.
   `/etc/resolv.conf` points, or `V90D_RESOLV`) below a marker line, after
   DHCP's and up to the resolver's three, checked every 10 s (a DHCP
   renewal rewrites the file). The log says when they change.
-- **The callers' relay** (5g) asks the settings' servers and then the IPv6
-  ones from resolv.conf, passing over any it cannot send to: on a network
-  with IPv6 alone the callers' names still resolve.
+- **The callers' relay** (5g) asks the settings' servers; the IPv6 ones of
+  resolv.conf only when none of the settings' can be sent to (a network
+  with IPv6 alone), or when the settings name none. An advertisement is no
+  more authenticated than a DHCP offer: anyone on the LAN can send one, so
+  it never stands beside servers the owner chose.
 - **The box's own connections** to boards and services (`bbsdial.c`) look
   names up for both families and try each address in turn, each with its
   share of the time (at least 3 s). The IPv6 guards match the IPv4 ones:
   never the box itself (`::1`, link-local, multicast, its own addresses, an
   IPv4-mapped one by its IPv4), and for a list's entries only global
   unicast, without the documentation, Teredo, ORCHID and benchmarking
-  ranges, unique local addresses or NAT64's local-use prefix; 6to4 and
-  `64:ff9b::/96` by the IPv4 address inside.
+  ranges, unique local addresses or NAT64's local-use prefix. An address
+  that carries an IPv4 one is judged by it: 6to4 and `64:ff9b::/96` by it
+  alone. The network's own NAT64 prefix (PREF64, at the positions RFC 6052
+  gives for its length) only narrows: an address in it must pass the IPv6
+  rules and carry a public IPv4 address too, since a network-specific
+  prefix may be in global unicast and lead to private IPv4 addresses, and
+  anyone on the LAN can advertise one (a prefix in unique local space makes
+  nothing there public). The daemon hands it to `bbsdial_set_pref64()`;
+  each connection's child has it.
 - The OBi's `/obi` had no room for the bigger kernel: `v90d`, `obiline` and
   `obinv` are in `/usr/sbin` of the root file system, which both kernels
   start from.

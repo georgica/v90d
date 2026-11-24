@@ -1803,9 +1803,12 @@ int main(int argc, char **argv)
      * name server set (a stand-in on 127.0.0.1) and its answer comes back;
      * a AAAA question is answered by the box, with none, and never asked. */
     {
-        static char lanlog[300];
-        int dfd = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK, 0), asked = 0, asked_aaaa = 0, one = 1;
+        static char lanlog[300], rfile[300];
+        int dfd = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK, 0), asked = 0, asked_aaaa = 0, one = 1, asked6 = 0;
+        int dfd6 = socket(AF_INET6, SOCK_DGRAM | SOCK_NONBLOCK, 0);
         struct sockaddr_in da;
+        struct sockaddr_in6 da6;
+        FILE *rf;
         cfg_default(&c);
         strcpy(c.line_number, "5551234"); c.rings = 1; c.status_port = 8080;
         c.dns[0] = IP4(192, 0, 2, 53); c.dns[1] = 0;     /* the stand-in, on lo (a loopback address is no name server to the settings) */
@@ -1815,6 +1818,13 @@ int main(int argc, char **argv)
         setsockopt(dfd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
         memset(&da, 0, sizeof da); da.sin_family = AF_INET; da.sin_port = htons(53); da.sin_addr.s_addr = htonl(IP4(192, 0, 2, 53));
         CHECK(bind(dfd, (struct sockaddr *)(void *)&da, sizeof da) == 0);
+        /* a system name server (as a router's advertisement would put one in
+         * resolv.conf) that is there and answers: with the settings' own set
+         * and reachable it is never asked */
+        memset(&da6, 0, sizeof da6); da6.sin6_family = AF_INET6; da6.sin6_port = htons(53); da6.sin6_addr = in6addr_loopback;
+        CHECK(dfd6 >= 0 && bind(dfd6, (struct sockaddr *)(void *)&da6, sizeof da6) == 0);
+        snprintf(rfile, sizeof rfile, "%s/ns_dns.resolv", argv[2]);
+        rf = fopen(rfile, "w"); if (rf) { fputs("nameserver ::1\n", rf); fclose(rf); }
         CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
         snprintf(lanlog, sizeof lanlog, "%s/ns_dns.log", argv[2]);
         pid = fork();
@@ -1822,6 +1832,7 @@ int main(int argc, char **argv)
             int a = fcntl(sv[1], F_DUPFD, 20), lfd = open(lanlog, O_WRONLY | O_CREAT | O_TRUNC, 0644);
             dup2(a, 3); if (lfd >= 0) dup2(lfd, 2);
             for (i = 4; i < 64; i++) close(i);
+            setenv("V90D_RESOLV", rfile, 1);
             execl(argv[1], "v90d", "-c", conf, "-l", "fd:3", "-i", "lo", "-t", "ppp0", "-b", "", "-f", "", (char *)NULL);
             _exit(127);
         }
@@ -1861,6 +1872,7 @@ int main(int argc, char **argv)
                     if (t % BLK == 0) {                 /* the name server stand-in: A only, 192.0.2.7 */
                         uint8_t m[512]; struct sockaddr_in fa; socklen_t fl = sizeof fa;
                         ssize_t r = recvfrom(dfd, m, sizeof m, 0, (struct sockaddr *)(void *)&fa, &fl);
+                        {   uint8_t m6[512]; if (recv(dfd6, m6, sizeof m6, 0) > 0) asked6++; }
                         if (r > 12 + 5) {
                             size_t e = (size_t)r;
                             int mt = m[e - 3];
@@ -1912,9 +1924,35 @@ int main(int argc, char **argv)
                    got_a, got_none, asked, asked_aaaa);
             CHECK_EQ_I(asked, 1);
             CHECK_EQ_I(asked_aaaa, 0);
+            CHECK_EQ_I(asked6, 0);                  /* the system's IPv6 server: not beside the settings' */
+            {   /* the settings' server is there but does not answer: the relay
+                 * tries it again, and still never the system's */
+                uint8_t p[200]; size_t qn = 12, n; uint16_t ck; long t; int quiet = 0;
+                memset(p, 0, sizeof p);
+                p[28] = 0x43; p[29] = 0x43; p[30] = 0x01; p[33] = 1;
+                memcpy(p + 28 + qn, name, sizeof name); qn += sizeof name;
+                p[28 + qn++] = 0; p[28 + qn++] = 1; p[28 + qn++] = 0; p[28 + qn++] = 1;
+                n = 28 + qn;
+                p[0] = 0x45; p[2] = (uint8_t)(n >> 8); p[3] = (uint8_t)n; p[8] = 64; p[9] = 17;
+                put32(p + 12, C.ppp.my_ip); put32(p + 16, PPP_LOCAL);
+                ck = csum(p, 20); p[10] = (uint8_t)(ck >> 8); p[11] = (uint8_t)ck;
+                p[20] = 0x14; p[21] = 0xe9; p[23] = 53; p[24] = (uint8_t)((n - 20) >> 8); p[25] = (uint8_t)(n - 20);
+                (void)caller_send_ip(&C, p, n);
+                for (t = 0; t < 7L * FS && !dead; t++) {
+                    if (t % BLK == 0) {
+                        uint8_t m[512];
+                        if (recv(dfd, m, sizeof m, 0) > 0) quiet++;             /* heard, not answered */
+                        if (recv(dfd6, m, sizeof m, 0) > 0) asked6++;
+                    }
+                    step(0);
+                }
+                printf("  a settings' server that does not answer: asked %d time(s); the system's %d\n", quiet, asked6);
+                CHECK(quiet >= 2);                  /* tried again */
+                CHECK_EQ_I(asked6, 0);
+            }
         }
         hang_up();
-        close(dfd);
+        close(dfd); close(dfd6);
         quiet_exit = 1;
         kill(pid, SIGTERM);
         for (i = 0; i < 400 && !dead; i++) step(0);
