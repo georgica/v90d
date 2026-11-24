@@ -21,7 +21,9 @@ not work on it. Whether another route exists is under investigation. See
 3. Log in to the stock web page as `admin`.
 4. Advanced Settings, Upgrade and Provisioning, "Upload Firmware: Upload
    from local directory". Choose `v90d-ht802fw.bin`, press "Upload
-   Firmware".
+   Firmware". If the page answers at once with "Your firmware file is
+   invalid", the stock firmware is checking the file's name (the HT801's
+   1.0.65.3 does): rename the file to `ht802fw.bin` and choose it again.
 5. The page says the device is processing the firmware. Leave the power on.
    After two to three minutes the box restarts by itself.
 6. Open the same address again. The page is now "Nestaliga". Log in with
@@ -76,13 +78,17 @@ file from the releases page and uploading it yourself.
 - **The power went during the install or an upgrade.** The box starts the
   stock firmware (an incomplete copy is never started). Upload the file
   again.
-- **An HT801.** Two HT801 revisions (part numbers 9611003610A and
-  9610003611C) are accepted, from what their flash contents say, but no
-  unit has run v90d yet. On such a board a start only counts as good once
-  the box has also received something on its network port. So plug the
-  network cable in before the power: if the network does not work under
-  v90d, or no cable is in for three starts in a row, the box goes back to
-  the stock firmware by itself. Please open an issue and say how it went.
+- **An HT801.** Upload `v90d-ht801fw.bin`, renamed to `ht801fw.bin` first
+  (the stock page checks the filename before sending). Three part numbers
+  are accepted (9610003610A, 9611003610A and 9610003611C); V1.0A
+  (9610003610A) has been confirmed by its owner. On such a board a start
+  only counts as good once the box has also received something on its
+  network port. So plug the network cable in before the power: if the
+  network does not work under v90d, or no cable is in for three starts in
+  a row, the box goes back to the stock firmware by itself. Once v90d runs,
+  its Firmware page takes only the HT801 file (the HT802 one is refused),
+  and the update check fetches the HT801 file by itself. Please open an
+  issue and say how it went.
 - **A different board revision.** The loader knows boards by their part
   number. On any other it does not start v90d and gives the box back to the
   stock firmware, so trying is safe. See [BOARDS.md](BOARDS.md), and please

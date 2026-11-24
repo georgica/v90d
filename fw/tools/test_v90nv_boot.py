@@ -63,7 +63,7 @@ def stock_flash():
     return bytes(f)
 
 
-def loader_flash(our_set=0, sysimg=OLD_SYS):
+def loader_flash(our_set=0, sysimg=OLD_SYS, model='ht802', dev=None):
     """A stock unit whose stock system, running from the other set, has
     installed our firmware file."""
     f = bytearray(stock_flash())
@@ -72,8 +72,8 @@ def loader_flash(our_set=0, sysimg=OLD_SYS):
             a, b = R.PARTS[kind]
             n = R.SIZE[kind]
             f[a:a + n], f[b:b + n] = f[b:b + n], f[a:a + n]
-    c = G.parse(release(sysimg))[0]
-    return R.stock_upgrade(bytes(f), c, 1 - our_set, R.HT802)
+    c = G.parse(release(sysimg, model=model))[0]
+    return R.stock_upgrade(bytes(f), c, 1 - our_set, dev or R.HT802)
 
 
 def env_image(tries):
@@ -247,6 +247,7 @@ class Where(unittest.TestCase):
             self.assertEqual(w['image_name'], 'v90d ht802 0.1.0')
             self.assertEqual(w['stock'], 'AB'[1 - s] + ' good')
             self.assertEqual(w['board'], '9610003725A known')
+            self.assertEqual(w['model'], 'ht802')
             self.assertEqual(w['tried'], 'yes')
             self.assertEqual(w['unconfirmed'], '0')
             self.assertEqual(b.get(), loader_flash(s))  # looking writes nothing
@@ -487,7 +488,7 @@ class Upgrade(unittest.TestCase):
             'load address': system(2, 21000, load=0xC8800000),
             'too large': system(2, 0x300000 - 0x200 - 64 + 1),
             'stock firmware': stock_file,
-            'other model': release(NEW_SYS, model='ht801'),
+            'other model': release(NEW_SYS, model='ht814'),
             'other cpu': release(NEW_SYS, cpu='dvf9919'),
             'damaged file': bytes(broken),
             'half a file': release(NEW_SYS)[:9000],
@@ -507,11 +508,12 @@ class Upgrade(unittest.TestCase):
             self.assertEqual(b.get(), make())
 
     def test_one_port_board_is_known_but_not_tried(self):
-        for pn in (b'9611003610A\0', b'9610003611C\0'):
+        for pn in (b'9611003610A\0', b'9610003611C\0', b'9610003610A\0'):
             f = bytearray(loader_flash(0))
             f[0x4020:0x4020 + 12] = pn
             w = Box(self, bytes(f)).where()
             self.assertEqual(w['board'], pn[:-1].decode() + ' known')
+            self.assertEqual(w['model'], 'ht801')
             self.assertEqual(w['tried'], 'no')
 
     def test_refused_on_another_board(self):
@@ -524,6 +526,20 @@ class Upgrade(unittest.TestCase):
         self.assertEqual(b.get(), bytes(f))
         self.assertIn('not known', b.where()['board'])
         self.assertEqual(b.where()['tried'], 'no')
+
+    def test_model_is_enforced(self):
+        # an HT801 box takes only an HT801 image; an HT802 image is refused
+        f = bytearray(loader_flash(0))
+        f[0x4020:0x4020 + 12] = b'9611003610A\0'       # an HT801 part number
+        b = Box(self, bytes(f))
+        ht801 = system(5, 21000, name='v90d ht801 0.2.0')
+        ht802 = system(5, 21000, name='v90d ht802 0.2.0')
+        self.assertEqual(b.nv('check', b.file('x', ht801))[0], 0)     # right model
+        rc, out = b.nv('upgrade', b.file('x', ht802))                 # wrong model
+        self.assertEqual(rc, 1, out)
+        self.assertIn('ht801', out); self.assertIn('ht802', out)
+        self.assertEqual(b.get(), bytes(f))                          # nothing written
+        self.assertEqual(b.nv('upgrade', b.file('x', ht801))[0], 0)  # the HT801 image installs
 
     def test_refused_while_the_set_is_half_installed(self):
         # power was lost while the stock upgrade wrote our file: core is

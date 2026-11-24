@@ -18,7 +18,8 @@ stock as before.
 | HT802 | V2.5A | `9610003725A` | DSPG DVF9918 | 2 | 2 × Si3217x | **Tested** |
 | HT802 | V1.6A | `9610003716A` | DVF99 (same device tree) | 2 | 1 × Si3226x (Si32260, dual-channel) | **Confirmed by its owner** (issue #4) |
 | HT802 | other V2.x | not yet known | DVF9918 (expected) | 2 | 2 × Si3217x (expected) | **Expected, untested** |
-| HT801 | V1.0A | `9611003610A` | DVF99 (same device tree) | 1 | 1 × Si3217x (factory data) | **Accepted by the loader, untested** |
+| HT801 | V1.0A | `9610003610A` | DSPG DVF9918 | 1 | 1 × Si3217x (factory data) | **Confirmed by its owner** (a V.90 call) |
+| HT801 | V1.0A | `9611003610A` (a flash dump) | DVF99 (same device tree) | 1 | 1 × Si3217x (factory data) | **Accepted by the loader, untested** |
 | HT801 | V1.1C | `9610003611C` | DVF99 (same device tree) | 1 | 1 × Si3217x (factory data) | **Accepted by the loader, untested** |
 | HT801 | V2.x | not yet known | DVF9918 (expected) | 1 | 1 × Si3217x (expected) | **Expected, untested** |
 | HT802V2 | V2.0A | `9610009420A` | Rockchip RK3308H | 2 | Si32283 ProSLIC | **Rockchip; under investigation** |
@@ -36,8 +37,8 @@ no part in them. See "The Obihai OBi200" below.
   one unit on the community firmware; its facts are in `fw/obi/README.md`.
 - **Confirmed by its owner** — v90d has been installed on a real unit of
   this board by someone outside the project, who reported the network and
-  both phone ports working (battery, dial tone). No dial-up call through it
-  has been reported yet, and the unit is not here to measure. The loader
+  phone ports working (battery, dial tone); for the HT801 V1.0A, a V.90
+  dial-up call (PROGRESS.md). The unit is not here to measure. The loader
   still treats the board as untried (`LD_BOARDS_TRIED`): a start is
   confirmed only once the network has been heard.
 - **Expected, untested** — Grandstream ships one firmware for the HT801 and
@@ -317,6 +318,14 @@ the second port. On an HT801 the daemon then runs with one line and the web
 pages show one port. On the tested HT802 this was checked: both ports found,
 a call made through port 2.
 
+The HT801's stock upgrade page requires its own file (`v90d-ht801fw.bin`):
+the upgrader checks the part names, model key at offset 0x1A (`0xFD20`;
+the HT802's is `0xFD21`), and hardware bits (`ffff` vs. `7fff`). The
+system in it is the same kernel, named `v90d ht801 VERSION` instead of
+`v90d ht802 VERSION`; once v90d runs, its Firmware page writes only an image
+named for the box's own model. One unit reports `9610003610A` for a V1.0A, one
+digit from the dump's `9611003610A`; both are accepted.
+
 What is not known, and matters before anyone flashes one:
 
 1. **Ethernet.** The firmware does not name the PHY: the device tree says
@@ -336,6 +345,11 @@ What is not known, and matters before anyone flashes one:
    dual-channel Si3226x only. Another revision is refused cleanly (no battery
    voltage, a line in the log), and the port stays dead.
 3. **V2.x HT801 units** have a part number that is not in the list yet.
+
+Since then one V1.0A (`9610003610A`) has run v90d, installed from its
+stock page: its network came up and a V.90 call connected (PROGRESS.md),
+which settles point 1 for that unit. The V1.1C and the dump's
+`9611003610A` are still untried.
 
 Whoever can should make the first start on an HT801 from RAM
 (`fw/tools/ramboot.sh`, which writes nothing) with a serial console

@@ -1,7 +1,8 @@
 # Every board's firmware, built from the tagged sources and attached to the
 # release when it is published:
-#   v90d-ht802fw.bin   the Grandstream HT802 and HT801 (all revisions the
-#                      loader knows: one image, BOARDS.md)
+#   v90d-ht802fw.bin   the Grandstream HT802 (all revisions the loader knows)
+#   v90d-ht801fw.bin   the Grandstream HT801: the same system, named and keyed
+#                      for the HT801's stock upgrade page (BOARDS.md)
 #   v90d-obi200.fw     the Obihai OBi200, built from the community firmware
 #                      (fw/obi/getbase.sh fetches it, checked by SHA-256)
 #   SHA256SUMS
@@ -72,7 +73,7 @@ jobs:
       - name: HT802 / HT801 image
         run: |
           make -C fw release
-          cp fw/build/release/v90d-ht802fw.bin .
+          cp fw/build/release/v90d-ht802fw.bin fw/build/release/v90d-ht801fw.bin .
 
       - name: OBi200 image (and its tests)
         run: |
@@ -83,9 +84,9 @@ jobs:
       - name: Attach to the release
         if: env.TAG != ''
         run: |
-          sha256sum v90d-ht802fw.bin v90d-obi200.fw > SHA256SUMS
+          sha256sum v90d-ht802fw.bin v90d-ht801fw.bin v90d-obi200.fw > SHA256SUMS
           cat SHA256SUMS
-          gh release upload "$TAG" v90d-ht802fw.bin v90d-obi200.fw SHA256SUMS --clobber
+          gh release upload "$TAG" v90d-ht802fw.bin v90d-ht801fw.bin v90d-obi200.fw SHA256SUMS --clobber
 
       - name: Download links in the release notes
         if: env.TAG != ''
@@ -97,7 +98,8 @@ jobs:
           import re, sys
           u = sys.argv[1]
           sums = dict(reversed(l.split()) for l in open("SHA256SUMS") if l.strip())
-          rows = [("v90d-ht802fw.bin", "Grandstream HT802 (V2.5A, V1.6A) and HT801"),
+          rows = [("v90d-ht802fw.bin", "Grandstream HT802 (V2.5A, V1.6A)"),
+                  ("v90d-ht801fw.bin", "Grandstream HT801 (untested)"),
                   ("v90d-obi200.fw", "Obihai OBi200 on the community firmware (fw/obi/README.md)"),
                   ("SHA256SUMS", "the checksums")]
           block = ["<!-- downloads -->", "### Downloads", "", "| file | for | sha256 |", "|---|---|---|"]
