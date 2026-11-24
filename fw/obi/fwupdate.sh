@@ -9,7 +9,7 @@
 set -e
 ver="$1"
 repo="${V90D_REPO:-georgica/v90d}"
-obinv="${OBINV:-/obi/obinv}"
+obinv="${OBINV:-/usr/sbin/obinv}"
 case "$ver" in
     '' | *[!0-9.]*) echo "fwupdate: bad version '$ver'" >&2; exit 2 ;;
 esac

@@ -45,12 +45,11 @@ $(BUILD)/kernel.xz: $(BUILD)/oinit FORCE | $(BUILD)
 	$(MAKE) -C ../../srv v90d-obi
 FORCE:
 # Our files of /obi, as they go into the image
-files: $(BUILD)/obiline $(BUILD)/obinv $(BUILD)/kernel.xz ../../srv/build/v90d-obi obi kinit ../udhcpc.script ../v90d.conf ../VERSION ../bbsfetch.sh ../../lists/bbs.txt ../../lists/services.txt
+files: $(BUILD)/kernel.xz obi kinit ../udhcpc.script ../v90d.conf ../VERSION ../bbsfetch.sh ../../lists/bbs.txt ../../lists/services.txt
 	@rm -rf $(BUILD)/image && mkdir -p $(BUILD)/image
-	cp obi kinit ../udhcpc.script $(BUILD)/obiline $(BUILD)/obinv $(BUILD)/kernel.xz ../v90d.conf $(BUILD)/image/
+	cp obi kinit ../udhcpc.script $(BUILD)/kernel.xz ../v90d.conf $(BUILD)/image/
 	cp ramboot/build/kjump $(BUILD)/image/kjump
 	cp ramboot/build/stub.bin $(BUILD)/image/kjump.stub
-	cp ../../srv/build/v90d-obi $(BUILD)/image/v90d
 	cp ../VERSION $(BUILD)/image/VERSION
 	cp ../bbsfetch.sh $(BUILD)/image/bbsfetch.sh
 	cp ../../lists/bbs.txt $(BUILD)/image/bbs.txt
@@ -58,11 +57,13 @@ files: $(BUILD)/obiline $(BUILD)/obinv $(BUILD)/kernel.xz ../../srv/build/v90d-o
 # v90d's own root file system (mkrootfs.py), in place of the maker's: the
 # archive gateway, OpenVPN and the scripts the HT802 has in its /etc
 BUSYBOX = ../build/busybox-1.36.1
-ROOTFS_ADD = ../../arch/build/v90arch-arm:/usr/sbin/v90arch ../build/vpn/openvpn:/usr/sbin/openvpn \
+ROOTFS_ADD = ../../srv/build/v90d-obi:/usr/sbin/v90d $(BUILD)/obiline:/usr/sbin/obiline $(BUILD)/obinv:/usr/sbin/obinv \
+             ../../arch/build/v90arch-arm:/usr/sbin/v90arch ../build/vpn/openvpn:/usr/sbin/openvpn \
              ../updatecheck.sh:/etc/updatecheck.sh fwupdate.sh:/etc/fwupdate.sh ../dclease.script:/etc/dclease.script
 $(BUILD)/rootfs.sqsh: mkrootfs.py rootfs/etc/inittab rootfs/etc/init.d/rcS rootfs/etc/passwd rootfs/etc/group \
                       fwupdate.sh ../updatecheck.sh ../dclease.script \
-                      $(BUSYBOX)/busybox ../../arch/build/v90arch-arm ../build/vpn/openvpn FORCE
+                      $(BUSYBOX)/busybox ../../arch/build/v90arch-arm ../build/vpn/openvpn \
+                      ../../srv/build/v90d-obi $(BUILD)/obiline $(BUILD)/obinv FORCE
 	@test -n "$(BASE)" || { echo "make image BASE=your-OBi-firmware.fw"; exit 1; }
 	$(MAKE) -s -C $(BUSYBOX) busybox.links
 	python3 mkrootfs.py "$(BASE)" $@ --busybox $(BUSYBOX)/busybox $(addprefix --add ,$(ROOTFS_ADD))

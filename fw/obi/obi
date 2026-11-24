@@ -64,7 +64,7 @@ fi
 mkdir -p /scratch/v90d
 CONF=/scratch/v90d/v90d.conf
 [ -s $CONF ] || cp $D/v90d.conf $CONF
-if ! $D/v90d -c $CONF -p >/dev/null 2>&1; then
+if ! /usr/sbin/v90d -c $CONF -p >/dev/null 2>&1; then
     say "the saved settings are not understood by this firmware: factory settings for now"
     CONF=/tmp/v90d.conf
     cp $D/v90d.conf $CONF
@@ -95,7 +95,7 @@ elif [ ! -d /sys/class/net/$LAN ]; then
     swcfg -sw 0 5 9 0x28 >/dev/null 2>&1
     swcfg -sw 0 5 0xa 0xb0c8 >/dev/null 2>&1
 fi
-eval "$($D/v90d -c $CONF -p)" || LAN_MODE=dhcp
+eval "$(/usr/sbin/v90d -c $CONF -p)" || LAN_MODE=dhcp
 ifconfig lo 127.0.0.1 up
 ifconfig $LAN 0.0.0.0 allmulti up
 # the rescue address, as the HT802 has it: whatever the settings say and
@@ -127,16 +127,16 @@ if [ -n "$OWN" ]; then
     export OBINV_FLASH OBINV_FLASH_WR OBINV_FLASH_WR_AT
 fi
 # what the Firmware page shows about how this box keeps its firmware
-$D/obinv where > /tmp/v90d.where 2>/dev/null
+/usr/sbin/obinv where > /tmp/v90d.where 2>/dev/null
 
 # the line, then the daemon on it; each started again if it ever stops.
 # The Firmware page's flash tool is obinv (fw/obi/obinv.c).
-( while :; do $D/obiline -s /var/run/v90line 2>&1 | logger -t obiline; sleep 2; done ) &
+( while :; do /usr/sbin/obiline -s /var/run/v90line 2>&1 | logger -t obiline; sleep 2; done ) &
 sleep 2
 # The 1-800-BBS-DIAL list and the numbers of services: the ones in the
 # image, then Netstalgia's signed ones, fetched daily (fw/bbsfetch.sh); the
 # board details for the terminal menu's directory (none in the image).
-( while :; do $D/v90d -c $CONF -l seq:/var/run/v90line -i $LAN -t ppp0 -N $D/obinv \
+( while :; do /usr/sbin/v90d -c $CONF -l seq:/var/run/v90line -i $LAN -t ppp0 -N /usr/sbin/obinv \
     -V /scratch/v90d/vpn.ovpn -B $D/bbs.txt -b "sh $D/bbsfetch.sh" \
     -F $D/services.txt -f "sh $D/bbsfetch.sh http://api.netstalgia.online/v1/services.txt 'v90d-svc 1'" \
     -z "sh $D/bbsfetch.sh http://api.netstalgia.online/v1/bbsinfo.txt 'v90d-bbsinfo 1' 524288" \

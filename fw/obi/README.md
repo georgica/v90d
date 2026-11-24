@@ -111,6 +111,12 @@ Instead:
    through a flash partition that starts after U-Boot and the factory block.
 5. A minute after the daemon runs, `kinit` resets the count.
 
+`/obi` holds the start (`obi`, `kinit`, `kjump`), our kernel, the default
+settings and the lists. The programs, `v90d`, `obiline` and `obinv`, are in
+`/usr/sbin` of the root file system, which both kernels start from: `/obi`
+(2.25 MB) keeps its room for the kernel, which IPv6 made 112 KB bigger.
+`obinv` locks itself in memory before it writes, wherever it runs from.
+
 A start takes about 70 s from power on to a ready line. The kernel drivers
 (Ethernet and switch, SPI flash, watchdog, LEDs, GPIO, the SLIC and the audio
 DMA, which ours takes over from the maker's kernel as it runs) were
