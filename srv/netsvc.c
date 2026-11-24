@@ -116,12 +116,8 @@ static void dc_poll(uint32_t now_ms)
         dc_len = 0;
         dc_pid = fork();
         if (dc_pid == 0) {
-            struct sched_param sp;
-            memset(&sp, 0, sizeof sp);
-            (void)sched_setscheduler(0, SCHED_OTHER, &sp);
-            (void)munlockall();
             (void)fcntl(pp[1], F_SETFL, 0);                 /* the child writes without hurry */
-            if (dup2(pp[1], 1) < 0) _exit(126);
+            child_plain(-1, pp[1], 0);
             execl("/bin/sh", "sh", "-c", dc_cmd, (char *)NULL);
             _exit(127);
         }
@@ -163,10 +159,7 @@ static void dn_poll(uint32_t now_ms)
             snprintf(url, sizeof url, "https://" DCNOW_HOST "%s", dcnow_path(&dn[i].d));
             dn[i].pid = fork();
             if (dn[i].pid == 0) {
-                struct sched_param sp;
-                memset(&sp, 0, sizeof sp);
-                (void)sched_setscheduler(0, SCHED_OTHER, &sp);
-                (void)munlockall();
+                child_plain(-1, -1, 0);
                 if (dn_prog) execl(dn_prog, dn_prog, url, body, (char *)NULL);
                 else execlp("wget", "wget", "-q", "-T", "15", "-O", "/dev/null", "-U", DCNOW_AGENT, "--post-data", body, url, (char *)NULL);
                 _exit(127);
@@ -249,12 +242,8 @@ static void la_poll(uint32_t now_ms)
             la[i].len = 0;
             la[i].pid = fork();
             if (la[i].pid == 0) {
-                struct sched_param sp;
-                memset(&sp, 0, sizeof sp);
-                (void)sched_setscheduler(0, SCHED_OTHER, &sp);
-                (void)munlockall();
                 (void)fcntl(pp[1], F_SETFL, 0);
-                if (dup2(pp[1], 1) < 0) _exit(126);
+                child_plain(-1, pp[1], 0);
                 execl("/bin/sh", "sh", "-c", cmd, (char *)NULL);
                 _exit(127);
             }
@@ -268,13 +257,10 @@ static pid_t    up_pid; static uint32_t up_ip, up_next_ms; static int up_dirty =
 static void upnp_child(int add, uint32_t ip)
 {
     static uint8_t proto[NAT_OPEN_MAX]; static uint16_t lo[NAT_OPEN_MAX], hi[NAT_OPEN_MAX];
-    const nat_open *t; int n = dclist_ports(&t), i, r; struct sched_param sp; char a[16];
+    const nat_open *t; int n = dclist_ports(&t), i, r; char a[16];
     /* this child does not become another program: it must let go of the
      * daemon's lines, network devices and listening sockets itself */
-    for (i = 3; i < 1024; i++) (void)close(i);
-    memset(&sp, 0, sizeof sp);
-    (void)sched_setscheduler(0, SCHED_OTHER, &sp);
-    (void)munlockall();
+    child_plain(-1, -1, 1);
     for (i = 0; i < n; i++) { proto[i] = t[i].proto; lo[i] = t[i].lo; hi[i] = t[i].hi; }
     r = upnp_run(if_address(lan_if), add, ip, proto, lo, hi, n, "v90d: Dreamcast");
     if (r == -1) logf_(CFG_LOG_WARN, "game ports: no router answered the search (UPnP)");
@@ -381,10 +367,7 @@ static void vp_poll(uint32_t now_ms)
     (void)vp_remote(remote, sizeof remote);
     vp_pid = fork();
     if (vp_pid == 0) {
-        struct sched_param sp;
-        memset(&sp, 0, sizeof sp);
-        (void)sched_setscheduler(0, SCHED_OTHER, &sp);
-        (void)munlockall();
+        child_plain(-1, -1, 0);
         /* after the profile, so that it cannot say otherwise: our device,
          * no scripts, and the box's own traffic and name servers stay */
         /* Of what the server sends, no route is taken: a filter on their
@@ -441,10 +424,7 @@ static void arch_poll(uint32_t now_ms)
     arch_pid = fork();
     if (arch_pid == 0) {
         /* the child is an ordinary process: no real-time priority, no locked memory */
-        struct sched_param sp;
-        memset(&sp, 0, sizeof sp);
-        (void)sched_setscheduler(0, SCHED_OTHER, &sp);
-        (void)munlockall();
+        child_plain(-1, -1, 0);
         /* every name the gateway gives out is in this block: what is not
          * redirected to it (a secure site, mail) is refused at once instead
          * of waiting for an answer that cannot come */
@@ -486,10 +466,7 @@ static void nat_refresh(void)
     need = build_plan(&p);
     natr_pid = fork();
     if (natr_pid == 0) {
-        struct sched_param sp;
-        memset(&sp, 0, sizeof sp);
-        (void)sched_setscheduler(0, SCHED_OTHER, &sp);
-        (void)munlockall();
+        child_plain(-1, -1, 0);
         if (need) _exit(nat_apply(&p) < 0);
         _exit(nat_remove() < 0 && errno != ENOENT);
     }

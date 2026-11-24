@@ -22,19 +22,6 @@
 
 static const char *dial_prog = "";
 
-/* a child of the real-time daemon is an ordinary process with nothing of
- * ours open but what it is given as 0 and 1 */
-static void child_setup(int in, int out)
-{
-    struct sched_param sp; int fd;
-    memset(&sp, 0, sizeof sp);
-    (void)sched_setscheduler(0, SCHED_OTHER, &sp);
-    (void)munlockall();
-    if (in >= 0 && dup2(in, 0) < 0) _exit(126);
-    if (out >= 0 && dup2(out, 1) < 0) _exit(126);
-    for (fd = 3; fd < 1024; fd++) (void)close(fd);
-}
-
 /* ---- the list, a line at a time: a call's look-up is read a piece per
  * block, the loop has a telephone line to serve (the BBS page reads it
  * whole, and only while every line is on hook: bbslink_rows) ---- */
@@ -236,7 +223,7 @@ static void lf_poll(lister_t *L, uint32_t now_ms)
         (void)unlink(L->tmp);                           /* a new file of our own, never through a link */
         fd = open(L->tmp, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
         if (fd < 0) _exit(126);
-        child_setup(-1, fd);
+        child_plain(-1, fd, 1);
         _exit(fetch_child(L));
     }
     if (L->pid < 0) L->pid = 0;
@@ -344,9 +331,9 @@ static void bl_dial(int k)
     l->pid = fork();
     if (l->pid == 0) {
         (void)fcntl(sv[1], F_SETFL, 0);
-        child_setup(sv[1], sv[1]);
+        child_plain(sv[1], sv[1], 1);
         if (dial_prog[0]) execl(dial_prog, dial_prog, l->to.host, port, (char *)NULL);
-        _exit(bbsdial_run(l->to.host, port, 0, 15, l->policy));    /* child_setup made the pair our fd 0 */
+        _exit(bbsdial_run(l->to.host, port, 0, 15, l->policy));    /* child_plain made the pair our fd 0 */
     }
     close(sv[1]);
     if (l->pid < 0) { l->pid = 0; close(sv[0]); bl_bye(l, "The box cannot make the connection.\r\n"); return; }

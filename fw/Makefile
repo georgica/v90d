@@ -35,7 +35,7 @@ NV_FLAGS := -std=gnu99 -Wall -Wextra -Werror -Iloader -Idrv -I../cfg -DV90D_VERS
 .PHONY: all kernel uimage tools clean-kernel
 all: build/v90d.zimage
 
-NV_DEP := $(NV_SRC) tools/nv.h loader/boot.h drv/qspi.h ../cfg/page.h ../cfg/sbuf.h VERSION
+NV_DEP := $(NV_SRC) tools/nv.h tools/fwserve.h loader/boot.h drv/qspi.h ../cfg/page.h ../cfg/sbuf.h VERSION
 tools/v90nv.host: $(NV_DEP)
 	cc $(NV_FLAGS) -O2 -o $@ $(NV_SRC)
 tools/v90nv.arm: $(NV_DEP)

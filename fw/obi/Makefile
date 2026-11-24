@@ -14,8 +14,8 @@ $(BUILD):
 $(BUILD)/obiline: obiline.c compat26.c $(DRV)/pump.c $(DRV)/proslic.c $(DRV)/slic.c $(wildcard $(DRV)/*.h) | $(BUILD)
 	$(ARM_CC) $(CFLAGS) -static -pthread -I$(DRV) -o $@ obiline.c compat26.c $(DRV)/pump.c $(DRV)/proslic.c $(DRV)/slic.c
 	$(dir $(ARM_CC))arm-linux-strip $@
-$(BUILD)/obinv: obinv.c compat26.c ../../ppp/ppp_md5.c ../../cfg/page.h ../../cfg/sbuf.h | $(BUILD)
-	$(ARM_CC) $(CFLAGS) -static -I../../ppp -I../../cfg -o $@ obinv.c compat26.c ../../ppp/ppp_md5.c
+$(BUILD)/obinv: obinv.c compat26.c ../../ppp/ppp_md5.c ../../cfg/page.h ../../cfg/sbuf.h ../tools/fwserve.h | $(BUILD)
+	$(ARM_CC) $(CFLAGS) -static -I../../ppp -I../../cfg -I../tools -o $@ obinv.c compat26.c ../../ppp/ppp_md5.c
 	$(dir $(ARM_CC))arm-linux-strip $@
 $(BUILD)/oinit: $(BUILD)/%: %.c | $(BUILD)
 	$(ARM_CC) $(CFLAGS) -static -Os -o $@ $<
@@ -45,9 +45,9 @@ $(BUILD)/kernel.xz: $(BUILD)/oinit FORCE | $(BUILD)
 	$(MAKE) -C ../../srv v90d-obi
 FORCE:
 # Our files of /obi, as they go into the image
-files: $(BUILD)/obiline $(BUILD)/obinv $(BUILD)/kernel.xz ../../srv/build/v90d-obi obi kinit udhcpc.script ../v90d.conf ../VERSION ../bbsfetch.sh ../../lists/bbs.txt ../../lists/services.txt
+files: $(BUILD)/obiline $(BUILD)/obinv $(BUILD)/kernel.xz ../../srv/build/v90d-obi obi kinit ../udhcpc.script ../v90d.conf ../VERSION ../bbsfetch.sh ../../lists/bbs.txt ../../lists/services.txt
 	@rm -rf $(BUILD)/image && mkdir -p $(BUILD)/image
-	cp obi kinit udhcpc.script $(BUILD)/obiline $(BUILD)/obinv $(BUILD)/kernel.xz ../v90d.conf $(BUILD)/image/
+	cp obi kinit ../udhcpc.script $(BUILD)/obiline $(BUILD)/obinv $(BUILD)/kernel.xz ../v90d.conf $(BUILD)/image/
 	cp ramboot/build/kjump $(BUILD)/image/kjump
 	cp ramboot/build/stub.bin $(BUILD)/image/kjump.stub
 	cp ../../srv/build/v90d-obi $(BUILD)/image/v90d
@@ -74,8 +74,8 @@ image: files $(BUILD)/rootfs.sqsh mkobifw.py
 	python3 mkobifw.py --full --rootfs $(BUILD)/rootfs.sqsh --files $(BUILD)/image "$(BASE)" $(BUILD)/v90d-obi200.fw
 image-rootfs: image
 # obinv and the builder on the host, against a stand-in flash (needs BASE and the image)
-$(BUILD)/obinv.host: obinv.c ../../ppp/ppp_md5.c ../../cfg/page.h ../../cfg/sbuf.h | $(BUILD)
-	cc -std=gnu99 -O2 -Wall -Wextra -Werror -I../../ppp -I../../cfg -o $@ obinv.c ../../ppp/ppp_md5.c
+$(BUILD)/obinv.host: obinv.c ../../ppp/ppp_md5.c ../../cfg/page.h ../../cfg/sbuf.h ../tools/fwserve.h | $(BUILD)
+	cc -std=gnu99 -O2 -Wall -Wextra -Werror -I../../ppp -I../../cfg -I../tools -o $@ obinv.c ../../ppp/ppp_md5.c
 test: $(BUILD)/obinv.host image
 	python3 test_obinv.py $(BUILD)/obinv.host "$(BASE)" $(BUILD)/v90d-obi200.fw
 	python3 test_scripts.py $(BUILD)/rootfs.sqsh $(BUSYBOX)/busybox

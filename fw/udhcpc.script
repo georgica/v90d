@@ -1,21 +1,30 @@
 #!/bin/sh
-# Lease handler for busybox udhcpc. Ours; written for this image.
-# udhcpc sets: interface ip subnet router dns
+# Lease handler for BusyBox udhcpc, the same on the HT80x (fw/rcS) and the
+# OBi200 (fw/obi/obi). Ours; written for this image.
+# udhcpc sets: interface ip subnet broadcast router dns. The box's start
+# script may set:
+#   V90D_RESOLV  the resolv.conf that /etc/resolv.conf links to
+#                (default /tmp/resolv.conf)
+#   V90D_LED     a light's brightness file, lit while there is an address
+RESOLV=${V90D_RESOLV:-/tmp/resolv.conf}
+led() { if [ -n "$V90D_LED" ]; then echo $1 > "$V90D_LED" 2>/dev/null; fi; }
 case "$1" in
 deconfig)
     ifconfig "$interface" 0.0.0.0
-    echo 0 > /sys/class/leds/ht802:wan/brightness 2>/dev/null
+    led 0
     ;;
 bound|renew)
-    ifconfig "$interface" "$ip" netmask "${subnet:-255.255.255.0}"
+    ifconfig "$interface" "$ip" netmask "${subnet:-255.255.255.0}" ${broadcast:+broadcast $broadcast}
     if [ -n "$router" ]; then
         while route del default dev "$interface" 2>/dev/null; do :; done
         for r in $router; do route add default gw "$r" dev "$interface"; break; done
     fi
-    : > /tmp/resolv.conf
-    for d in $dns; do echo "nameserver $d" >> /tmp/resolv.conf; done
-    # the network light: we have an address
-    echo 1 > /sys/class/leds/ht802:wan/brightness 2>/dev/null
+    # whole or not at all: a name lookup never sees half a file
+    : > $RESOLV.new
+    for d in $dns; do echo "nameserver $d" >> $RESOLV.new; done
+    mv $RESOLV.new $RESOLV
+    logger -t udhcpc "$interface $ip" 2>/dev/null
+    led 1
     ;;
 esac
 exit 0

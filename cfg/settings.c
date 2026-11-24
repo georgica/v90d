@@ -546,9 +546,10 @@ int settings_render_page(const cfg_t *c, int page, int saved, const char *error,
         sb_puts(&b, "</section>\n");
     }
     if (page == SETTINGS_SERVICES) {
-        static const char tail[] = "</table></div>\n<p>... and 00000 more.</p><p>The list is Netstalgia's,"
-            " signed by it; the box fetches it once a day while the switch above is on. Your own numbers"
-            " come first when a number is on both.</p></section>\n" PAGE_END;
+#define SVC_NOTE "<p>The list is Netstalgia's, signed by it; the box fetches it once a day while the switch" \
+                 " above is on. Your own numbers come first when a number is on both.</p></section>\n"
+        /* room kept for what follows the rows */
+        static const char tail[] = "</table></div>\n<p>... and 00000 more.</p>" SVC_NOTE PAGE_END;
         sb_puts(&b, "<section><h2>Netstalgia's numbers</h2>\n");
         if (!c->svc_netstalgia) sb_puts(&b, "<p>Off: the box does not answer these.</p>\n");
         if (svc_rows && b.cap > b.len + sizeof tail + 128) {
@@ -559,8 +560,8 @@ int settings_render_page(const cfg_t *c, int page, int saved, const char *error,
             sb_puts(&b, "</table></div>\n");
             if (left) { sb_puts(&b, "<p>... and "); sb_u64(&b, (uint64_t)left); sb_puts(&b, " more.</p>"); }
         } else if (!svc_rows) sb_puts(&b, "<p>No list.</p>\n");
-        sb_puts(&b, "<p>The list is Netstalgia's, signed by it; the box fetches it once a day while the switch"
-                    " above is on. Your own numbers come first when a number is on both.</p></section>\n");
+        sb_puts(&b, SVC_NOTE);
+#undef SVC_NOTE
     }
     if (ON(SETTINGS_SYSTEM))
         sb_puts(&b, "<form method=\"post\" action=\"/restart\">\n"

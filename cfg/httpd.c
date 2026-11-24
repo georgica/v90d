@@ -349,6 +349,50 @@ static int same_origin(const hdr_t *origin, const hdr_t *host)
     return origin->len - i == host->len && ieq(origin->v + i, host->v, host->len);
 }
 
+/* a post with an Origin of another site (a form there, posting through the
+ * user's browser): answered 403 here, and 1 returned */
+static int cross_site(httpd_t *h, httpd_conn_t *c, const char *p, size_t n, uint32_t now)
+{
+    hdr_t og, host;
+    hdr_find(p, n, "origin", &og);
+    if (!og.count) return 0;
+    hdr_find(p, n, "host", &host);
+    if (same_origin(&og, &host)) return 0;
+    respond_text(h, c, 403, NULL, "This request comes from another site.", 0, now);
+    return 1;
+}
+
+#define FORM_TYPE "application/x-www-form-urlencoded"
+
+/* /ui.js is served from one answer buffer: it must fit (C99, no static assert) */
+typedef char page_js_fits[sizeof PAGE_JS - 1 <= HTTPD_BODY_MAX ? 1 : -1];
+
+/* the Content-Type value is the media type t (any case), alone or with parameters */
+static int media_is(const hdr_t *hd, const char *t)
+{
+    size_t l = strlen(t);
+    return hd->len >= l && ieq(hd->v, t, l) && (hd->len == l || hd->v[l] == ';' || is_blank(hd->v[l]));
+}
+
+/* the Content-Length of a post, at most max, into *cl: 1. Otherwise it
+ * answers (411 none, 400 not a plain number or twice, 413 too large) and
+ * returns 0. */
+static int body_length(httpd_t *h, httpd_conn_t *c, const char *p, size_t n, size_t max, size_t *cl, uint32_t now)
+{
+    hdr_t hd;
+    size_t i, v = 0;
+    hdr_find(p, n, "content-length", &hd);
+    if (hd.count == 0) { respond_text(h, c, 411, NULL, NULL, 0, now); return 0; }
+    for (i = 0; i < hd.len; i++) {
+        if (hd.v[i] < '0' || hd.v[i] > '9') break;
+        if (i < 9) v = v * 10u + (size_t)(hd.v[i] - '0');
+    }
+    if (hd.count > 1 || hd.len == 0 || i < hd.len) { respond_text(h, c, 400, NULL, NULL, 0, now); return 0; }
+    if (hd.len > 9 || v > max) { respond_text(h, c, 413, NULL, NULL, 0, now); return 0; }
+    *cl = v;
+    return 1;
+}
+
 /* ---- who may see the pages -------------------------------------------------- */
 
 #define SESSION_MS    (15u * 60u * 1000u)   /* a session ends this long after its last use */
@@ -686,43 +730,22 @@ static void settings_request(httpd_t *h, httpd_conn_t *c, size_t n, int method, 
 static void take_body(httpd_t *h, httpd_conn_t *c, size_t n, size_t max, int login, uint32_t now)
 {
     const char *p = c->rx;
-    hdr_t hd, host;
-    size_t cl = 0, have, i;
+    hdr_t hd;
+    size_t cl = 0, have;
 
     c->post_login = login;
     /* a form on some other site must not be able to post here through the
      * user's browser */
-    hdr_find(p, n, "origin", &hd);
-    if (hd.count) {
-        hdr_find(p, n, "host", &host);
-        if (!same_origin(&hd, &host)) {
-            respond_text(h, c, 403, NULL, "This request comes from another site.", 0, now);
-            return;
-        }
-    }
+    if (cross_site(h, c, p, n, now)) return;
     hdr_find(p, n, "transfer-encoding", &hd);
     if (hd.count) goto bad;
     hdr_find(p, n, "content-type", &hd);
     if (hd.count > 1) goto bad;
-    if (login == 2) {
-        if (hd.count == 0 || hd.len < 10 || !ieq(hd.v, "text/plain", 10) || (hd.len > 10 && hd.v[10] != ';' && !is_blank(hd.v[10]))) {
-            respond_text(h, c, 415, NULL, NULL, 0, now);
-            return;
-        }
-    } else
-    if (hd.count == 0 || hd.len < 33 || !ieq(hd.v, "application/x-www-form-urlencoded", 33) ||
-        (hd.len > 33 && hd.v[33] != ';' && !is_blank(hd.v[33]))) {
+    if (hd.count == 0 || !media_is(&hd, login == 2 ? "text/plain" : FORM_TYPE)) {
         respond_text(h, c, 415, NULL, NULL, 0, now);
         return;
     }
-    hdr_find(p, n, "content-length", &hd);
-    if (hd.count == 0) { respond_text(h, c, 411, NULL, NULL, 0, now); return; }
-    if (hd.count > 1 || hd.len == 0) goto bad;
-    for (i = 0; i < hd.len; i++) {
-        if (hd.v[i] < '0' || hd.v[i] > '9') goto bad;
-        if (i < 9) cl = cl * 10u + (size_t)(hd.v[i] - '0');
-    }
-    if (hd.len > 9 || cl > max) { respond_text(h, c, 413, NULL, NULL, 0, now); return; }
+    if (!body_length(h, c, p, n, max, &cl, now)) return;
 
     /* the part of the body that came with the head, then the rest */
     have = c->rx_len - n;
@@ -748,8 +771,8 @@ static void firmware_request(httpd_t *h, httpd_conn_t *c, size_t n, int method, 
     char *body = c->tx + HTTPD_HDR_RESERVE;
     char where[FIRMWARE_TEXT_MAX], state[FIRMWARE_TEXT_MAX], ctype[HTTPD_CTYPE_MAX + 1];
     int head_only = method == M_HEAD, a;
-    hdr_t hd, host;
-    size_t cl = 0, max, have, i;
+    hdr_t hd;
+    size_t cl = 0, max, have;
 
     if (method == M_OTHER || (sub == 0 && method == M_POST) || ((sub == 1 || sub == 3) && method != M_POST)) {
         respond_text(h, c, 405, (sub == 1 || sub == 3) ? "Allow: POST\r\n" : sub == 2 ? ALLOW_FORM : ALLOW_READ, NULL, head_only, now);
@@ -776,14 +799,7 @@ static void firmware_request(httpd_t *h, httpd_conn_t *c, size_t n, int method, 
     }
 
     /* a post: everything about it is checked here, its body is not ours */
-    hdr_find(p, n, "origin", &hd);
-    if (hd.count) {
-        hdr_find(p, n, "host", &host);
-        if (!same_origin(&hd, &host)) {
-            respond_text(h, c, 403, NULL, "This request comes from another site.", 0, now);
-            return;
-        }
-    }
+    if (cross_site(h, c, p, n, now)) return;
     if (sub == 3) {
         const char *why;
         if (!h->fw.install) { respond_text(h, c, 501, NULL, "This firmware cannot update itself.", 0, now); return; }
@@ -798,21 +814,13 @@ static void firmware_request(httpd_t *h, httpd_conn_t *c, size_t n, int method, 
     if (hd.count) goto bad;
     hdr_find(p, n, "content-type", &hd);
     if (hd.count > 1 || hd.len > HTTPD_CTYPE_MAX) goto bad;
-    if (sub == 2 && (hd.count == 0 || hd.len < 33 || !ieq(hd.v, "application/x-www-form-urlencoded", 33) ||
-                     (hd.len > 33 && hd.v[33] != ';' && !is_blank(hd.v[33])))) {
+    if (sub == 2 && (hd.count == 0 || !media_is(&hd, FORM_TYPE))) {
         respond_text(h, c, 415, NULL, NULL, 0, now);
         return;
     }
     memcpy(ctype, hd.v, hd.len); ctype[hd.len] = '\0';
-    hdr_find(p, n, "content-length", &hd);
-    if (hd.count == 0) { respond_text(h, c, 411, NULL, NULL, 0, now); return; }
-    if (hd.count > 1 || hd.len == 0) goto bad;
-    for (i = 0; i < hd.len; i++) {
-        if (hd.v[i] < '0' || hd.v[i] > '9') goto bad;
-        if (i < 9) cl = cl * 10u + (size_t)(hd.v[i] - '0');
-    }
     max = sub == 1 ? HTTPD_FW_UPLOAD_MAX : HTTPD_FW_STOCK_MAX;
-    if (hd.len > 9 || cl > max) { respond_text(h, c, 413, NULL, NULL, 0, now); return; }
+    if (!body_length(h, c, p, n, max, &cl, now)) return;
 
     have = c->rx_len - n;
     if (have > cl) have = cl;
@@ -895,7 +903,6 @@ static void handle(httpd_t *h, httpd_conn_t *c, size_t n, uint32_t now)
     }
     if (plen == 8 && memcmp(uri, "/restart", 8) == 0) {
         char *body = c->tx + HTTPD_HDR_RESERVE;
-        hdr_t og, host;
         sbuf_t s;
         int a;
 
@@ -906,14 +913,7 @@ static void handle(httpd_t *h, httpd_conn_t *c, size_t n, uint32_t now)
             respond_text(h, c, 403, NULL, BY_ADDRESS, 0, now);
             return;
         }
-        hdr_find(c->rx, n, "origin", &og);
-        if (og.count) {
-            hdr_find(c->rx, n, "host", &host);
-            if (!same_origin(&og, &host)) {
-                respond_text(h, c, 403, NULL, "This request comes from another site.", 0, now);
-                return;
-            }
-        }
+        if (cross_site(h, c, c->rx, n, now)) return;
         /* the owner of the server looks at restart_asked and does it, once
          * this answer is out; whatever body came with the post is not read */
         h->restart_asked = 1;

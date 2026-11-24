@@ -22,7 +22,7 @@ sys.path.insert(0, HERE)
 import mkobifw  # noqa: E402
 
 SCRIPTS = {"obi": os.path.join(HERE, "obi"), "kinit": os.path.join(HERE, "kinit"),
-           "udhcpc.script": os.path.join(HERE, "udhcpc.script"),
+           "udhcpc.script": os.path.join(HERE, "..", "udhcpc.script"),     # the HT80x's too
            "rcS": os.path.join(HERE, "rootfs", "etc", "init.d", "rcS"),
            "fwupdate.sh": os.path.join(HERE, "fwupdate.sh"),
            "updatecheck.sh": os.path.join(HERE, "..", "updatecheck.sh"),

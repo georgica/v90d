@@ -179,7 +179,7 @@ words of the command line reach init's environment; other words after
 | `obinv.c` | the Firmware page's flash tool on this box (the HT80x has fw/tools/v90nv) |
 | `compat26.c` | `rename` and `accept4` for Linux 2.6.30, older than our C library expects |
 | `mkobifw.py` | the firmware file builder; the file format is in its header |
-| `udhcpc.script` | the LAN address by DHCP |
+| `udhcpc.script` | the LAN address by DHCP (fw/udhcpc.script, the HT80x's) |
 
 The daemon itself is the same as on the HT80x (`make -C srv v90d-obi`), built
 with `compat26.c` and a 16 MiB Firmware page upload. Under our kernel it uses

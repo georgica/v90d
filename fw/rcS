@@ -101,7 +101,8 @@ if [ "$LAN_MODE" = static ]; then
 else
     # -b: go on in the background if no lease comes at once; the daemon
     # starts its status page when the address appears
-    udhcpc -i $LAN -b -s /etc/udhcpc.script -x hostname:v90d
+    # (the lease handler lights the network light while there is an address)
+    V90D_LED=/sys/class/leds/ht802:wan/brightness udhcpc -i $LAN -b -s /etc/udhcpc.script -x hostname:v90d
 fi
 
 # bring-up builds only (fw/mkinitramfs.sh debug): a root shell on the LAN

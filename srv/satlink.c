@@ -204,10 +204,8 @@ static void sl_stun_poll(uint32_t now_ms)
     if (pipe2(pp, O_CLOEXEC | O_NONBLOCK) < 0) return;
     stun_pid = fork();
     if (stun_pid == 0) {
-        struct sched_param sp; struct addrinfo hints, *res = NULL;
-        memset(&sp, 0, sizeof sp);
-        (void)sched_setscheduler(0, SCHED_OTHER, &sp);
-        (void)munlockall();
+        struct addrinfo hints, *res = NULL;
+        child_plain(-1, -1, 0);
         memset(&hints, 0, sizeof hints); hints.ai_family = AF_INET; hints.ai_socktype = SOCK_DGRAM;
         if (getaddrinfo(SATURN_STUN_HOST, NULL, &hints, &res) == 0 && res) {
             uint32_t ip = ntohl(((struct sockaddr_in *)(void *)res->ai_addr)->sin_addr.s_addr);
@@ -230,12 +228,8 @@ static void sl_query(int k, const char *action)
     l->q_len = 0; l->q_at = 0;
     l->q_pid = fork();
     if (l->q_pid == 0) {
-        struct sched_param sp;
-        memset(&sp, 0, sizeof sp);
-        (void)sched_setscheduler(0, SCHED_OTHER, &sp);
-        (void)munlockall();
         (void)fcntl(pp[1], F_SETFL, 0);
-        if (dup2(pp[1], 1) < 0) _exit(126);
+        child_plain(-1, pp[1], 0);
         if (mm_cmd[0])
             execl("/bin/sh", "sh", "-c", mm_cmd, "mm", action, l->game, ip12, portstr, (char *)NULL);
         snprintf(url, sizeof url, "https://%s%s?action=%s&gameID=%s&client_ip=%s&port=%s&key=%s",

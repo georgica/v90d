@@ -236,10 +236,7 @@ static const char *fw_take(void *ctx, int what, int fd, const char *early, size_
     snprintf(len, sizeof len, "%lu", (unsigned long)content_length);
     fw_pid = fork();
     if (fw_pid == 0) {
-        struct sched_param sp;
-        memset(&sp, 0, sizeof sp);
-        (void)sched_setscheduler(0, SCHED_OTHER, &sp);
-        (void)munlockall();
+        child_plain(-1, -1, 0);
         if (dup2(fd, 0) < 0 || dup2(fd, 1) < 0 || dup2(pfd[0], 3) < 0) _exit(127);
         for (i = 4; i < 256; i++) close(i);     /* the lines, the listener: none of its business */
         (void)setenv("V90NV_EARLY_FD", "3", 1);
@@ -272,10 +269,7 @@ static const char *fw_install(void *ctx)
     fw_pid = fork();
     if (fw_pid == 0) {
         const char *st = getenv("V90NV_STATE"); int fd;
-        struct sched_param sp;
-        memset(&sp, 0, sizeof sp);
-        (void)sched_setscheduler(0, SCHED_OTHER, &sp);
-        (void)munlockall();
+        child_plain(-1, -1, 0);
         if (!st) st = "/tmp/v90d.fwstate";
         fd = open(st, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0600);   /* the script's words land where the page reads them */
         if (fd >= 0) { (void)dup2(fd, 1); (void)dup2(fd, 2); }

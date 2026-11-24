@@ -77,6 +77,7 @@ int main(int argc, char **argv)
     if (argc < 3) { fprintf(stderr, "usage: kjump PAYLOAD STUB [R1 [R2]] | kjump --count try|ok|show\n"); return 2; }
     np = payload(argv[1], pay, sizeof pay);
     ns = slurp(argv[2], stub, sizeof stub);
+    if (ns < 7 * 4 || ns % 4) { fprintf(stderr, "%s: not a stub (its literals are its last 28 octets)\n", argv[2]); return 1; }
     /* the stub's literals: check them against this kernel, set r1, r2 */
     sw = (uint32_t *)(stub + ns - 7 * 4);
     if (sw[0] != sym("arm926_flush_kern_cache_all") || sw[1] != sym("setup_mm_for_reboot") ||

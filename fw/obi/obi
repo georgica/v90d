@@ -109,8 +109,9 @@ if [ "$LAN_MODE" = static ]; then
     for d in $LAN_DNS1 $LAN_DNS2; do echo "nameserver $d" >> /var/tmp/resolv.conf; done
     say "LAN $LAN_ADDRESS (fixed)"
 else
-    # (v90d's root file system's BusyBox, under both kernels; it has no -H)
-    udhcpc -i $LAN -b -s $D/udhcpc.script -x hostname:v90d -p /var/run/${LAN}udhcpc.pid >/dev/null 2>&1 ||
+    # (v90d's root file system's BusyBox, under both kernels; it has no -H).
+    # The lease handler is the HT80x's: /etc/resolv.conf here links to /var/tmp.
+    V90D_RESOLV=/var/tmp/resolv.conf udhcpc -i $LAN -b -s $D/udhcpc.script -x hostname:v90d -p /var/run/${LAN}udhcpc.pid >/dev/null 2>&1 ||
         say "cannot start udhcpc"
     say "LAN by DHCP"
 fi
