@@ -174,11 +174,12 @@ static void test_page(void)
                     "<option value=\"on\" selected>On: offer PCM upstream to V.92 callers</option></select>"));
     CHECK(has(html, "AT+PIG=0")); CHECK(!has(html, "simulation"));
     CHECK(has(html, "<input type=\"text\" name=\"user0\" size=\"24\" maxlength=\"63\" value=\"\">"));
-    CHECK(has(html, "<input type=\"text\" name=\"user15\" size=\"24\" maxlength=\"63\" value=\"\">"));
-    CHECK(!has(html, "name=\"user16\""));
+    /* no user yet: the one new row, with its Add button */
+    CHECK(!has(html, "name=\"user1\"") && !has(html, "name=\"user16\""));
+    CHECK(has(html, "<tr class=\"new\"><td>New</td>") && has(html, "<input type=\"submit\" value=\"Add\">"));
     CHECK(has(html, "<input type=\"password\" name=\"pass0\" size=\"24\" maxlength=\"64\""
                     " autocomplete=\"new-password\">"));
-    CHECK(has(html, "name=\"pass15\""));
+    CHECK(!has(html, "name=\"pass1\""));
     CHECK(has(html, "<input type=\"password\" name=\"admin_password\" size=\"24\" maxlength=\"64\""
                     " autocomplete=\"new-password\">"));
     CHECK(has(html, "<input type=\"checkbox\" name=\"admin_clear\" value=\"1\">"));
@@ -230,7 +231,7 @@ static void test_page(void)
             if (!e || (v && v < e)) with_value++;
             p++;
         }
-        CHECK_EQ_I(pw, CFG_MAX_USERS + 1);
+        CHECK_EQ_I(pw, 3 + 1 + 1);          /* the three users, the new row, the admin password */
         CHECK_EQ_I(with_value, 0);
     }
 
@@ -693,7 +694,7 @@ static void test_pages(void)
           { "name=\"mod_v90\"", "name=\"user0\"", "name=\"address\"", "name=\"admin_password\"" } },
         { SETTINGS_MODEM,   "/modem",   "Modem",   "name=\"mod_v90\"",
           { "name=\"number\"", "name=\"user0\"", "name=\"address\"", "name=\"admin_password\"" } },
-        { SETTINGS_USERS,   "/users",   "Users",   "name=\"user15\"",
+        { SETTINGS_USERS,   "/users",   "Users",   "name=\"user3\"",
           { "name=\"number\"", "name=\"mod_v90\"", "name=\"address\"", "name=\"admin_password\"" } },
         { SETTINGS_NETWORK, "/network", "Network", "name=\"gateway\"",
           { "name=\"number\"", "name=\"mod_v90\"", "name=\"user0\"", "name=\"admin_password\"" } },
@@ -922,6 +923,24 @@ static void test_users(void)
         CHECK_EQ_I(out.n_users, CFG_MAX_USERS);
         CHECK(strcmp(out.users[15].name, "u15") == 0 && strcmp(out.users[15].secret, "p15") == 0);
     }
+    /* the page: the users there are and one new row; Add fills it */
+    {
+        cfg_t c2, o2; int k;
+        base(&c2);
+        CHECK(settings_render_page(&c2, SETTINGS_USERS, 0, NULL, html, sizeof html) > 0);
+        CHECK(has(html, "name=\"user3\" size=\"24\" maxlength=\"63\" value=\"\">") && !has(html, "name=\"user4\""));
+        CHECK(has(html, "To add a user, fill in the last row and press Add."));
+        CHECK_EQ_I(apply(&c2, "user3=dave&pass3=d4ve", &o2), SETTINGS_OK);
+        CHECK_EQ_I(o2.n_users, 4); CHECK(strcmp(o2.users[3].name, "dave") == 0 && strcmp(o2.users[3].secret, "d4ve") == 0);
+        CHECK(settings_render_page(&o2, SETTINGS_USERS, 0, NULL, html, sizeof html) > 0);
+        CHECK(has(html, "value=\"dave\"") && has(html, "name=\"user4\" size=\"24\" maxlength=\"63\" value=\"\">"));
+        /* full: no new row, no Add */
+        c2.n_users = CFG_MAX_USERS;
+        for (k = 0; k < CFG_MAX_USERS; k++) { snprintf(c2.users[k].name, sizeof c2.users[k].name, "u%d", k); strcpy(c2.users[k].secret, "s"); }
+        CHECK(settings_render_page(&c2, SETTINGS_USERS, 0, NULL, html, sizeof html) > 0);
+        CHECK(has(html, "name=\"user15\" size=\"24\" maxlength=\"63\" value=\"u15\">") && !has(html, "name=\"user16\""));
+        CHECK(!has(html, "value=\"Add\"") && has(html, "as many as the box takes"));
+    }
 }
 
 static void test_invalid(void)
@@ -1071,7 +1090,7 @@ static void test_round_trip(void)
     cfg_default(&c);
     CHECK(settings_render_html(&c, 0, NULL, html, sizeof html) > 0);
     n = submit(html, body, sizeof body);
-    CHECK_EQ_I(n, 7 + 1 + 1 + 6 + 2 + 2 * CFG_MAX_USERS + 6 + 1 + 1 + 1 + 1 + 5 + 1 + 1 + 1 + 1);     /* service, v92, x2, k56, compression, encryption, the four Dreamcast switches, the Saturn one, update_check */
+    CHECK_EQ_I(n, 7 + 1 + 1 + 6 + 2 + 2 * 1 + 6 + 1 + 1 + 1 + 1 + 5 + 1 + 1 + 1 + 1);     /* no user: the new row only */     /* service, v92, x2, k56, compression, encryption, the four Dreamcast switches, the Saturn one, update_check */
     CHECK_EQ_I(apply(&c, body, &out), SETTINGS_OK);
     CHECK(memcmp(&c, &out, sizeof c) == 0);
 
@@ -1093,7 +1112,7 @@ static void test_round_trip(void)
     strcpy(c.users[1].name, "caf\xe9\x01");
     CHECK(settings_render_html(&c, 0, NULL, html, sizeof html) > 0);
     n = submit(html, body, sizeof body);
-    CHECK_EQ_I(n, 7 + 1 + 1 + 1 + 2 + 2 * CFG_MAX_USERS - 1 + 6 + 1 + 1 + 1 + 1 + 5 + 1 + 1 + 1 + 1);     /* + update_check, x2, k56, encryption */
+    CHECK_EQ_I(n, 7 + 1 + 1 + 1 + 2 + 2 * (3 + 1) - 1 + 6 + 1 + 1 + 1 + 1 + 5 + 1 + 1 + 1 + 1);     /* three users and the new row */     /* + update_check, x2, k56, encryption */
     CHECK_EQ_I(apply(&c, body, &out), SETTINGS_OK);
     CHECK(memcmp(&c, &out, sizeof c) == 0);
 
@@ -1220,10 +1239,10 @@ static void test_services_page(void)
     CHECK(settings_render_html(&c, 0, NULL, html, sizeof html) > 0);
     CHECK(!has(html, "snum0") && has(html, "<a href=\"/bbs\">Services</a>"));
     CHECK(settings_render_page(&c, SETTINGS_SERVICES, 0, NULL, html, sizeof html) > 0);
-    CHECK(has(html, "<nav class=\"s\"><a href=\"/bbs\">BBS</a><b>Numbers</b></nav>"));
+    CHECK(has(html, "<span class=\"d\"><a href=\"/bbs\">BBS</a><b>Numbers</b></span>"));
     settings_set_svc_rows(NULL);
     CHECK(settings_render_page(&c, SETTINGS_SERVICES, 0, NULL, html, sizeof html) > 0);
-    CHECK(has(html, "<b>Services</b>") && has(html, "name=\"snum15\"") && !has(html, "snum16"));
+    CHECK(has(html, "<a class=\"on\" href=\"/bbs\">Services</a>") && has(html, "name=\"snum15\"") && !has(html, "snum16"));
     CHECK(has(html, "<select name=\"netstalgia\"><option value=\"off\">Off") && has(html, "<option value=\"on\" selected>On"));
     CHECK(has(html, "No list."));
 

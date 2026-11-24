@@ -353,10 +353,13 @@ int settings_render_page(const cfg_t *c, int page, int saved, const char *error,
     sb_puts(&b, "</table>\n<div class=\"x\"><table>\n"
                 "<tr><th>#</th><th>User name</th><th>Password</th></tr>\n");
     n = c->n_users < 0 ? 0 : c->n_users > CFG_MAX_USERS ? CFG_MAX_USERS : c->n_users;
-    for (i = 0; i < CFG_MAX_USERS; i++) {
+    /* the users there are, then one empty row for a new one (none when full) */
+    for (i = 0; i < CFG_MAX_USERS && i <= n; i++) {
         const char *name = i < n ? c->users[i].name : "";
         size_t nl = len_of(name, sizeof c->users[i].name);
-        sb_puts(&b, "<tr><td>"); sb_u64(&b, (uint64_t)i + 1u); sb_puts(&b, "</td><td>");
+        sb_puts(&b, i < n ? "<tr><td>" : "<tr class=\"new\"><td>");
+        if (i < n) sb_u64(&b, (uint64_t)i + 1u); else sb_puts(&b, "New");
+        sb_puts(&b, "</td><td>");
         if (form_safe(name, nl)) {
             in_open(&b, "text", "user", i, 24, CFG_NAME_MAX);
             sb_puts(&b, " value=\""); sb_html(&b, name, nl, 1); sb_puts(&b, "\">");
@@ -366,11 +369,14 @@ int settings_render_page(const cfg_t *c, int page, int saved, const char *error,
         }
         sb_puts(&b, "</td><td>");
         in_password(&b, "pass", i);
+        if (i == n) sb_puts(&b, " <input type=\"submit\" value=\"Add\">");
         sb_puts(&b, "</td></tr>\n");
     }
-    sb_puts(&b, "</table></div>\n"
-                "<p>A row without a name is not used. Passwords are not shown: leave the field"
-                " empty to keep the one a user has, type a new one to change it.</p></section>\n");
+    sb_puts(&b, "</table></div>\n<p>");
+    if (n >= CFG_MAX_USERS) sb_puts(&b, "There are 16 users, as many as the box takes. ");
+    else sb_puts(&b, "To add a user, fill in the last row and press Add. ");
+    sb_puts(&b, "To remove one, empty its name and save. Passwords are not shown: leave the"
+                " field empty to keep the one a user has, type a new one to change it.</p></section>\n");
 
     }
     if (ON(SETTINGS_NETWORK)) {
