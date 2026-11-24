@@ -99,6 +99,10 @@ fi
 eval "$($D/v90d -c $CONF -p)" || LAN_MODE=dhcp
 ifconfig lo 127.0.0.1 up
 ifconfig $LAN 0.0.0.0 allmulti up
+# the rescue address, as the HT802 has it: whatever the settings say and
+# whether DHCP answers or not, the box's pages are also at 169.254.90.1 (a
+# computer on the same cable with an address in 169.254.0.0/16 reaches it)
+ifconfig $LAN:9 169.254.90.1 netmask 255.255.0.0 2>/dev/null || say "no rescue address"
 if [ "$LAN_MODE" = static ]; then
     ifconfig $LAN "$LAN_ADDRESS" netmask "$LAN_NETMASK"
     [ -n "$LAN_GATEWAY" ] && route add default gw "$LAN_GATEWAY" dev $LAN
@@ -109,7 +113,7 @@ else
     # -x hostname: is today's BusyBox (v90d's root file system); the maker's
     # older one knows only -H, and refuses the other
     udhcpc -i $LAN -b -s $D/udhcpc.script -x hostname:v90d -p /var/run/${LAN}udhcpc.pid >/dev/null 2>&1 ||
-        udhcpc -i $LAN -b -s $D/udhcpc.script -H v90d -p /var/run/${LAN}udhcpc.pid >/dev/null 2>&1 ||
+        udhcpc -i $LAN -b -s $D/udhcpc.script -H v90d -p /var/run/${LAN}udhcpc.pid >/dev/null 2>&1 ||   # the maker's BusyBox only
         say "cannot start udhcpc"
     say "LAN by DHCP"
 fi

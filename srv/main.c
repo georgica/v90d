@@ -719,16 +719,19 @@ int main(int argc, char **argv)
                     if (t > 1600000000 && S[i].tel.state == TEL_ONHOOK) srv_set_clock(&S[i], (uint32_t)t);
                 if (live.status_listen == CFG_LISTEN_LAN) {
                     uint32_t a = if_address(lan_if);
-                    if (a != listen_addr || (a && H.listen_fd < 0)) {
+                    if (a != listen_addr || H.listen_fd < 0) {
                         char b[16];
-                        httpd_close(&H); listen_addr = 0;
+                        httpd_close(&H); listen_addr = a;
                         /* on every address of the LAN interface where the system lets us
-                         * tie the socket to it (so also on the image's rescue address),
-                         * else on its address */
-                        if (a && (httpd_listen(&H, 0, (uint16_t)live.status_port, lan_if) == 0 ||
-                                  httpd_listen(&H, a, (uint16_t)live.status_port, lan_if) == 0)) {
-                            listen_addr = a; listen_warned = 0;
-                            logf_(CFG_LOG_INFO, "status and settings on http://%s:%d/", ip_str(a, b), live.status_port);
+                         * tie the socket to it, so also on the image's rescue address, and
+                         * so even while the interface has no address of its own (DHCP has
+                         * not answered, or cannot): the rescue address is the way in then.
+                         * Where the socket cannot be tied, on the interface's address. */
+                        if (httpd_listen(&H, 0, (uint16_t)live.status_port, lan_if) == 0 ||
+                            (a && httpd_listen(&H, a, (uint16_t)live.status_port, lan_if) == 0)) {
+                            listen_warned = 0;
+                            if (a) logf_(CFG_LOG_INFO, "status and settings on http://%s:%d/", ip_str(a, b), live.status_port);
+                            else logf_(CFG_LOG_INFO, "status and settings on %s (no address yet; the rescue address answers)", lan_if);
                         } else if (a && !listen_warned) {
                             listen_warned = 1;
                             logf_(CFG_LOG_WARN, "cannot listen on %s:%d: %s", ip_str(a, b), live.status_port, strerror(errno));

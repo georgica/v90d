@@ -75,5 +75,6 @@ $(BUILD)/obinv.host: obinv.c ../../ppp/ppp_md5.c ../../cfg/page.h ../../cfg/sbuf
 	cc -std=gnu99 -O2 -Wall -Wextra -Werror -I../../ppp -I../../cfg -o $@ obinv.c ../../ppp/ppp_md5.c
 test: $(BUILD)/obinv.host image image-rootfs
 	python3 test_obinv.py $(BUILD)/obinv.host "$(BASE)" $(BUILD)/v90d-obi200.fw $(BUILD)/v90d-obi200-rootfs.fw
+	python3 test_scripts.py $(BUILD)/rootfs.sqsh $(BUSYBOX)/busybox
 clean:
 	rm -rf $(BUILD)

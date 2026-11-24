@@ -129,6 +129,14 @@ mounts it as before (oinit); the maker's kernel boots it from the flash and
 runs `rcS`, which makes `/dev` from `/sys` (this BusyBox's `mdev -s` names
 nodes by number on 2.6.30) and starts `/obi/obi`.
 
+Two nets against a box that starts but cannot be reached: `make test` runs
+`test_scripts.py`, which checks every command the start scripts run against
+the programs of the image, and runs the ones whose options differ between
+BusyBox versions with the scripts' own options under qemu-arm; and the box
+always answers on the rescue address 169.254.90.1 (as the HT802 does), also
+when DHCP gives it nothing: the daemon listens on the LAN port itself, not
+only once it has an address.
+
 It has run on a unit. Every start goes through this file system, so a
 mistake in it is not caught by the boot's checksum test: the box starts, but
 may be unreachable. Keep a 3.3 V serial adapter at hand when trying a change.
