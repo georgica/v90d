@@ -87,6 +87,7 @@ typedef struct {
     char      dialed[TEL_NUMBER_MAX + 1];
     int       ndialed;
     int       overflow;         /* more digits than fit */
+    int       match;            /* dialed_is() of the digits so far, worked out once per digit */
     int       want_hangup;      /* TEL_ANSWERED: the owner should end the call in an
                                    orderly way and then call tel_call_ended(); `end`
                                    says why (limit or idle) */

@@ -207,7 +207,11 @@ static void digit(tel_t *t, char k)
     if (want == 0 && k == '#' && t->ndialed > 0) { accept_number(t); return; }
     if (t->ndialed >= TEL_NUMBER_MAX) { t->overflow = 1; return; }
     t->dialed[t->ndialed++] = k; t->dialed[t->ndialed] = 0;
-    if (want && dialed_is(t) == 2) accept_number(t);
+    /* once per digit: the answer changes with nothing else while dialling
+     * (the settings are taken on hook), and the owner's question (cfg.more)
+     * may look through a long list */
+    t->match = want ? dialed_is(t) : 0;
+    if (t->match == 2) accept_number(t);
 }
 
 static void hook_logic(tel_t *t, int raw)
@@ -219,7 +223,7 @@ static void hook_logic(tel_t *t, int raw)
         if (t->hook_n >= MS(OFFHOOK_MS)) {
             t->hook = 1; t->hook_n = 0;
             t->calls++;
-            t->ndialed = 0; t->dialed[0] = 0; t->overflow = 0;
+            t->ndialed = 0; t->dialed[0] = 0; t->overflow = 0; t->match = 0;
             t->pulses = 0; t->since_make = 0; t->idle = 0;
             t->end = TEL_END_NONE; t->want_hangup = 0;
             t->answered_this = t->was_busy = t->was_wrong = 0;
@@ -309,7 +313,7 @@ int16_t tel_tick(tel_t *t, int offhook, int16_t rx)
         break;
     case TEL_DIALING: {
         size_t want = strlen(t->cfg.number);
-        int wrong = want && (t->overflow || !dialed_is(t));
+        int wrong = want && (t->overflow || !t->match);
         t->idle++;
         if (t->pulses) t->idle = 0;
         if (want == 0) { if (t->idle >= MS(ANY_WAIT_MS)) accept_number(t); }

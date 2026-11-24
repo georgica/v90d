@@ -280,6 +280,35 @@ static void test_wrong_number(void)
     CHECK(tone_amp(R.cap, R.ncap, 480) > 600);
 }
 
+/* numbers the owner knows (tel_cfg.more): asked once per digit, never per sample */
+static int more_calls;
+static int more_cb(void *ctx, const char *d)
+{
+    (void)ctx; more_calls++;
+    return strcmp(d, "776") == 0 ? 2 : strncmp("776", d, strlen(d)) == 0 ? 1 : 0;
+}
+static void test_more(void)
+{
+    tel_cfg c = base_cfg();
+    c.more = more_cb; c.more_ctx = NULL;
+    rig_init(&R, &c);
+    R.hook = 1; run(&R, 300);
+    more_calls = 0;
+    dial(&R, "77");
+    run(&R, 2000);                                  /* two seconds of samples while it waits */
+    CHECK_EQ_I(R.t.state, TEL_DIALING);
+    CHECK_EQ_I(more_calls, 2);
+    dial(&R, "6");
+    CHECK_EQ_I(R.t.state, TEL_CONNECTING);
+    CHECK_EQ_I(more_calls, 3);
+    R.hook = 0; run(&R, 600);
+    /* a digit it does not begin: wrong, as for any number */
+    R.hook = 1; run(&R, 300);
+    dial(&R, "70");
+    CHECK(wait_state(&R, TEL_INTERCEPT, 4000) >= 0);
+    R.hook = 0; run(&R, 600);
+}
+
 /* numbers that answer beside the port's own (tel_cfg.also) */
 static void test_also(void)
 {
@@ -561,6 +590,7 @@ static void test_dtmf_receiver(void)
 
 int main(void)
 {
+    test_more();
     test_dtmf_receiver();
     test_dialtone();
     test_dtmf_call();
