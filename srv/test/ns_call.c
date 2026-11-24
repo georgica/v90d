@@ -1890,6 +1890,22 @@ int main(int argc, char **argv)
                     }
                 }
             }
+            {   /* a question that is not a caller's (here: from the box's own address,
+                 * as one from the LAN would be): no answer, and nobody asked */
+                int u = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK, 0), got = 0, k2;
+                struct sockaddr_in ua; uint8_t q[64] = { 0x22, 0x22, 1, 0, 0, 1 }, x[512];
+                memcpy(q + 12, name, sizeof name); q[12 + sizeof name + 1] = 1; q[12 + sizeof name + 3] = 1;
+                memset(&ua, 0, sizeof ua); ua.sin_family = AF_INET; ua.sin_port = htons(53); ua.sin_addr.s_addr = htonl(PPP_LOCAL);
+                CHECK((int)sendto(u, q, 12 + sizeof name + 4, 0, (struct sockaddr *)(void *)&ua, sizeof ua) > 0);
+                for (k2 = 0; k2 < 30 && !got; k2++) {
+                    uint8_t mm[512]; struct sockaddr_in fa; socklen_t fl = sizeof fa;
+                    run_ms(100); usleep(20000);
+                    if (recv(u, x, sizeof x, 0) > 0) got = 1;
+                    if (recvfrom(dfd, mm, sizeof mm, 0, (struct sockaddr *)(void *)&fa, &fl) > 0) asked++;
+                }
+                CHECK(!got);
+                close(u);
+            }
             printf("  relay: A answered %d, AAAA answered with none %d; the name server was asked %d time(s), %d for AAAA\n",
                    got_a, got_none, asked, asked_aaaa);
             CHECK_EQ_I(asked, 1);

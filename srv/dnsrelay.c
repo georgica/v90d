@@ -54,6 +54,7 @@ static struct {
     int fd[LIS_MAX];
     uint32_t rebind_at[LIS_MAX];
     uint32_t up_set[DNSRELAY_UP_MAX], up[DNSRELAY_UP_MAX];
+    uint32_t peer[DNSRELAY_PEERS_MAX]; int npeer;
     uint32_t resolv_at; int resolv_read;
     int urnd;                   /* /dev/urandom */
     uint8_t pool[128]; size_t pool_n;
@@ -99,10 +100,13 @@ static uint16_t next_id(void)
 /* a question is over: answered, given up, or giving way */
 static void drop(int k) { close_fd(&R.p[k].fd); R.p[k].used = 0; }
 
-void dnsrelay_set(int on, const uint32_t listen[], int n_listen, const uint32_t up[DNSRELAY_UP_MAX])
+void dnsrelay_set(int on, const uint32_t listen[], int n_listen, const uint32_t peers[], int n_peers,
+                  const uint32_t up[DNSRELAY_UP_MAX])
 {
     int i, j;
     init_once();
+    R.npeer = 0;
+    for (i = 0; i < n_peers && R.npeer < DNSRELAY_PEERS_MAX; i++) if (peers[i]) R.peer[R.npeer++] = peers[i];
     R.on = on;
     if (n_listen > LIS_MAX) n_listen = LIS_MAX;
     R.nlis = 0;
@@ -207,6 +211,8 @@ static void from_caller(int li, uint32_t now)
         ssize_t r = recvfrom(R.fd[li], m, sizeof m, 0, (struct sockaddr *)(void *)&c, &cl);
         int t, k, oldest = 0;
         if (r <= 0) return;
+        for (k = 0; k < R.npeer && R.peer[k] != ntohl(c.sin_addr.s_addr); k++) ;
+        if (k == R.npeer) continue;             /* not a caller: the LAN gets no name server here */
         t = dnsrelay_qtype(m, (size_t)r);
         if (t < 0) continue;
         if (t == DNS_T_AAAA) {                  /* the caller has no IPv6: none */

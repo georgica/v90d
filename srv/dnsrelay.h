@@ -17,9 +17,13 @@
 #define DNSRELAY_TRIES    3
 
 /* the relay's settings: on, the addresses it answers on (each port's PPP
- * address; 0 = none), and the servers it asks (0 = none: those of
+ * address; 0 = none), the callers it answers (each port's peer address:
+ * a question from any other address is dropped, so the box is no name
+ * server for the LAN), and the servers it asks (0 = none: those of
  * /etc/resolv.conf then) */
-void dnsrelay_set(int on, const uint32_t listen[], int n_listen, const uint32_t up[DNSRELAY_UP_MAX]);
+#define DNSRELAY_PEERS_MAX 4
+void dnsrelay_set(int on, const uint32_t listen[], int n_listen, const uint32_t peers[], int n_peers,
+                  const uint32_t up[DNSRELAY_UP_MAX]);
 /* every block */
 void dnsrelay_poll(uint32_t now_ms);
 
