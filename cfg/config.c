@@ -288,7 +288,8 @@ int cfg_svc_number_taken(const char *z)
     size_t n = strlen(z);
     if (n == 11 && z[0] == '1') { z++; n--; }
     if (n != 10 || !all_digits(z, n)) return 0;
-    return strcmp(z, "8002273425") == 0 || memcmp(z, "227", 3) == 0;
+    /* the BBS numbers, and the time service's (srv/srv.h, SRV_ACTS) */
+    return strcmp(z, "8002273425") == 0 || memcmp(z, "227", 3) == 0 || strcmp(z, "3034944774") == 0;
 }
 
 /* the [modem] and [line] fields of *c; o = 0, or K2_OFF when they hold
@@ -427,7 +428,7 @@ static int validate(const cfg_t *c, char *msg, int *k1, int *k2)
         if (strcmp(back.name, e->name) != 0)
             return kerr(msg, K_SVC, "%s: the name has blanks at an end or a tab", safe(e->number, sn));
         if (cfg_svc_number_taken(e->number))
-            return kerr(msg, K_SVC, "%s is a number the box answers itself (the BBS numbers)", safe(e->number, sn));
+            return kerr(msg, K_SVC, "%s is a number the box answers itself (the BBS numbers, the time service)", safe(e->number, sn));
         for (j = 0; j < i; j++)
             if (cfg_svc_number_match(c->services[j].number, e->number))
                 return kerr(msg, K_SVC, "%s is listed twice", safe(e->number, sn));

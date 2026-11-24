@@ -129,6 +129,7 @@ const char *termsvc_where(int k)
     if (kind == SRV_LINK_MENU) return bbslink_menu_busy(k) ? "a BBS" : "the menu";
     if (kind == SRV_LINK_BBS) return "a BBS";
     if (kind == SRV_LINK_SVC) return "a service";
+    if (kind == SRV_LINK_ACTS) return "the time service";
     if (kind != SATURN_NONE) return "a Saturn game";
     switch (S[k].cfg.service) {
     case CFG_SERVICE_ARCHIVE: return "the archive (PPP)";

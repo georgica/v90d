@@ -32,6 +32,7 @@
 #include "tun.h"
 #include "saturn.h"
 #include "stun.h"
+#include <time.h>
 
 #define FS 8000
 #define BLK 80
@@ -1686,6 +1687,107 @@ int main(int argc, char **argv)
         run_ms(500); usleep(200000);
         if (system(cmd)) { }
         CHECK(!file_has(ruleset, "8380"));
+        hang_up();
+        quiet_exit = 1;
+        kill(pid, SIGTERM);
+        for (i = 0; i < 400 && !dead; i++) step(0);
+        close(line_fd);
+        CHECK_EQ_I(waitpid(pid, &st, 0), pid);
+        CHECK(WIFEXITED(st) && WEXITSTATUS(st) == 0);
+    }
+    /* 17. the time service (303 494 4774, srv/acts.h): ACTS's format from
+     * the box's clock, at V.32bis or below and without error control; '?'
+     * gives the help. The lines come by the real clock, so the line is run
+     * in slices with real time between them. */
+    {
+        static char lanlog[300]; const char *l; int lines = 0;
+        cfg_default(&c);
+        strcpy(c.line_number, "5551234"); c.rings = 1; c.status_port = 8080;
+        CHECK_EQ_I(cfg_save(&c, conf, err, sizeof err), CFG_OK);
+        CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
+        snprintf(lanlog, sizeof lanlog, "%s/ns_acts.log", argv[2]);
+        unlink(lanlog);
+        pid = fork();
+        if (pid == 0) {
+            int a = fcntl(sv[1], F_DUPFD, 20), lfd = open(lanlog, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            dup2(a, 3); if (lfd >= 0) dup2(lfd, 2);
+            for (i = 4; i < 64; i++) close(i);
+            execl(argv[1], "v90d", "-c", conf, "-l", "fd:3", "-i", "lo", "-t", "ppp0", "-b", "", "-f", "", (char *)NULL);
+            _exit(127);
+        }
+        close(sv[1]);
+        line_fd = sv[0]; idle_fd = -1;
+        dead = quiet_exit = 0; hook = modem_on = 0; blk_n = 0; c_tx = 0; c_rx_pw = 0;
+        channel_init(&CH, &cc);
+        memset(prev_tx, 0xFF, sizeof prev_tx);
+        run_ms(2000);                       /* the box takes the time once a second */
+        {
+            caller_cfg_t ac; long t;
+            hook = 1; run_ms(500);
+            dial("3034944774");
+            run_ms(3000 + 2000 + 300);
+            caller_cfg_default(&ac);
+            ac.use_v42 = 0; ac.raw_rx = bt_rx; ac.raw_tx = bt_tx;   /* as an ACTS client sets its modem */
+            caller_init(&C, &ac);
+            modem_on = 1; bt_got_n = bt_at = bt_n = 0;
+            for (t = 0; t < 30L * FS && !C.connected && !dead; t++) step(0);
+            CHECK(C.connected);
+        }
+        CHECK(bt_wait("National Institute of Standards and Technology\r\nTelephone Time Service, Generator 3B\r\n", 10000));
+        CHECK(bt_wait(" MJD  YR MO DA H  M  S  ST S UT1 msADV         OTM\r\n", 5000));
+        for (i = 0; i < 600 && !dead; i++) {      /* up to 6 s of real time */
+            const uint8_t *p = bt_got; size_t left = bt_got_n; lines = 0;
+            while ((l = memmem(p, left, "UTC(NIST) ", 10)) != NULL) { lines++; left -= (size_t)((const uint8_t *)l + 10 - p); p = (const uint8_t *)l + 10; }
+            if (lines >= 3) break;
+            run_ms(20); usleep(10000);
+        }
+        printf("  time service: %d lines\n", lines);
+        CHECK(lines >= 3);
+        {   /* the last whole line: its fields, and the time it names against ours */
+            char ln[80]; const char *e = memmem(bt_got, bt_got_n, "UTC(NIST) *", 11), *b2 = e;
+            long mjd; int yy, mo, dd, hh, mi, ss, tt, lp, dut, a1, a2; char sg, otm; struct tm tmv; time_t named, now = time(NULL);
+            while (e && (l = memmem(e + 1, bt_got_n - (size_t)(e + 1 - (const char *)bt_got), "UTC(NIST) *", 11)) != NULL) e = l;
+            for (b2 = e; e && b2 > (const char *)bt_got && b2[-1] != '\n'; b2--) ;
+            CHECK(e != NULL && e - b2 + 11 < (long)sizeof ln);
+            if (e && e - b2 + 11 < (long)sizeof ln) {
+                memcpy(ln, b2, (size_t)(e - b2 + 11)); ln[e - b2 + 11] = 0;
+                printf("    %s\n", ln);
+                CHECK_EQ_I(sscanf(ln, "%5ld %2d-%2d-%2d %2d:%2d:%2d %2d %1d %c.%1d %3d.%1d UTC(NIST) %c",
+                                  &mjd, &yy, &mo, &dd, &hh, &mi, &ss, &tt, &lp, &sg, &dut, &a1, &a2, &otm), 14);
+                CHECK_EQ_I(a1, 45); CHECK_EQ_I(a2, 0); CHECK_EQ_I(otm, '*');
+                memset(&tmv, 0, sizeof tmv);
+                tmv.tm_year = yy + 100; tmv.tm_mon = mo - 1; tmv.tm_mday = dd; tmv.tm_hour = hh; tmv.tm_min = mi; tmv.tm_sec = ss;
+                named = timegm(&tmv);
+                CHECK(named >= now - 3 && named <= now + 2);
+                CHECK_EQ_I((long)mjd, (long)(named / 86400 + 40587));
+            }
+        }
+        bt_type("?");
+        for (i = 0; i < 300 && !dead && !bt_saw("Send the OTM back"); i++) { run_ms(20); usleep(10000); }
+        CHECK(bt_saw("Send the OTM back"));
+        CHECK(file_has(lanlog, "port 1: time service at "));
+        {   /* V.32bis or below */
+            FILE *f2 = fopen(lanlog, "r"); char lb[400]; int bps = 0;
+            while (f2 && fgets(lb, sizeof lb, f2)) { const char *q = strstr(lb, "time service at "); if (q) bps = atoi(q + 16); }
+            if (f2) fclose(f2);
+            printf("    at %d bit/s\n", bps);
+            CHECK(bps >= 300 && bps <= 14400);
+        }
+        hang_up();
+        /* with the 1 in front, the same */
+        {
+            caller_cfg_t ac; long t;
+            hook = 1; run_ms(500);
+            dial("13034944774");
+            run_ms(3000 + 2000 + 300);
+            caller_cfg_default(&ac);
+            ac.use_v42 = 0; ac.raw_rx = bt_rx; ac.raw_tx = bt_tx;
+            caller_init(&C, &ac);
+            modem_on = 1; bt_got_n = bt_at = bt_n = 0;
+            for (t = 0; t < 30L * FS && !C.connected && !dead; t++) step(0);
+            CHECK(C.connected);
+            CHECK(bt_wait("Telephone Time Service", 10000));
+        }
         hang_up();
         quiet_exit = 1;
         kill(pid, SIGTERM);
