@@ -351,7 +351,9 @@ static void call_start(srv_t *s)
     d.ppp.encrypt = enc;
     d.ppp.users = s->users; d.ppp.n_users = (size_t)c->n_users;
     d.ppp.our_ip = c->ppp_local; d.ppp.peer_ip = c->ppp_peer;
-    d.ppp.dns1 = c->dns[0]; d.ppp.dns2 = c->dns[1];
+    /* the callers' name server: the box (dnsrelay.h), or the servers themselves */
+    if (c->dns_relay) { d.ppp.dns1 = c->ppp_local; d.ppp.dns2 = 0; }
+    else { d.ppp.dns1 = c->dns[0]; d.ppp.dns2 = c->dns[1]; }
     d.ppp.mru = (uint16_t)c->mru;
     d.ppp.echo_interval_ms = (uint32_t)c->echo_interval * 1000u;
     /* [ppp] compression: CCP with Deflate and MPPC, or no CCP at all. When

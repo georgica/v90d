@@ -20,7 +20,7 @@ enum {
     K_NUMBER, K_TONES, K_BUSY, K_DROP, K_SESSION, K_IDLE, K_SERVICE, K_DCNOW, K_DCLAN, K_DCUPNP, K_DCIWANGO, K_SATMATCH,
     K_LISTEN, K_PORT, K_ADMINPW,
     K_LEVEL,
-    K_PPP_PEER2, K_ARCHIVE, K_COMPRESSION, K_ENCRYPTION, K_ENCRYPTION2, K_UPDATE_CHECK,
+    K_PPP_PEER2, K_ARCHIVE, K_COMPRESSION, K_ENCRYPTION, K_ENCRYPTION2, K_UPDATE_CHECK, K_DNS_RELAY,
     K_SVC_NETSTALGIA, K_SVC_MENU, K_SVC,
     /* port 2: the keys of [modem] and [line] again, in the same order */
     K2_MODS, K2_MAXDOWN, K2_MAXUP, K2_TXLEVEL, K2_V42, K2_V42BIS, K2_V92, K2_X2, K2_K56, K2_RINGS, K2_LAW,
@@ -41,7 +41,7 @@ static const struct { int sec; const char *name; } keydefs[K_COUNT] = {
     { S_LINE, "service" }, { S_LINE, "dreamcast_now" }, { S_LINE, "dreamcast_lan" }, { S_LINE, "dreamcast_upnp" }, { S_LINE, "dreamcast_iwango" }, { S_LINE, "saturn_matchmaking" },
     { S_STATUS, "listen" }, { S_STATUS, "port" }, { S_STATUS, "admin_password" },
     { S_LOG, "level" },
-    { S_NETWORK, "ppp_peer2" }, { S_NETWORK, "archive" }, { S_PPP, "compression" }, { S_PPP, "encryption" }, { S_PPP, "encryption2" }, { S_SYSTEM, "update_check" },
+    { S_NETWORK, "ppp_peer2" }, { S_NETWORK, "archive" }, { S_PPP, "compression" }, { S_PPP, "encryption" }, { S_PPP, "encryption2" }, { S_SYSTEM, "update_check" }, { S_NETWORK, "dns_relay" },
     { S_SERVICES, "netstalgia" }, { S_SERVICES, "menu" }, { S_SERVICES, "service" },
     { S_MODEM2, "modulations" }, { S_MODEM2, "max_downstream" }, { S_MODEM2, "max_upstream" },
     { S_MODEM2, "tx_level" }, { S_MODEM2, "v42" }, { S_MODEM2, "v42bis" }, { S_MODEM2, "v92" }, { S_MODEM2, "x2" }, { S_MODEM2, "k56" },
@@ -123,6 +123,7 @@ void cfg_default(cfg_t *c)
     c->dns[0]        = 0x09090909u;     /* 9.9.9.9 */
     c->dns[1]        = 0x01010101u;     /* 1.1.1.1 */
     c->nat           = 1;
+    c->dns_relay     = 1;
     c->auth          = CFG_AUTH_NONE;
     c->mru           = 1500;
     c->echo_interval = 30;
@@ -374,6 +375,7 @@ static int validate(const cfg_t *c, char *msg, int *k1, int *k2)
     *k1 = K_DNS1;      if (c->dns[0] && host(msg, K_DNS1, c->dns[0])) return -1;
     *k1 = K_DNS2;      if (c->dns[1] && host(msg, K_DNS2, c->dns[1])) return -1;
     *k1 = K_NAT;       if (en(msg, K_NAT, c->nat, 2)) return -1;
+    *k1 = K_DNS_RELAY; if (en(msg, K_DNS_RELAY, c->dns_relay, 2)) return -1;
 
     *k1 = K_AUTH;      if (en(msg, K_AUTH, c->auth, 3)) return -1;
     *k1 = K_MRU;       if (rng(msg, K_MRU, c->mru, 68, 1500)) return -1;
@@ -794,6 +796,7 @@ static int set_value(cfg_t *c, pctx_t *px, int k, int mk, int line, const char *
     case K_DNS2:      return set_ip(&c->dns[1], mk, v, 1, msg);
     case K_NAT:       return set_enum(&c->nat, mk, v, n_onoff, 2, l_onoff, msg);
     case K_UPDATE_CHECK: return set_enum(&c->update_check, mk, v, n_onoff, 2, l_onoff, msg);
+    case K_DNS_RELAY: return set_enum(&c->dns_relay, mk, v, n_onoff, 2, l_onoff, msg);
     /* the switch for the whole box of older settings: see cfg_parse */
     case K_ARCHIVE:   return set_enum(&px->old_archive, mk, v, n_onoff, 2, l_onoff, msg);
     case K_AUTH:      return set_enum(&c->auth, mk, v, n_auth, 3, l_auth, msg);
@@ -1110,6 +1113,7 @@ int cfg_write(const cfg_t *c, int with_secrets, char *buf, size_t cap)
     w_ip(&s, K_DNS1, c->dns[0], 1);
     w_ip(&s, K_DNS2, c->dns[1], 1);
     w_str(&s, K_NAT, nm(n_onoff, 2, c->nat));
+    w_str(&s, K_DNS_RELAY, nm(n_onoff, 2, c->dns_relay));
 
     sb_puts(&s, "\n[ppp]\n");
     w_str(&s, K_AUTH, nm(n_auth, 3, c->auth));

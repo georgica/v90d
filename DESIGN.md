@@ -461,6 +461,30 @@ the host gives it the UTC time in microseconds and writes what
   at 2 a.m. Mountain time (NIST's).
 - After 55 s the line in hand ends and the box hangs up once it is out.
 
+### 5g. The callers' name server (DNS relay)
+
+`[network] dns_relay` (on by default): IPCP gives the caller the box's PPP
+address as its only name server, and `srv/dnsrelay.c` answers there.
+
+- **UDP on the PPP address, port 53**, bound with `IP_FREEBIND` (the
+  address is on no interface until the first call). Non-blocking, a slice
+  per block.
+- **AAAA is answered by the box**: NOERROR with no answers, the header and
+  question of the query (an EDNS record left out). The link is IPv4 only;
+  this is what keeps an IPv6-capable caller (XP with IPv6 installed) from
+  trying addresses it cannot reach, issue #7. Every other standard query
+  with one question goes to the servers.
+- **The servers**: `[network] dns1` and `dns2`, or with both empty those of
+  `/etc/resolv.conf` (DHCP), read again every 30 s. A question without an
+  answer in 2 s goes to the other one, three tries in all.
+- **Against forged answers**: each question goes out with a fresh id from
+  `/dev/urandom` on a socket of its own, connected to the server asked (a
+  random source port, and the kernel takes nothing from another address);
+  an answer is passed on only with that id and the same question. Then the
+  caller's own id is put back.
+- Archive calls keep the archive's DNS (its prerouting redirect is ahead of
+  local delivery); a Dreamcast port keeps the console's servers.
+
 ## 6. Firmware (Track A)
 
 A mainline-derived Linux kernel with board support for the DVF9918 SoC written

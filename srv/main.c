@@ -72,6 +72,7 @@
 #include "bbslink.h"
 #include "termsvc.h"
 #include "actsvc.h"
+#include "dnsrelay.h"
 #include "update.h"
 #include "netsvc.h"
 #include "vpn.h"
@@ -188,6 +189,12 @@ static void ip_to_kernel(void *ctx, const uint8_t *pkt, size_t len)
 }
 
 /* the terminal menu ([services] menu) is for the PPP services' numbers */
+/* the callers' name server ([network] dns_relay): on the PPP address */
+static void relay_want(const cfg_t *c)
+{
+    dnsrelay_set(c->dns_relay, &c->ppp_local, 1, c->dns);
+}
+
 static int menu_wanted(const cfg_t *c)
 {
     int ppp1 = c->service == CFG_SERVICE_INTERNET || c->service == CFG_SERVICE_ARCHIVE;
@@ -313,6 +320,7 @@ static void adopt(const cfg_t *n)
     update_config(n->update_check, V90D_VERSION);
     bbslink_svc_want(n->svc_netstalgia);
     termsvc_want(menu_wanted(n));
+    relay_want(n);
 }
 
 static int store(const cfg_t *n)
@@ -595,6 +603,7 @@ int main(int argc, char **argv)
     update_config(live.update_check, V90D_VERSION);
     bbslink_svc_want(live.svc_netstalgia);
     termsvc_want(menu_wanted(&live));
+    relay_want(&live);
     settings_set_svc_rows(bbslink_svc_rows);
 
     /* The line gives us 10 ms blocks and wants each answered in time; a late
@@ -682,6 +691,7 @@ int main(int argc, char **argv)
             bbslink_poll(now_ms);
             termsvc_poll(now_ms);
             actsvc_poll();
+            dnsrelay_poll(now_ms);
             update_poll(now_ms);
             netsvc_poll(now_ms);
             if (fw_pid > 0 && blocks == 50 && waitpid(fw_pid, NULL, WNOHANG) == fw_pid) fw_pid = 0;   /* once a second (blocks counts to 100 and starts again) */

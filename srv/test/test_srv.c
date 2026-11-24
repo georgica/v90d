@@ -978,7 +978,8 @@ static void test_dreamcast_call(void)
     place_call("5551234", 6000);
     start_modem(0, "alice", "wonderland");
     CHECK(wait_ip(20000) > 0);
-    CHECK(C.ppp.dns1 == IPA(9, 9, 9, 9));
+    CHECK(C.ppp.dns1 == c.ppp_local);      /* [network] dns_relay, on by default: the box answers */
+    CHECK(C.ppp.dns2 == 0);
     mktcp(p, 30, 1024, 80, 0x10);
     lan0 = lan_n;
     for (i = 0; i < 5L * FS && lan_n == lan0; i++) { if (i == 0) CHECK_EQ_I(caller_send_ip(&C, p, 40), 0); step(0); }

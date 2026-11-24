@@ -248,6 +248,8 @@ typedef struct {
     uint32_t   ppp_peer;
     uint32_t   dns[2];          /* 0 = none */
     int        nat;
+    int        dns_relay;       /* 1 = the callers' name server is the box (srv/dnsrelay.h), which asks
+                                   dns[] (or the system's) and answers no IPv6 addresses; 0 = dns[] itself */
     /* [ppp] */
     int        auth;            /* CFG_AUTH_* */
     int        mru;
