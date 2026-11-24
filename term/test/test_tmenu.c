@@ -20,6 +20,14 @@ static int tonight(void *ctx, int i, char l[20], char v[16], int *c)
     if (i == 1) { strcpy(l, "This call"); strcpy(v, "V.90 50666"); *c = TS_YL; return 1; }
     return 0;
 }
+static int ready;
+static int own(void *ctx, int id, tscr *s)
+{
+    (void)ctx;
+    if (!ready) return TM_NOT_READY;
+    tscr_put(s, 2, 2, id == TM_OWN ? "YOUR ACCOUNT" : "?", TS_WH, -1);
+    return -1;
+}
 static int who(void *ctx, int i, tmenu_who *r)
 {
     (void)ctx;
@@ -71,6 +79,8 @@ static void setup(tmenu_cfg *c)
     c->dir = &D; c->dir_source = "from the Telnet BBS Guide"; c->dir_note = "Dial 1-800-BBS-DIAL, then a board's name.";
     c->ppp_addr = "10.77.0.23"; c->ppp_server = "10.77.0.1"; c->ppp_mtu = 1500;
     c->tonight = tonight; c->who = who; c->lines = 2;
+    c->items[3] = (tmenu_item){ '4', "Your account", "time, best", TM_OWN };
+    c->draw = own;
 }
 
 int main(void)
@@ -115,7 +125,7 @@ int main(void)
     CHECK_EQ_I(M.sel, 1);
     /* the bar wraps round to Goodbye */
     keys("\x1b[A\x1b[A"); drain();
-    CHECK_EQ_I(M.sel, 3);
+    CHECK_EQ_I(M.sel, 4);
 
     /* 2: shown in "Your choice", then Who's online; any key back */
     keys("2"); drain();
@@ -159,6 +169,19 @@ int main(void)
     keys("\x1b"); wait_ms(310); drain();
     CHECK(shows("MAIN MENU"));
     CHECK(!line_has("ddns") && !line_has("zruspas.org") && !line_has(":9000"));
+
+    /* 4: an owner's screen whose data comes later */
+    ready = 0;
+    keys("4"); wait_ms(240); drain();
+    CHECK(shows("One moment..."));
+    wait_ms(150); drain();
+    CHECK(shows("One moment..."));
+    ready = 1;
+    wait_ms(150); drain();
+    CHECK(shows("YOUR ACCOUNT") && !shows("One moment"));
+    CHECK_EQ_I(vt_diff(&V, &M.cur), 0);
+    keys("x"); drain();
+    CHECK(shows("MAIN MENU"));
 
     /* 1: the handoff, then PPP */
     keys("1"); wait_ms(230);

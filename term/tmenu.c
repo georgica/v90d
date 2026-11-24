@@ -239,6 +239,15 @@ static int draw_own(tmenu_t *m, tscr *s)
     int cur;
     top(m, s);
     cur = m->cfg.draw ? m->cfg.draw(m->cfg.ctx, m->item_id, s) : -1;
+    m->not_ready = cur == TM_NOT_READY;
+    if (m->not_ready) {                   /* its data is on the way: asked again shortly */
+        tscr_clear(s);
+        top(m, s);
+        tscr_put(s, 2, 3, "One moment...", TS_W, -1);
+        foot_online(m, s, "");
+        m->retry_at = m->now + TM_RETRY_MS;
+        return 3 * 256 + 16;
+    }
     return cur;
 }
 
@@ -595,6 +604,7 @@ void tmenu_poll(tmenu_t *m, uint32_t now_ms)
     if (m->esc_n == 1 && (int32_t)(now_ms - m->esc_at) >= ESC_MS) { m->esc_n = 0; key(m, K_ESC); }
     else if (m->esc_n > 1 && (int32_t)(now_ms - m->esc_at) >= 4 * ESC_MS) m->esc_n = 0;
     if (m->go_at && (int32_t)(now_ms - m->go_at) >= 0) { m->go_at = 0; open_item(m, m->go_to); }
+    if (m->screen == S_OWN && m->not_ready && (int32_t)(now_ms - m->retry_at) >= 0) redraw(m);
     if (m->dirty_search && m->cfg.dir && tdir_step(m->cfg.dir, &m->view, SEARCH_STEP)) {
         m->dirty_search = 0;
         if (m->screen == S_BBS) redraw(m);
@@ -629,6 +639,12 @@ int tmenu_action(tmenu_t *m, int *board)
     m->act_wait = 0;
     if (board) *board = m->act_board;
     return a;
+}
+
+void tmenu_redraw(tmenu_t *m)
+{
+    if (!(m->action && m->act_wait)) redraw(m);
+    emit(m);
 }
 
 void tmenu_back(tmenu_t *m, uint32_t now_ms)

@@ -25,6 +25,8 @@
 #define TM_OUT     16384          /* output waiting for the line */
 #define TM_PER     15             /* directory rows a page */
 #define TM_OWN     100            /* first id of an owner's item */
+#define TM_NOT_READY (-2)         /* cfg.draw: not yet */
+#define TM_RETRY_MS 100
 
 enum { TM_PPP = 1, TM_WHO, TM_BBS };                  /* the built-in items */
 enum { TM_ACT_NONE = 0, TM_ACT_PPP, TM_ACT_DIAL, TM_ACT_HANGUP };
@@ -56,7 +58,9 @@ typedef struct {
     int  (*who)(void *ctx, int i, tmenu_who *row);
     /* An owner's screen (an item with id >= TM_OWN): draw it on s (the bars
      * are drawn already) and return where the cursor goes as y * 256 + x,
-     * or -1. Any key then goes back to the menu. */
+     * or -1. Any key then goes back to the menu. TM_NOT_READY: its data is
+     * not there yet; the menu shows "One moment..." and asks again every
+     * TM_RETRY_MS. */
     int  (*draw)(void *ctx, int id, tscr *s);
     /* the opening screen and the menu, after they are drawn: the owner's
      * own touches (screen 0 opening, 1 menu); may be NULL */
@@ -83,6 +87,7 @@ typedef struct {
     char      scratch[TM_OUT];    /* a screen on its way into out */
     size_t    out_head, out_n;
     int       action, act_board, act_wait;
+    int       not_ready; uint32_t retry_at;
 } tmenu_t;
 
 void tmenu_init(tmenu_t *m, const tmenu_cfg *cfg, uint32_t now_ms);
@@ -99,5 +104,7 @@ size_t tmenu_output(tmenu_t *m, uint8_t *p, size_t cap);
 int  tmenu_action(tmenu_t *m, int *board);
 /* the caller is back from a board: the directory again, all of it */
 void tmenu_back(tmenu_t *m, uint32_t now_ms);
+/* the owner's data changed: the screen is made again (only what changed goes out) */
+void tmenu_redraw(tmenu_t *m);
 
 #endif
