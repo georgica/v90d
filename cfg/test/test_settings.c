@@ -136,9 +136,9 @@ static void test_page(void)
     CHECK(has(html, "</html>\n"));
     CHECK(has(html, "<title>Nestaliga settings</title>"));
     CHECK(has(html, "<h1><i></i>Nestaliga<small>dial-up server</small></h1>"));
-    CHECK(has(html, "<a href=\"/\">Dashboard</a>"));
+    CHECK(has(html, "<a href=\"/\">Status</a>"));
     CHECK(has(html, "prefers-color-scheme:dark"));
-    CHECK(has(html, "<a href=\"/line\">Line</a>") && !has(html, "href=\"/config\""));
+    CHECK(has(html, "<a href=\"/line\">Phone</a>") && !has(html, "href=\"/config\""));
     CHECK(has(html, "<small>1 to 10</small>"));
     CHECK(has(html, "<form method=\"post\" action=\"/settings\">"));
     CHECK(has(html, "<input type=\"submit\" value=\"Save\">"));
@@ -529,13 +529,13 @@ static void test_consoles_page(void)
     /* a saturn port alone brings the tab up too */
     c.port2.service = CFG_SERVICE_SATURN;
     CHECK(settings_render_page(&c, SETTINGS_LINE, 0, NULL, html, sizeof html) > 0);
-    CHECK(has(html, "<a href=\"/dreamcast\">Consoles</a>"));
+    CHECK(has(html, "<a href=\"/dreamcast\">Services</a>"));        /* the section leads to it first */
     base(&c);
     c.service = CFG_SERVICE_DREAMCAST; c.dc_lan = 1;
     c.port2.service = CFG_SERVICE_SATURN; c.port2.sat_match = 1;
     CHECK(settings_render_page(&c, SETTINGS_LINE, 0, NULL, html, sizeof html) > 0);
     CHECK(!has(html, "name=\"dreamcast_now\"")); CHECK(!has(html, "name=\"saturn_matchmaking\""));
-    CHECK(has(html, "<a href=\"/dreamcast\">Consoles</a>"));           /* the tab */
+    CHECK(has(html, "<a href=\"/dreamcast\">Services</a>"));           /* the section leads to the page */
     /* the page itself: both sections, the Dreamcast switches and the Saturn one */
     CHECK(settings_render_page(&c, SETTINGS_CONSOLES, 0, NULL, html, sizeof html) > 0);
     CHECK(has(html, "<b>Consoles</b>")); CHECK(!has(html, "<a href=\"/dreamcast\">Consoles</a>"));
@@ -714,7 +714,7 @@ static void test_pages(void)
         CHECK(has(html, want));
         CHECK(has(html, pg[i].has));
         for (k = 0; k < 4; k++) CHECK(!has(html, pg[i].hasnt[k]));
-        CHECK(has(html, "<a href=\"/\">Dashboard</a>") && has(html, "href=\"/logout\">Log out</a>"));
+        CHECK(has(html, "<a href=\"/\">Status</a>") && has(html, "href=\"/logout\">Log out</a>"));
         CHECK(!has(html, "href=\"/config\"") && !has(html, "href=\"/settings\""));
         CHECK(has(html, "<input type=\"submit\" value=\"Save\">"));
         /* the restart form is on the system page only */
@@ -1218,7 +1218,9 @@ static void test_services_page(void)
     CHECK(strcmp(settings_page_path(SETTINGS_SERVICES), "/services") == 0);
     /* nothing of it on the page of all settings, the tab on every page */
     CHECK(settings_render_html(&c, 0, NULL, html, sizeof html) > 0);
-    CHECK(!has(html, "snum0") && has(html, "<a href=\"/services\">Services</a>"));
+    CHECK(!has(html, "snum0") && has(html, "<a href=\"/bbs\">Services</a>"));
+    CHECK(settings_render_page(&c, SETTINGS_SERVICES, 0, NULL, html, sizeof html) > 0);
+    CHECK(has(html, "<nav class=\"s\"><a href=\"/bbs\">BBS</a><b>Numbers</b></nav>"));
     settings_set_svc_rows(NULL);
     CHECK(settings_render_page(&c, SETTINGS_SERVICES, 0, NULL, html, sizeof html) > 0);
     CHECK(has(html, "<b>Services</b>") && has(html, "name=\"snum15\"") && !has(html, "snum16"));

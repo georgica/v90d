@@ -363,7 +363,7 @@ of boards. Format and rules: `[services]` in `cfg/config.h` and
 `srv/svc.h`.
 
 - **Whose.** The owner's numbers are in the settings (`[services] service =
-  NUMBER HOST:PORT raw|telnet NAME`, up to 16, the Services tab). Netstalgia
+  NUMBER HOST:PORT raw|telnet NAME`, up to 16, the Numbers page under Services). Netstalgia
   keeps more in a second signed list,
   `http://api.netstalgia.online/v1/services.txt`, `v90d-svc 1`, with a serial
   of its own, fetched and checked exactly like the list of boards (the same

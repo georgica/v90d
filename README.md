@@ -59,8 +59,9 @@ the stock firmware stays in the box, one click away.
   (1 800 227 3425), on every port, whatever its service: see below.
 - Numbers that connect straight to a service, raw or over telnet: your own
   and Netstalgia's (a game server, a text service): see below.
-- A web interface ("Nestaliga") for all of it: dashboard, line, modem,
-  users, network, system, bulletin boards, services, firmware and calls, with a
+- A web interface ("Nestaliga") for all of it, in four sections: Status
+  (dashboard, calls), Phone (line, modem, users), Services (bulletin boards,
+  numbers to services) and System (network, system, firmware), with a
   Consoles page (the
   Dreamcast switches and the Saturn matchmaking switch) when a port uses one
   of those services. The pages follow the box: both phone ports on an HT802,
@@ -97,7 +98,7 @@ telnet negotiation stays inside the box; the terminal sees the board, ANSI
 and all. When the board logs you off, the line is dropped, as it always
 was.
 
-The **BBS** page of the web interface lists the boards with their numbers,
+The **BBS** page of the web interface (under **Services**) lists the boards with their numbers,
 a hundred to a page, with a search by name or number.
 The boards are those of the [Telnet BBS Guide](https://www.telnetbbsguide.com),
 more than a thousand of them: a box that uses the numbers fetches the list
@@ -135,7 +136,7 @@ Neverwinter Nights dials **1 385 596 1775** and reaches the revived server.
 **Telnet** says `Calling` and the name, then joins a board or text service.
 The call ends when the service hangs up.
 
-Put up to 16 numbers of your own on the **Services** tab (number, host,
+Put up to 16 numbers of your own under **Services**, on the **Numbers** page (number, host,
 port, raw or telnet, a name); a host on your own network is fine. The box
 also answers the numbers in [Netstalgia](https://netstalgia.online)'s
 signed list of services, which it fetches once a day (switch it off on the

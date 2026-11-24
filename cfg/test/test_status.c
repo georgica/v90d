@@ -175,15 +175,15 @@ static void test_idle(void)
     {
         const char *a = strstr(html, "href=");
         int n_links = 0;
-        CHECK(a != NULL && strncmp(a, "href=\"/line\">Line</a>", 21) == 0);
+        CHECK(a != NULL && strncmp(a, "href=\"/line\">Phone</a>", 22) == 0);
         for (; a; a = strstr(a + 5, "href=")) { CHECK(a[6] == '/' && a[7] != '/'); n_links++; }
-        CHECK_EQ_I(n_links, 10);                /* five settings tabs, BBS, Services, Firmware, Calls, Log out */
+        CHECK_EQ_I(n_links, 5);                 /* the sections Phone, Services, System, Log out; Calls under Status */
     }
     CHECK(has(html, "<meta http-equiv=\"refresh\" content=\"5\">"));
     /* the look: light and dark, a header that marks this page, the state
      * as a badge with a line under it, the call list free to scroll */
     CHECK(has(html, "prefers-color-scheme:dark"));
-    CHECK(has(html, "<nav><b>Dashboard</b>"));
+    CHECK(has(html, "<nav><b>Status</b>") && has(html, "<nav class=\"s\"><b>Dashboard</b><a href=\"/calls\">Calls</a></nav>"));
     CHECK(has(html, "<title>Nestaliga status</title>"));
     CHECK(has(html, "<h1><i></i>Nestaliga<small>dial-up server</small></h1>"));
     CHECK(has(html, "<span class=\"b s0\">idle</span>"));

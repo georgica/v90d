@@ -103,7 +103,7 @@ enum { SETTINGS_ALL, SETTINGS_LINE, SETTINGS_MODEM, SETTINGS_USERS, SETTINGS_NET
        /* the Consoles tab (/dreamcast, /dreamcast2): the dreamcast switches
         * and the saturn matchmaking switch, per port */
        SETTINGS_CONSOLES, SETTINGS_CONSOLES2,
-       /* the Services tab (/services): the owner's numbers that connect
+       /* the Numbers page (/services, under Services): the owner's numbers that connect
         * straight to a service, the switch for Netstalgia's, and
         * Netstalgia's list as it is (settings_set_svc_rows). Not on the
         * page of all settings. */
@@ -118,7 +118,7 @@ void settings_set_vpn(const char *remote);
  * no Port 2 switch, the port-2 paths (/line2, /modem2, /dreamcast2) do not
  * resolve, and a port=2 post is refused. The default is two. */
 void settings_set_two_ports(int two);
-/* Netstalgia's numbers for the Services page: fn writes them as <tr> rows
+/* Netstalgia's numbers for the Numbers page: fn writes them as <tr> rows
  * of four cells (number, name, mode, host:port) into buf[0..cap) and
  * returns how many octets, *left the number of entries that did not fit
  * or were not shown. NULL (the default): no list. */

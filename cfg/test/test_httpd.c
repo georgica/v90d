@@ -822,12 +822,12 @@ static void test_settings_page(void)
     CHECK(r.body && memcmp(r.body, want, (size_t)n) == 0);
     CHECK(strstr(resp, "value=\"alice\"") != NULL);
     CHECK(strstr(resp, "TOPSECRET") == NULL);
-    CHECK(strstr(resp, "<a href=\"/\">Dashboard</a>") != NULL);
+    CHECK(strstr(resp, "<a href=\"/\">Status</a>") != NULL);
     CHECK(strstr(resp, "Settings saved") == NULL);
     CHECK_EQ_I(got_eof, 1);
     /* and the status page leads here */
     len = exchange("GET / HTTP/1.0\r\n\r\n", resp, sizeof resp);
-    CHECK(strstr(resp, "<a href=\"/line\">Line</a>") != NULL);
+    CHECK(strstr(resp, "<a href=\"/line\">Phone</a>") != NULL);
 
     /* the note after a save, only for exactly that query */
     len = exchange("GET /settings?saved=1 HTTP/1.0\r\n\r\n", resp, sizeof resp);
@@ -1655,14 +1655,16 @@ static void test_two_ports(void)
      * carries both the dreamcast switches and the saturn one */
     C.port2.service = CFG_SERVICE_DREAMCAST;
     len = exchange("GET / HTTP/1.0\r\n\r\n", resp, sizeof resp);
-    CHECK(strstr(resp, "<a href=\"/dreamcast\">Consoles</a>") != NULL);
+    CHECK(strstr(resp, "<a href=\"/dreamcast\">Services</a>") != NULL);
     len = exchange("GET /dreamcast2 HTTP/1.0\r\n\r\n", resp, sizeof resp);
     CHECK(parse_resp(resp, len, &r) && r.code == 200 && strstr(resp, "<select name=\"dreamcast_lan\">") != NULL
           && strstr(resp, "<select name=\"saturn_matchmaking\">") != NULL);
     C.port2.service = CFG_SERVICE_INTERNET;
     C.service = CFG_SERVICE_SATURN;
     len = exchange("GET /firmware HTTP/1.0\r\n\r\n", resp, sizeof resp);
-    CHECK(strstr(resp, "<a href=\"/dreamcast\">Consoles</a>") != NULL);
+    CHECK(strstr(resp, "<a href=\"/dreamcast\">Services</a>") != NULL);
+    len = exchange("GET /bbs HTTP/1.0\r\n\r\n", resp, sizeof resp);
+    CHECK(strstr(resp, "<nav class=\"s\"><a href=\"/dreamcast\">Consoles</a><b>BBS</b>") != NULL);
     CHECK_EQ_I(code_of("GET /saturn HTTP/1.0\r\nHost: 192.168.1.2\r\n\r\n"), 404);   /* no separate Saturn tab */
     C.service = CFG_SERVICE_INTERNET;
     len = exchange("GET /firmware HTTP/1.0\r\n\r\n", resp, sizeof resp);
@@ -2321,8 +2323,10 @@ static void test_bbs_page(void)
     len = exchange("GET /bbs?p=99999999999 HTTP/1.0\r\n\r\n", resp, sizeof resp);
     CHECK(parse_resp(resp, len, &r) && r.code == 200); CHECK(bbs_skip >= 0);
     CHECK_EQ_I(code_of("POST /bbs HTTP/1.0\r\nContent-Length: 0\r\n\r\n"), 405);
-    /* the tab is on the other pages */
+    /* the other pages lead to it (the Services section) */
     len = exchange("GET / HTTP/1.0\r\n\r\n", resp, sizeof resp);
+    CHECK(strstr(resp, "<a href=\"/bbs\">Services</a>") != NULL);
+    len = exchange("GET /services HTTP/1.0\r\n\r\n", resp, sizeof resp);
     CHECK(strstr(resp, "<a href=\"/bbs\">BBS</a>") != NULL);
     httpd_on_bbs(&H, NULL, NULL);
 }

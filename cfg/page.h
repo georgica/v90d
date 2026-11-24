@@ -41,6 +41,9 @@
     "nav a{color:#fff;background:rgba(255,255,255,.12)}" \
     "nav b{color:#1f2a44;background:var(--ac)}" \
     "nav .r{margin-left:auto;background:none;color:#c3cbda}" \
+    "nav.s{padding:6px 0 0;border-top:1px solid rgba(255,255,255,.12)}" \
+    "nav.s a,nav.s b{padding:5px 14px;font-size:11px;border-radius:4px 4px 0 0}" \
+    "nav.s a{background:none;color:#c3cbda}" \
     "main{padding-top:18px}" \
     "section,.k{background:var(--pn);border:1px solid var(--ln);border-radius:10px;" \
     "box-shadow:var(--sh);overflow:hidden}" \
@@ -100,17 +103,25 @@
  * knows the settings says so before a page is made (the settings pages by
  * themselves, the server for the others); defined in status.c. */
 extern int page_consoles_tab;   /* a port uses the dreamcast or saturn service */
+/* The menu: a row of sections, and under it the pages of the section of
+ * the page shown (plain links, no script: a period browser uses it too).
+ * A section's own link leads to its first page. */
 static inline void page_top(sbuf_t *b, const char *title, const char *head, int active, const char *alone)
 {
     static const struct { const char *href, *label; } tabs[] = {
         { "/", "Dashboard" }, { "/line", "Line" }, { "/modem", "Modem" }, { "/users", "Users" },
         { "/network", "Network" }, { "/system", "System" }, { "/firmware", "Firmware" },
         { "/calls", "Calls" }, { "/dreamcast", "Consoles" }, { "/bbs", "BBS" },
-        { "/services", "Services" },
+        { "/services", "Numbers" },
     };
-    /* the order they are shown in */
-    static const unsigned char order[] = { 0, 1, 2, 3, 4, 8, 9, 10, 5, 6, 7 };
-    int i, k;
+    /* the sections and their pages, in the order they are shown; -1 ends a section */
+    static const struct { const char *label; signed char tab[4]; } sections[] = {
+        { "Status",   { 0, 7, -1, -1 } },
+        { "Phone",    { 1, 2, 3, -1 } },
+        { "Services", { PAGE_TAB_CONSOLES, PAGE_TAB_BBS, PAGE_TAB_SERVICES, -1 } },
+        { "System",   { 4, 5, PAGE_TAB_FIRMWARE, -1 } },
+    };
+    int s, k, mine = -1;
 
     sb_puts(b, "<!DOCTYPE html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">\n");
     sb_puts(b, head);
@@ -119,20 +130,37 @@ static inline void page_top(sbuf_t *b, const char *title, const char *head, int 
     sb_puts(b, "</title>\n" PAGE_CSS "</head><body>\n"
                "<header><div><h1><i></i>" PAGE_NAME "<small>dial-up server</small></h1>\n<nav>");
     if (alone) {
-        sb_puts(b, "<b>"); sb_puts(b, alone); sb_puts(b, "</b>");
+        sb_puts(b, "<b>"); sb_puts(b, alone); sb_puts(b, "</b></nav>");
     } else {
-        for (k = 0; k < (int)sizeof order; k++) {
-            i = order[k];
-            if (i == PAGE_TAB_CONSOLES && !page_consoles_tab && i != active) continue;
-            if (i == active) { sb_puts(b, "<b>"); sb_puts(b, tabs[i].label); sb_puts(b, "</b>"); }
+        for (s = 0; s < (int)(sizeof sections / sizeof sections[0]); s++)
+            for (k = 0; k < 4 && sections[s].tab[k] >= 0; k++)
+                if (sections[s].tab[k] == active) mine = s;
+        for (s = 0; s < (int)(sizeof sections / sizeof sections[0]); s++) {
+            int first = -1;
+            for (k = 0; k < 4 && sections[s].tab[k] >= 0 && first < 0; k++)
+                if (sections[s].tab[k] != PAGE_TAB_CONSOLES || page_consoles_tab) first = sections[s].tab[k];
+            if (s == mine) { sb_puts(b, "<b>"); sb_puts(b, sections[s].label); sb_puts(b, "</b>"); }
             else {
-                sb_puts(b, "<a href=\""); sb_puts(b, tabs[i].href); sb_puts(b, "\">");
-                sb_puts(b, tabs[i].label); sb_puts(b, "</a>");
+                sb_puts(b, "<a href=\""); sb_puts(b, tabs[first].href); sb_puts(b, "\">");
+                sb_puts(b, sections[s].label); sb_puts(b, "</a>");
             }
         }
-        sb_puts(b, "<a class=\"r\" href=\"/logout\">Log out</a>");
+        sb_puts(b, "<a class=\"r\" href=\"/logout\">Log out</a></nav>");
+        if (mine >= 0) {
+            sb_puts(b, "\n<nav class=\"s\">");
+            for (k = 0; k < 4 && sections[mine].tab[k] >= 0; k++) {
+                int i = sections[mine].tab[k];
+                if (i == PAGE_TAB_CONSOLES && !page_consoles_tab && i != active) continue;
+                if (i == active) { sb_puts(b, "<b>"); sb_puts(b, tabs[i].label); sb_puts(b, "</b>"); }
+                else {
+                    sb_puts(b, "<a href=\""); sb_puts(b, tabs[i].href); sb_puts(b, "\">");
+                    sb_puts(b, tabs[i].label); sb_puts(b, "</a>");
+                }
+            }
+            sb_puts(b, "</nav>");
+        }
     }
-    sb_puts(b, "</nav></div></header>\n<main>\n");
+    sb_puts(b, "</div></header>\n<main>\n");
 }
 
 #define PAGE_END \
