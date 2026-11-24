@@ -176,7 +176,7 @@ static void test_page(void)
     CHECK(has(html, "<input type=\"text\" name=\"user0\" size=\"24\" maxlength=\"63\" value=\"\">"));
     /* no user yet: the one new row, with its Add button */
     CHECK(!has(html, "name=\"user1\"") && !has(html, "name=\"user16\""));
-    CHECK(has(html, "<tr class=\"new\"><td>New</td>") && has(html, "<input type=\"submit\" value=\"Add\">"));
+    CHECK(has(html, "<tr class=\"new\"><td>New</td>") && has(html, "<p><input type=\"submit\" name=\"add\" value=\"Add\"></p>"));
     CHECK(has(html, "<input type=\"password\" name=\"pass0\" size=\"24\" maxlength=\"64\""
                     " autocomplete=\"new-password\">"));
     CHECK(!has(html, "name=\"pass1\""));
@@ -218,7 +218,7 @@ static void test_page(void)
     CHECK(has(html, "name=\"user0\" size=\"24\" maxlength=\"63\" value=\"alice\">"));
     CHECK(has(html, "name=\"user1\" size=\"24\" maxlength=\"63\" value=\"bob\">"));
     CHECK(has(html, "name=\"user2\" size=\"24\" maxlength=\"63\" value=\"carol\">"));
-    CHECK(has(html, "name=\"user3\" size=\"24\" maxlength=\"63\" value=\"\">"));
+    CHECK(!has(html, "name=\"user3\""));                     /* no empty row until Add asks for one */
     CHECK(has(html, "A password is set"));
     /* no secret is ever in the page, and no password field has a value */
     CHECK(!has(html, "SECRET"));
@@ -231,7 +231,7 @@ static void test_page(void)
             if (!e || (v && v < e)) with_value++;
             p++;
         }
-        CHECK_EQ_I(pw, 3 + 1 + 1);          /* the three users, the new row, the admin password */
+        CHECK_EQ_I(pw, 3 + 1);              /* the three users and the admin password */
         CHECK_EQ_I(with_value, 0);
     }
 
@@ -694,7 +694,7 @@ static void test_pages(void)
           { "name=\"mod_v90\"", "name=\"user0\"", "name=\"address\"", "name=\"admin_password\"" } },
         { SETTINGS_MODEM,   "/modem",   "Modem",   "name=\"mod_v90\"",
           { "name=\"number\"", "name=\"user0\"", "name=\"address\"", "name=\"admin_password\"" } },
-        { SETTINGS_USERS,   "/users",   "Users",   "name=\"user3\"",
+        { SETTINGS_USERS,   "/users",   "Users",   "name=\"add\" value=\"Add\"",
           { "name=\"number\"", "name=\"mod_v90\"", "name=\"address\"", "name=\"admin_password\"" } },
         { SETTINGS_NETWORK, "/network", "Network", "name=\"gateway\"",
           { "name=\"number\"", "name=\"mod_v90\"", "name=\"user0\"", "name=\"admin_password\"" } },
@@ -928,18 +928,30 @@ static void test_users(void)
         cfg_t c2, o2; int k;
         base(&c2);
         CHECK(settings_render_page(&c2, SETTINGS_USERS, 0, NULL, html, sizeof html) > 0);
-        CHECK(has(html, "name=\"user3\" size=\"24\" maxlength=\"63\" value=\"\">") && !has(html, "name=\"user4\""));
-        CHECK(has(html, "To add a user, fill in the last row and press Add."));
+        CHECK(!has(html, "name=\"user3\"") && has(html, "<p><input type=\"submit\" name=\"add\" value=\"Add\"></p>"));
+        CHECK(has(html, "Add saves the page and gives it an empty row for a new user."));
+        /* Add: the form saved as it is, and the button said so */
+        CHECK_EQ_I(apply(&c2, "user0=alice&pass0=&add=Add", &o2), SETTINGS_OK);
+        CHECK_EQ_I(settings_added(), 1); CHECK_EQ_I(o2.n_users, 3);
+        CHECK_EQ_I(apply(&c2, "user0=alice&pass0=", &o2), SETTINGS_OK); CHECK_EQ_I(settings_added(), 0);
+        CHECK_EQ_I(apply(&c2, "add=Add&add=Add", &o2), SETTINGS_BAD);
+        /* then the page with an empty row, which a second post fills in */
+        CHECK(settings_render_page_add(&c2, SETTINGS_USERS, 1, 1, NULL, html, sizeof html) > 0);
+        CHECK(has(html, "<tr class=\"new\"><td>New</td><td><input type=\"text\" name=\"user3\" size=\"24\" maxlength=\"63\" value=\"\">"));
+        CHECK(!has(html, "name=\"user4\""));
         CHECK_EQ_I(apply(&c2, "user3=dave&pass3=d4ve", &o2), SETTINGS_OK);
         CHECK_EQ_I(o2.n_users, 4); CHECK(strcmp(o2.users[3].name, "dave") == 0 && strcmp(o2.users[3].secret, "d4ve") == 0);
+        /* the next page: dave, and no empty row of its own */
         CHECK(settings_render_page(&o2, SETTINGS_USERS, 0, NULL, html, sizeof html) > 0);
-        CHECK(has(html, "value=\"dave\"") && has(html, "name=\"user4\" size=\"24\" maxlength=\"63\" value=\"\">"));
+        CHECK(has(html, "value=\"dave\"") && !has(html, "name=\"user4\""));
         /* full: no new row, no Add */
         c2.n_users = CFG_MAX_USERS;
         for (k = 0; k < CFG_MAX_USERS; k++) { snprintf(c2.users[k].name, sizeof c2.users[k].name, "u%d", k); strcpy(c2.users[k].secret, "s"); }
         CHECK(settings_render_page(&c2, SETTINGS_USERS, 0, NULL, html, sizeof html) > 0);
         CHECK(has(html, "name=\"user15\" size=\"24\" maxlength=\"63\" value=\"u15\">") && !has(html, "name=\"user16\""));
         CHECK(!has(html, "value=\"Add\"") && has(html, "as many as the box takes"));
+        CHECK(settings_render_page_add(&c2, SETTINGS_USERS, 0, 1, NULL, html, sizeof html) > 0);
+        CHECK(!has(html, "name=\"user16\""));            /* Add cannot go past 16 */
     }
 }
 
@@ -1112,7 +1124,7 @@ static void test_round_trip(void)
     strcpy(c.users[1].name, "caf\xe9\x01");
     CHECK(settings_render_html(&c, 0, NULL, html, sizeof html) > 0);
     n = submit(html, body, sizeof body);
-    CHECK_EQ_I(n, 7 + 1 + 1 + 1 + 2 + 2 * (3 + 1) - 1 + 6 + 1 + 1 + 1 + 1 + 5 + 1 + 1 + 1 + 1);     /* three users and the new row */     /* + update_check, x2, k56, encryption */
+    CHECK_EQ_I(n, 7 + 1 + 1 + 1 + 2 + 2 * 3 - 1 + 6 + 1 + 1 + 1 + 1 + 5 + 1 + 1 + 1 + 1);     /* the three users */     /* + update_check, x2, k56, encryption */
     CHECK_EQ_I(apply(&c, body, &out), SETTINGS_OK);
     CHECK(memcmp(&c, &out, sizeof c) == 0);
 
@@ -1242,7 +1254,20 @@ static void test_services_page(void)
     CHECK(has(html, "<span class=\"dd\"><a href=\"/bbs\">BBS</a><b>Numbers</b></span>"));
     settings_set_svc_rows(NULL);
     CHECK(settings_render_page(&c, SETTINGS_SERVICES, 0, NULL, html, sizeof html) > 0);
-    CHECK(has(html, "<a class=\"on\" href=\"/bbs\">Services</a>") && has(html, "name=\"snum15\"") && !has(html, "snum16"));
+    /* Add on this page too: the numbers there are and one more row */
+    {
+        cfg_t c3 = c; c3.n_services = 2;
+        strcpy(c3.services[0].number, "5550001"); strcpy(c3.services[0].host, "a"); c3.services[0].port = 1; strcpy(c3.services[0].name, "A");
+        strcpy(c3.services[1].number, "5550002"); strcpy(c3.services[1].host, "b"); c3.services[1].port = 2; strcpy(c3.services[1].name, "B");
+        CHECK(settings_render_page(&c3, SETTINGS_SERVICES, 0, NULL, html, sizeof html) > 0);
+        CHECK(has(html, "name=\"snum1\"") && !has(html, "name=\"snum2\""));
+        CHECK(settings_render_page_add(&c3, SETTINGS_SERVICES, 1, 1, NULL, html, sizeof html) > 0);
+        CHECK(has(html, "name=\"snum2\" size=\"13\" maxlength=\"15\" value=\"\"") && !has(html, "name=\"snum3\""));
+        CHECK(settings_render_page(&c, SETTINGS_SERVICES, 0, NULL, html, sizeof html) > 0);
+    }
+    /* none yet: one empty row, and Add for more */
+    CHECK(has(html, "<a class=\"on\" href=\"/bbs\">Services</a>") && has(html, "name=\"snum0\"") && !has(html, "snum1"));
+    CHECK(has(html, "<p><input type=\"submit\" name=\"add\" value=\"Add\"></p>"));
     CHECK(has(html, "<select name=\"netstalgia\"><option value=\"off\">Off") && has(html, "<option value=\"on\" selected>On"));
     CHECK(has(html, "No list."));
 
@@ -1256,7 +1281,7 @@ static void test_services_page(void)
     CHECK(out.mru == 576 && out.n_users == 3);          /* the rest as it was */
     c = out;
     CHECK(settings_render_page(&c, SETTINGS_SERVICES, 0, NULL, html, sizeof html) > 0);
-    CHECK(has(html, "name=\"sname1\" size=\"24\" maxlength=\"47\" value=\"My &quot;board&quot;\">"));
+    CHECK(has(html, "name=\"sname1\" size=\"18\" maxlength=\"47\" value=\"My &quot;board&quot;\">"));
     CHECK(has(html, "<option value=\"telnet\" selected>telnet</option>"));
     CHECK(has(html, "Off: the box does not answer these."));
     /* what a browser sends back is the same config */

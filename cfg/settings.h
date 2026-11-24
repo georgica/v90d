@@ -31,6 +31,8 @@
  *   compression       on | off (PPP compression, [ppp])
  *   admin_password    new password of this page, empty = keep
  *   admin_clear       1 = remove the password of this page
+ *   add               the Add button of the Users and Numbers pages (any
+ *                     value): saved as ever, then the page with an empty row
  *   netstalgia        on | off: answer the numbers of Netstalgia's list of
  *                     services too ([services])
  *   snum0 .. snum15   the owner's service numbers, empty = row not used
@@ -109,6 +111,10 @@ enum { SETTINGS_ALL, SETTINGS_LINE, SETTINGS_MODEM, SETTINGS_USERS, SETTINGS_NET
         * page of all settings. */
        SETTINGS_SERVICES, SETTINGS_PAGES };
 int settings_render_page(const cfg_t *c, int page, int saved, const char *error, char *buf, size_t cap);
+/* The same with add: one more empty row on the Users and Numbers pages (the
+ * Add button: the page saved, then shown again with a row to fill in). Those
+ * pages show their entries, and one empty row while there is none. */
+int settings_render_page_add(const cfg_t *c, int page, int saved, int add, const char *error, char *buf, size_t cap);
 /* What the Dreamcast page says about the VPN profile (vpn.h) that the
  * owner keeps: "host port" of its server, or NULL when none is stored. The
  * profile itself is never shown. */
@@ -142,6 +148,9 @@ int settings_page_of(const char *path, size_t len);
  * err may be NULL if errsz is 0. */
 int settings_apply(const cfg_t *cur, const char *body, size_t len, cfg_t *out,
                    char *err, size_t errsz);
+/* 1 if the form that settings_apply() took last was posted with its Add
+ * button (field add, any value): show the page with an empty row next */
+int settings_added(void);
 
 /* The login page: user name and password, posted to /login. failed adds
  * the line that the last try was wrong. At most LOGIN_HTML_MAX octets;

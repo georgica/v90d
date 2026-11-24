@@ -571,7 +571,8 @@ static void post_done(httpd_t *h, httpd_conn_t *c, uint32_t now)
         sb_puts(&s, "<!DOCTYPE html>\n<html lang=\"en\"><head><title>" PAGE_NAME " settings</title></head><body>\n"
                     "<p>Settings saved. <a href=\"");
         sb_puts(&s, settings_page_path(c->post_page));
-        sb_puts(&s, "?saved=1\">Continue</a></p>\n</body></html>\n");
+        sb_puts(&s, settings_added() ? "?saved=1&amp;add=1\">Continue</a></p>\n</body></html>\n"
+                                     : "?saved=1\">Continue</a></p>\n</body></html>\n");
         {
             /* back to the page the form was on */
             char at[64];
@@ -579,7 +580,7 @@ static void post_done(httpd_t *h, httpd_conn_t *c, uint32_t now)
             int blen = sb_end(&s);
             sb_init(&l, at, sizeof at);
             sb_puts(&l, "Location: "); sb_puts(&l, settings_page_path(c->post_page));
-            sb_puts(&l, "?saved=1\r\n");
+            sb_puts(&l, settings_added() ? "?saved=1&add=1\r\n" : "?saved=1\r\n");
             sb_end(&l);
             finish(h, c, 303, CT_HTML, at, blen, 0, now);
         }
@@ -638,8 +639,11 @@ static void settings_request(httpd_t *h, httpd_conn_t *c, size_t n, int method, 
     }
 
     if (method != M_POST) {
-        int saved = query && qlen == 7 && memcmp(query, "saved=1", 7) == 0;
-        finish(h, c, 200, CT_HTML, NULL, settings_render_page(h->cfg, page, saved, NULL, body, HTTPD_BODY_MAX),
+        /* ?saved=1 after a save, &add=1 after the Add button (or ?add=1 alone) */
+        int both = query && qlen == 13 && memcmp(query, "saved=1&add=1", 13) == 0;
+        int saved = both || (query && qlen == 7 && memcmp(query, "saved=1", 7) == 0);
+        int add = both || (query && qlen == 5 && memcmp(query, "add=1", 5) == 0);
+        finish(h, c, 200, CT_HTML, NULL, settings_render_page_add(h->cfg, page, saved, add, NULL, body, HTTPD_BODY_MAX),
                head_only, now);
         return;
     }

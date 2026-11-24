@@ -1446,7 +1446,7 @@ int main(int argc, char **argv)
         hang_up();
         /* (e) the page: the owner's rows and Netstalgia's list */
         CHECK(http("GET /services HTTP/1.0\r\n\r\n", resp, sizeof resp) > 0);
-        CHECK(strstr(resp, "name=\"snum1\" size=\"16\" maxlength=\"15\" value=\"5550002\"") != NULL);
+        CHECK(strstr(resp, "name=\"snum1\" size=\"13\" maxlength=\"15\" value=\"5550002\"") != NULL);
         CHECK(strstr(resp, "<tr><td>13855961775</td><td>NWN</td><td>raw</td><td>nwn.example:5000</td></tr>") != NULL);
         /* (f) the switch off: Netstalgia's numbers no longer answer, the owner's do */
         snprintf(post, sizeof post, "POST /services HTTP/1.0\r\nHost: 127.0.0.1:8080\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: %d\r\n\r\n%s",

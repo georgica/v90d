@@ -15,7 +15,7 @@ enum {
     F_LAN, F_ADDRESS, F_NETMASK, F_GATEWAY, F_DNS1, F_DNS2, F_PORT, F_SERVICE, F_V92, F_COMPRESSION,
     F_ENCRYPTION,
     F_DCNOW, F_DCLAN, F_DCUPNP, F_DCIWANGO, F_SATMATCH, F_UPDATE_CHECK, F_X2, F_K56,
-    F_SVCNET,
+    F_SVCNET, F_ADD,
     F_COUNT,
     F_USER = 100, F_PASS = 200,     /* plus the row */
     F_SVC = 300                     /* plus 100 * the S_ column, plus the row */
@@ -39,7 +39,7 @@ static const struct { const char *name; const char *sec; } fields[F_COUNT] = {
     { "encryption", "ppp" },
     { "dreamcast_now", "line" }, { "dreamcast_lan", "line" }, { "dreamcast_upnp", "line" }, { "dreamcast_iwango", "line" }, { "saturn_matchmaking", "line" },
     { "update_check", "system" }, { "x2", "modem" }, { "k56", "modem" },
-    { "netstalgia", "services" },
+    { "netstalgia", "services" }, { "add", "status" },
 };
 
 static const char *const n_tones[] = { "us", "eu" };
@@ -216,9 +216,22 @@ void settings_set_vpn(const char *remote)
     snprintf(vpn_remote, sizeof vpn_remote, "%s", remote ? remote : "");
 }
 
+/* empty rows to show on the Users and Numbers pages beyond those that are
+ * always there (settings_render_page_add) */
+static int add_rows;
+
 int settings_render_html(const cfg_t *c, int saved, const char *error, char *buf, size_t cap)
 {
     return settings_render_page(c, SETTINGS_ALL, saved, error, buf, cap);
+}
+
+int settings_render_page_add(const cfg_t *c, int page, int saved, int add, const char *error, char *buf, size_t cap)
+{
+    int r;
+    add_rows = add ? 1 : 0;
+    r = settings_render_page(c, page, saved, error, buf, cap);
+    add_rows = 0;
+    return r;
 }
 
 int settings_render_page(const cfg_t *c, int page, int saved, const char *error, char *buf, size_t cap)
@@ -353,8 +366,9 @@ int settings_render_page(const cfg_t *c, int page, int saved, const char *error,
     sb_puts(&b, "</table>\n<div class=\"x\"><table>\n"
                 "<tr><th>#</th><th>User name</th><th>Password</th></tr>\n");
     n = c->n_users < 0 ? 0 : c->n_users > CFG_MAX_USERS ? CFG_MAX_USERS : c->n_users;
-    /* the users there are, then one empty row for a new one (none when full) */
-    for (i = 0; i < CFG_MAX_USERS && i <= n; i++) {
+    /* the users there are, and an empty row when there is none yet or Add
+     * asked for one */
+    for (i = 0; i < CFG_MAX_USERS && i < n + (n == 0) + add_rows; i++) {
         const char *name = i < n ? c->users[i].name : "";
         size_t nl = len_of(name, sizeof c->users[i].name);
         sb_puts(&b, i < n ? "<tr><td>" : "<tr class=\"new\"><td>");
@@ -369,12 +383,13 @@ int settings_render_page(const cfg_t *c, int page, int saved, const char *error,
         }
         sb_puts(&b, "</td><td>");
         in_password(&b, "pass", i);
-        if (i == n) sb_puts(&b, " <input type=\"submit\" value=\"Add\">");
         sb_puts(&b, "</td></tr>\n");
     }
-    sb_puts(&b, "</table></div>\n<p>");
+    sb_puts(&b, "</table></div>\n");
+    if (n < CFG_MAX_USERS) sb_puts(&b, "<p><input type=\"submit\" name=\"add\" value=\"Add\"></p>\n");
+    sb_puts(&b, "<p>");
     if (n >= CFG_MAX_USERS) sb_puts(&b, "There are 16 users, as many as the box takes. ");
-    else sb_puts(&b, "To add a user, fill in the last row and press Add. ");
+    else sb_puts(&b, "Add saves the page and gives it an empty row for a new user. ");
     sb_puts(&b, "To remove one, empty its name and save. Passwords are not shown: leave the"
                 " field empty to keep the one a user has, type a new one to change it.</p></section>\n");
 
@@ -424,15 +439,17 @@ int settings_render_page(const cfg_t *c, int page, int saved, const char *error,
     sb_puts(&b, "<section><h2>Numbers to services</h2>\n<div class=\"x\"><table>\n"
                 "<tr><th>#</th><th>Number</th><th>Host</th><th>Port</th><th>Mode</th><th>Name</th></tr>\n");
     n = c->n_services < 0 ? 0 : c->n_services > CFG_MAX_SERVICES ? CFG_MAX_SERVICES : c->n_services;
-    for (i = 0; i < CFG_MAX_SERVICES; i++) {
+    for (i = 0; i < CFG_MAX_SERVICES && i < n + (n == 0) + add_rows; i++) {
         const cfg_service_t *e = &c->services[i];
         int used = i < n, m;
-        sb_puts(&b, "<tr><td>"); sb_u64(&b, (uint64_t)i + 1u); sb_puts(&b, "</td><td>");
-        in_open(&b, "text", svc_col[S_NUM], i, 16, CFG_SVC_NUMBER_MAX);
+        sb_puts(&b, used ? "<tr><td>" : "<tr class=\"new\"><td>");
+        if (used) sb_u64(&b, (uint64_t)i + 1u); else sb_puts(&b, "New");
+        sb_puts(&b, "</td><td>");
+        in_open(&b, "text", svc_col[S_NUM], i, 13, CFG_SVC_NUMBER_MAX);
         sb_puts(&b, " value=\""); if (used) sb_html(&b, e->number, sizeof e->number, 0); sb_puts(&b, "\"></td><td>");
-        in_open(&b, "text", svc_col[S_HOST], i, 22, CFG_SVC_HOST_MAX);
+        in_open(&b, "text", svc_col[S_HOST], i, 18, CFG_SVC_HOST_MAX);
         sb_puts(&b, " value=\""); if (used) sb_html(&b, e->host, sizeof e->host, 0); sb_puts(&b, "\"></td><td>");
-        in_open(&b, "text", svc_col[S_PORT], i, 6, 5);
+        in_open(&b, "text", svc_col[S_PORT], i, 5, 5);
         sb_puts(&b, " value=\""); if (used) sb_u64(&b, e->port); sb_puts(&b, "\"></td><td>");
         sb_puts(&b, "<select name=\"smode"); sb_u64(&b, (uint64_t)i); sb_puts(&b, "\">");
         for (m = 0; m < 2; m++) {
@@ -440,10 +457,12 @@ int settings_render_page(const cfg_t *c, int page, int saved, const char *error,
             sb_puts(&b, used && e->mode == m ? "\" selected>" : "\">"); sb_puts(&b, n_svcmode[m]); sb_puts(&b, "</option>");
         }
         sb_puts(&b, "</select></td><td>");
-        in_open(&b, "text", svc_col[S_NAME], i, 24, CFG_SVC_NAME_MAX);
+        in_open(&b, "text", svc_col[S_NAME], i, 18, CFG_SVC_NAME_MAX);
         sb_puts(&b, " value=\""); if (used) sb_html(&b, e->name, sizeof e->name, 0); sb_puts(&b, "\"></td></tr>\n");
     }
-    sb_puts(&b, "</table></div>\n<table>\n");
+    sb_puts(&b, "</table></div>\n");
+    if (n < CFG_MAX_SERVICES) sb_puts(&b, "<p><input type=\"submit\" name=\"add\" value=\"Add\"></p>\n");
+    sb_puts(&b, "<table>\n");
     in_select(&b, "Netstalgia's numbers", F_SVCNET, c->svc_netstalgia, n_v92, t_svcnet, 2);
     sb_puts(&b, "</table>\n<p>A caller who dials one of these numbers, on either port and whatever its"
                 " service, is connected straight to the host: no PPP, the call carries what the modems"
@@ -513,6 +532,7 @@ typedef struct {
     char        admin_pw[CFG_SECRET_MAX + 1];
     int         invalid;
     int         port2;                      /* the line and modem fields are port 2's */
+    int         add;                        /* the Add button: a new empty row after saving */
     int         bad;                        /* not a form of ours after all */
     char        msg[SETTINGS_MSG_MAX];
 } form_t;
@@ -731,6 +751,7 @@ static void set_field(form_t *f, int fi, const char *v, size_t len)
     case F_ENCRYPTION: set_enum(f, fi, &c->encryption, v, n_comp, 2, "on, off"); break;
     case F_UPDATE_CHECK: set_enum(f, fi, &c->update_check, v, n_v92, 2, "on, off"); break;
     case F_SVCNET:  set_enum(f, fi, &c->svc_netstalgia, v, n_v92, 2, "on, off"); break;
+    case F_ADD:     f->add = 1; break;          /* the button's label, whatever it is */
     case F_ADDRESS: set_addr(f, fi, &c->lan_addr, v, 0); break;
     case F_NETMASK: set_addr(f, fi, &c->lan_netmask, v, 0); break;
     case F_GATEWAY: set_addr(f, fi, &c->lan_gateway, v, 1); break;
@@ -839,6 +860,9 @@ static void build_services(form_t *f, const cfg_t *cur)
     c->n_services = n;
 }
 
+static int last_add;
+int settings_added(void) { return last_add; }
+
 int settings_apply(const cfg_t *cur, const char *body, size_t len, cfg_t *out,
                    char *err, size_t errsz)
 {
@@ -848,6 +872,7 @@ int settings_apply(const cfg_t *cur, const char *body, size_t len, cfg_t *out,
     int i;
 
     memset(&f, 0, sizeof f);
+    last_add = 0;
     f.out = out;
     for (i = 0; i < F_COUNT; i++) f.sw[i] = -1;
     *out = *cur;
@@ -915,6 +940,7 @@ int settings_apply(const cfg_t *cur, const char *body, size_t len, cfg_t *out,
     build_users(&f, cur);
     build_services(&f, cur);
 
+    last_add = f.add;
     if (f.port2) { cfg_t view = *out; cfg_for_port(&view, 1, out); }
     if (!f.invalid && cfg_validate(out, f.msg, sizeof f.msg) != CFG_OK) f.invalid = 1;
     if (f.invalid) {
