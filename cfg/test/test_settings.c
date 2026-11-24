@@ -1239,7 +1239,7 @@ static void test_services_page(void)
     CHECK(settings_render_html(&c, 0, NULL, html, sizeof html) > 0);
     CHECK(!has(html, "snum0") && has(html, "<a href=\"/bbs\">Services</a>"));
     CHECK(settings_render_page(&c, SETTINGS_SERVICES, 0, NULL, html, sizeof html) > 0);
-    CHECK(has(html, "<span class=\"d\"><a href=\"/bbs\">BBS</a><b>Numbers</b></span>"));
+    CHECK(has(html, "<span class=\"dd\"><a href=\"/bbs\">BBS</a><b>Numbers</b></span>"));
     settings_set_svc_rows(NULL);
     CHECK(settings_render_page(&c, SETTINGS_SERVICES, 0, NULL, html, sizeof html) > 0);
     CHECK(has(html, "<a class=\"on\" href=\"/bbs\">Services</a>") && has(html, "name=\"snum15\"") && !has(html, "snum16"));

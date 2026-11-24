@@ -183,8 +183,8 @@ static void test_idle(void)
     /* the look: light and dark, a header that marks this page, the state
      * as a badge with a line under it, the call list free to scroll */
     CHECK(has(html, "prefers-color-scheme:dark"));
-    CHECK(has(html, "<nav><span class=\"m\"><a class=\"on\" href=\"/\">Status</a><span class=\"d\"><b>Dashboard</b><a href=\"/calls\">Calls</a></span></span>"));
-    CHECK(has(html, "nav .m:hover .d,nav .m:focus-within .d{display:block}"));      /* the drop-down, by CSS alone */
+    CHECK(has(html, "<nav><span class=\"mn\"><a class=\"on\" href=\"/\">Status</a><span class=\"dd\"><b>Dashboard</b><a href=\"/calls\">Calls</a></span></span>"));
+    CHECK(has(html, "nav .mn:hover .dd,nav .mn:focus-within .dd{display:block}"));      /* the drop-down, by CSS alone */
     CHECK(has(html, "<title>Nestaliga status</title>"));
     CHECK(has(html, "<h1><i></i>Nestaliga<small>dial-up server</small></h1>"));
     CHECK(has(html, "<span class=\"b s0\">idle</span>"));

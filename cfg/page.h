@@ -41,16 +41,16 @@
     "nav a{color:#fff;background:rgba(255,255,255,.12)}" \
     "nav b{color:#1f2a44;background:var(--ac)}" \
     "nav .r{margin-left:auto;background:none;color:#c3cbda}" \
-    "nav .m{position:relative;display:flex}" \
-    "nav .m>a.on{color:#1f2a44;background:var(--ac)}" \
-    "nav .d{display:none;position:absolute;top:100%;left:0;z-index:9;min-width:100%;" \
+    "nav .mn{position:relative;display:flex}" \
+    "nav .mn>a.on{color:#1f2a44;background:var(--ac)}" \
+    "nav .dd{display:none;position:absolute;top:100%;left:0;z-index:9;min-width:100%;" \
     "padding:4px 0;background:var(--hd);border:1px solid rgba(255,255,255,.15);border-radius:0 6px 6px 6px;" \
     "box-shadow:0 6px 16px rgba(0,0,0,.3)}" \
-    "nav .m:hover .d,nav .m:focus-within .d{display:block}" \
-    "nav .d a,nav .d b{display:block;white-space:nowrap;border-radius:0;background:none;" \
+    "nav .mn:hover .dd,nav .mn:focus-within .dd{display:block}" \
+    "nav .dd a,nav .dd b{display:block;white-space:nowrap;border-radius:0;background:none;" \
     "padding:7px 18px;color:#fff;letter-spacing:.04em}" \
-    "nav .d a:hover{background:rgba(255,255,255,.12)}" \
-    "nav .d b{color:var(--ac)}" \
+    "nav .dd a:hover{background:rgba(255,255,255,.12)}" \
+    "nav .dd b{color:var(--ac)}" \
     "main{padding-top:18px}" \
     "section,.k{background:var(--pn);border:1px solid var(--ln);border-radius:10px;" \
     "box-shadow:var(--sh);overflow:hidden}" \
@@ -148,9 +148,9 @@ static inline void page_top(sbuf_t *b, const char *title, const char *head, int 
                 if (first < 0) first = i;
                 if (i == active) mine = 1;
             }
-            sb_puts(b, "<span class=\"m\"><a"); if (mine) sb_puts(b, " class=\"on\"");
+            sb_puts(b, "<span class=\"mn\"><a"); if (mine) sb_puts(b, " class=\"on\"");
             sb_puts(b, " href=\""); sb_puts(b, tabs[first].href); sb_puts(b, "\">");
-            sb_puts(b, sections[s].label); sb_puts(b, "</a><span class=\"d\">");
+            sb_puts(b, sections[s].label); sb_puts(b, "</a><span class=\"dd\">");
             for (k = 0; k < 4 && sections[s].tab[k] >= 0; k++) {
                 int i = sections[s].tab[k];
                 if (i == PAGE_TAB_CONSOLES && !page_consoles_tab && i != active) continue;

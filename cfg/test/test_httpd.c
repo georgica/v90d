@@ -1664,7 +1664,7 @@ static void test_two_ports(void)
     len = exchange("GET /firmware HTTP/1.0\r\n\r\n", resp, sizeof resp);
     CHECK(strstr(resp, "<a href=\"/dreamcast\">Services</a>") != NULL);
     len = exchange("GET /bbs HTTP/1.0\r\n\r\n", resp, sizeof resp);
-    CHECK(strstr(resp, "<span class=\"d\"><a href=\"/dreamcast\">Consoles</a><b>BBS</b>") != NULL);
+    CHECK(strstr(resp, "<span class=\"dd\"><a href=\"/dreamcast\">Consoles</a><b>BBS</b>") != NULL);
     CHECK_EQ_I(code_of("GET /saturn HTTP/1.0\r\nHost: 192.168.1.2\r\n\r\n"), 404);   /* no separate Saturn tab */
     C.service = CFG_SERVICE_INTERNET;
     len = exchange("GET /firmware HTTP/1.0\r\n\r\n", resp, sizeof resp);
