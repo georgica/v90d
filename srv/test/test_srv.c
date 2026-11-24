@@ -1506,6 +1506,7 @@ static void test_bbs_signature(void)
     static const char body[] = "# test list\nv90d-bbs 2\nbbs telehack 2278353422 telehack.com Telehack\n";
     static const char sighex[] = "7c87360e8104f757a267de88b9578877b333a9348f2f56d443669a45a3b5b06d35c37940637e7a879607b4345fe88abbfa3ee6ed963708896eb09f8a0a815d05";
     uint8_t keys[2][32], pk[32], sig[64], m[2], h[64];
+    uint64_t ser = 0;
     char list[512], bad[512];
     int i, zero;
     printf("bbs: the signature on the list\n");
@@ -1526,29 +1527,65 @@ static void test_bbs_signature(void)
     memset(keys, 0, sizeof keys);
     hexin("2152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db12", keys[1], 32);
     snprintf(list, sizeof list, "%s" BBS_SIG_TAG "%s\n", body, sighex);
-    CHECK_EQ_I(bbs_sig_check(list, strlen(list), (const uint8_t (*)[32])keys, 2), BBS_SIG_OK);
-    CHECK_EQ_I(bbs_sig_check(list, strlen(list) - 1, (const uint8_t (*)[32])keys, 2), BBS_SIG_OK);   /* no last line end */
+    CHECK_EQ_I(bbs_sig_check(list, strlen(list), (const uint8_t (*)[32])keys, 2, NULL), BBS_SIG_OK);
+    CHECK_EQ_I(bbs_sig_check(list, strlen(list) - 1, (const uint8_t (*)[32])keys, 2, NULL), BBS_SIG_OK);   /* no last line end */
     /* a board changed, added in front or behind the signature: refused */
     strcpy(bad, list); bad[strstr(bad, "telehack.com") - bad] = 'T';
-    CHECK_EQ_I(bbs_sig_check(bad, strlen(bad), (const uint8_t (*)[32])keys, 2), BBS_SIG_BAD);
+    CHECK_EQ_I(bbs_sig_check(bad, strlen(bad), (const uint8_t (*)[32])keys, 2, NULL), BBS_SIG_BAD);
     snprintf(bad, sizeof bad, "bbs evil 2273845000 evil.example Evil\n%s", list);
-    CHECK_EQ_I(bbs_sig_check(bad, strlen(bad), (const uint8_t (*)[32])keys, 2), BBS_SIG_BAD);
+    CHECK_EQ_I(bbs_sig_check(bad, strlen(bad), (const uint8_t (*)[32])keys, 2, NULL), BBS_SIG_BAD);
     snprintf(bad, sizeof bad, "%sbbs evil 2273845000 evil.example Evil\n", list);
-    CHECK_EQ_I(bbs_sig_check(bad, strlen(bad), (const uint8_t (*)[32])keys, 2), BBS_SIG_NONE);
+    CHECK_EQ_I(bbs_sig_check(bad, strlen(bad), (const uint8_t (*)[32])keys, 2, NULL), BBS_SIG_NONE);
     /* no signature line, a short one, upper case hex: none */
-    CHECK_EQ_I(bbs_sig_check(body, strlen(body), (const uint8_t (*)[32])keys, 2), BBS_SIG_NONE);
+    CHECK_EQ_I(bbs_sig_check(body, strlen(body), (const uint8_t (*)[32])keys, 2, NULL), BBS_SIG_NONE);
     snprintf(bad, sizeof bad, "%s" BBS_SIG_TAG "%.126s\n", body, sighex);
-    CHECK_EQ_I(bbs_sig_check(bad, strlen(bad), (const uint8_t (*)[32])keys, 2), BBS_SIG_NONE);
+    CHECK_EQ_I(bbs_sig_check(bad, strlen(bad), (const uint8_t (*)[32])keys, 2, NULL), BBS_SIG_NONE);
     snprintf(bad, sizeof bad, "%s" BBS_SIG_TAG "7C%s\n", body, sighex + 2);
-    CHECK_EQ_I(bbs_sig_check(bad, strlen(bad), (const uint8_t (*)[32])keys, 2), BBS_SIG_NONE);
+    CHECK_EQ_I(bbs_sig_check(bad, strlen(bad), (const uint8_t (*)[32])keys, 2, NULL), BBS_SIG_NONE);
+    /* the serial: inside the signed part, read back, and what is taken */
+    {
+        static const char sbody[] = "# test list\n# serial 2026112301\nv90d-bbs 2\nbbs telehack 2278353422 telehack.com Telehack\n";
+        static const char ssig[] = "059b45cd2f8c8bd3f4cf3561352734bed9ef5a242cd243e69c6eceb602719f4aca37b4eb9eb7fb6ec5e80abc5e6f85177774d58f7a113909f1bb6832ad3b0f06";
+        hexin("2152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db12", keys[1], 32);
+        snprintf(list, sizeof list, "%s" BBS_SIG_TAG "%s\n", sbody, ssig);
+        CHECK_EQ_I(bbs_sig_check(list, strlen(list), (const uint8_t (*)[32])keys, 2, &ser), BBS_SIG_OK);
+        CHECK(ser == 2026112301ull);
+        /* a higher serial put in: no longer what was signed */
+        strcpy(bad, list); bad[strstr(bad, "2026112301") - bad + 9] = '9';
+        CHECK_EQ_I(bbs_sig_check(bad, strlen(bad), (const uint8_t (*)[32])keys, 2, &ser), BBS_SIG_BAD);
+        /* a serial line after the signature is not inside it */
+        snprintf(bad, sizeof bad, "%s# serial 9999999999\n", list);
+        CHECK_EQ_I(bbs_sig_check(bad, strlen(bad), (const uint8_t (*)[32])keys, 2, &ser), BBS_SIG_NONE);
+    }
+    CHECK(bbs_serial("# serial 42\n", 12) == 42);
+    CHECK(bbs_serial("# serial 42\r\n", 13) == 42);
+    CHECK(bbs_serial("# serial 42", 11) == 42);
+    CHECK(bbs_serial("a\n# serial 7\nb\n", 15) == 7);
+    CHECK(bbs_serial("# serial 1\n# serial 2\n", 22) == 0);       /* twice */
+    CHECK(bbs_serial("# serial 4x\n", 12) == 0);
+    CHECK(bbs_serial("# serial \n", 10) == 0);
+    CHECK(bbs_serial("# serial  4\n", 12) == 0);
+    CHECK(bbs_serial("# serial 9999999999999999999\n", 29) == 9999999999999999999ull);
+    CHECK(bbs_serial("# serial 99999999999999999999\n", 30) == 0); /* 20 digits */
+    CHECK(bbs_serial("# serials 4\n", 12) == 0);
+    CHECK(bbs_serial("v90d-bbs 2\n", 11) == 0);
+    CHECK_EQ_I(bbs_take(BBS_SIG_OK, 7, 6), BBS_TAKE);
+    CHECK_EQ_I(bbs_take(BBS_SIG_OK, 7, 0), BBS_TAKE);
+    CHECK_EQ_I(bbs_take(BBS_SIG_OK, 6, 6), BBS_TAKE_SAME);
+    CHECK_EQ_I(bbs_take(BBS_SIG_OK, 5, 6), BBS_TAKE_OLD);
+    CHECK_EQ_I(bbs_take(BBS_SIG_OK, 0, 0), BBS_TAKE_OLD);
+    CHECK_EQ_I(bbs_take(BBS_SIG_OK, 0, 6), BBS_TAKE_OLD);
+    CHECK_EQ_I(bbs_take(BBS_SIG_BAD, 9, 6), BBS_TAKE_UNSIGNED);
+    CHECK_EQ_I(bbs_take(BBS_SIG_NONE, 9, 6), BBS_TAKE_UNSIGNED);
     /* signed, but by a key the box does not know (or no key at all) */
     memset(keys, 0, sizeof keys);
-    CHECK_EQ_I(bbs_sig_check(list, strlen(list), (const uint8_t (*)[32])keys, 2), BBS_SIG_BAD);
+    CHECK_EQ_I(bbs_sig_check(list, strlen(list), (const uint8_t (*)[32])keys, 2, NULL), BBS_SIG_BAD);
     keys[0][0] = 1;
-    CHECK_EQ_I(bbs_sig_check(list, strlen(list), (const uint8_t (*)[32])keys, 2), BBS_SIG_BAD);
+    CHECK_EQ_I(bbs_sig_check(list, strlen(list), (const uint8_t (*)[32])keys, 2, NULL), BBS_SIG_BAD);
     /* the list in the image, once there is a key, is Netstalgia's signed one */
     for (zero = 1, i = 0; i < BBS_SIG_KEYS * 32; i++) if (bbs_sig_keys[i / 32][i % 32]) zero = 0;
-    if (!zero) CHECK_EQ_I(bbs_sig_file("../lists/bbs.txt", bbs_sig_keys, BBS_SIG_KEYS), BBS_SIG_OK);
+    if (!zero) CHECK_EQ_I(bbs_sig_file("../lists/bbs.txt", bbs_sig_keys, BBS_SIG_KEYS, &ser), BBS_SIG_OK);
+    if (!zero) CHECK(ser > 0);
 }
 
 static void test_v92_call(void)

@@ -306,7 +306,12 @@ front. A port whose own number looks like one of them keeps its number.
   TweetNaCl), away from the loop: a check costs a good part of a second
   on the box. A list nobody we know signed is thrown away and the box
   keeps the one it has, the image's at worst; the next try is a day
-  later. There is no unsigned source any more (until 0.10 the box fell
+  later. Inside the signed part a `# serial N` line numbers the list
+  (Netstalgia only raises it, YYYYMMDDnn); the box takes a list only when
+  its serial is above that of the list it has (the image's at first, so
+  the snapshot's serial; an equal one is the same list, kept quietly), so
+  an old signed list cannot be handed to it again, and a list without a
+  serial is never taken. There is no unsigned source any more (until 0.10 the box fell
   back to the guide's own archive): the connection is not trusted, only
   the signature, so someone on the path can withhold the list but cannot
   change it. What passes is then checked line by line by the daemon (the

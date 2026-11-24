@@ -1212,17 +1212,17 @@ int main(int argc, char **argv)
         }
         f = fopen(builtin, "w");
         if (f) {
-            fprintf(f, "# the list in the image\nv90d-bbs 2\n"
+            fprintf(f, "# the list in the image\n# serial 6\nv90d-bbs 2\n"
                        "bbs telehack 2278353422 tele.example Telehack\nbbs 20forbeers 2272036723 b.example:1337 20 For Beers <BBS>\n"
                        "bbs dead 2273323000 dead.example Dead Board\n");
             fclose(f);
         }
         f = fopen(fetched, "w");
         if (f) {
-            /* signed with the test key (test/bbskeys_test.h) */
-            fprintf(f, "v90d-bbs 2\nbbs telehack 2278353422 tele.example Telehack\nbbs 20forbeers 2272036723 b.example:1337 20 For Beers <BBS>\n"
+            /* signed with the test key (test/bbskeys_test.h); newer than the image's */
+            fprintf(f, "# serial 7\nv90d-bbs 2\nbbs telehack 2278353422 tele.example Telehack\nbbs 20forbeers 2272036723 b.example:1337 20 For Beers <BBS>\n"
                        "bbs newboard 2276392627 n.example New Board\n"
-                       "# sig ed25519 abc614a5c5d0f4de226a8ed99ea5bdef0e3ca114ca5bdae3dca4e2242067894d3ede0456f0a4b3e68366bc33333472662a8fca4bfa593dad8462123c4924110b\n");
+                       "# sig ed25519 2f3f4aac9de5966c376f248f8dd45019d2ea0be983490812bc517dd59ab0a53a766777895ce008c04233a84c7202e380c506eb5cb715345a6ed19ca22e6fdc0d\n");
             fclose(f);
         }
         unlink(live);

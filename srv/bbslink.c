@@ -40,19 +40,20 @@ static void child_setup(int in, int out)
 /* ---- the list, a line at a time: a file is never read in one go, the
  * loop has a telephone line to serve ---- */
 #define SCAN_CHUNK 512
-typedef struct { int fd; char line[BBS_LINE_MAX + 2]; size_t n; int skip; } scan_t;
+typedef struct { int fd; char line[BBS_LINE_MAX + 2]; size_t n; int skip; uint64_t serial; } scan_t;
 typedef int (*scan_fn)(void *ctx, int kind, const bbs_entry *e);   /* 1 = enough */
 
 static int scan_open(scan_t *s, const char *path)
 {
     s->fd = open(path, O_RDONLY | O_CLOEXEC | O_NONBLOCK);
-    s->n = 0; s->skip = 0;
+    s->n = 0; s->skip = 0; s->serial = 0;
     return s->fd;
 }
 static void scan_close(scan_t *s) { if (s->fd >= 0) close(s->fd); s->fd = -1; }
 static int scan_line(scan_t *s, scan_fn fn, void *ctx)
 {
     bbs_entry e; int kind = s->skip ? BBS_LINE_BAD : bbs_line(s->line, s->n, &e);
+    if (kind == BBS_LINE_NONE && !s->serial) s->serial = bbs_serial(s->line, s->n);   /* "# serial N" (bbssig.h) */
     s->n = 0; s->skip = 0;
     return fn(ctx, kind, &e);
 }
@@ -75,8 +76,9 @@ static int scan_step(scan_t *s, scan_fn fn, void *ctx)
     }
     return 0;
 }
-/* the list in force: the fetched one once there is one */
+/* the list in force: the fetched one once there is one, and its serial */
 static int have_live;
+static uint64_t live_serial;
 static const char *list_path(void) { return have_live ? live_path : builtin_path; }
 
 
@@ -93,16 +95,25 @@ static struct {
 /* The fetch, in a child of the daemon: the command writes the list to
  * standard output (the new file), then the signature on it is checked here,
  * away from the loop (a check takes a good part of a second on the box). */
-#define FETCH_UNSIGNED 3
+#define FETCH_UNSIGNED 3        /* nobody we know signed it */
+#define FETCH_OLD      4        /* signed, but older than the list in force (or no serial) */
+#define FETCH_SAME     5        /* the list in force again */
 static int fetch_child(void)
 {
-    pid_t p; int st;
+    pid_t p; int st, r; uint64_t got, have;
     p = fork();
     if (p == 0) { execl("/bin/sh", "sh", "-c", fetch_cmd, (char *)NULL); _exit(127); }
     if (p < 0) return 126;
     while (waitpid(p, &st, 0) < 0) if (errno != EINTR) return 126;
     if (!WIFEXITED(st) || WEXITSTATUS(st) != 0) return 1;
-    return bbs_sig_file(ld.tmp, bbs_sig_keys, BBS_SIG_KEYS) == BBS_SIG_OK ? 0 : FETCH_UNSIGNED;
+    r = bbs_sig_file(ld.tmp, bbs_sig_keys, BBS_SIG_KEYS, &got);
+    have = have_live ? live_serial : bbs_serial_file(builtin_path);
+    switch (bbs_take(r, got, have)) {
+    case BBS_TAKE:      return 0;
+    case BBS_TAKE_SAME: return FETCH_SAME;
+    case BBS_TAKE_OLD:  return FETCH_OLD;
+    default:            return FETCH_UNSIGNED;
+    }
 }
 
 static int ld_line(void *ctx, int kind, const bbs_entry *e)
@@ -126,16 +137,17 @@ static void ld_poll(uint32_t now_ms)
             return;
         }
         if (rename(ld.tmp, live_path) < 0) { logf_(CFG_LOG_WARN, "bbs: the list that came cannot be kept: %s", strerror(errno)); return; }
-        have_live = 1;
+        have_live = 1; live_serial = ld.sc.serial;
         logf_(CFG_LOG_INFO, "bbs: fetched list with %d boards%s", ld.n_bbs, ld.n_bad ? " (some lines not understood)" : "");
         return;
     }
     if (ld.pid > 0) {
         if (waitpid(ld.pid, &st, WNOHANG) != ld.pid) return;
         ld.pid = 0;
-        if (WIFEXITED(st) && WEXITSTATUS(st) == FETCH_UNSIGNED) {
-            /* fetched, but nobody we know signed it: nothing to try again soon */
-            logf_(CFG_LOG_WARN, "bbs: the list that came is not signed by Netstalgia; keeping the one there is");
+        if (WIFEXITED(st) && (WEXITSTATUS(st) == FETCH_UNSIGNED || WEXITSTATUS(st) == FETCH_OLD || WEXITSTATUS(st) == FETCH_SAME)) {
+            /* fetched, but not to be taken: nothing to try again soon */
+            if (WEXITSTATUS(st) == FETCH_UNSIGNED) logf_(CFG_LOG_WARN, "bbs: the list that came is not signed by Netstalgia; keeping the one there is");
+            else if (WEXITSTATUS(st) == FETCH_OLD) logf_(CFG_LOG_WARN, "bbs: the list that came is older than the one there is; keeping that");
             (void)unlink(ld.tmp);
             ld.next_ms = now_ms + 24u * 3600u * 1000u; ld.fails = 0;
             return;

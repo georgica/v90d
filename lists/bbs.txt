@@ -1,5 +1,6 @@
 # Netstalgia Online: the BBS list behind 1-800-BBS-DIAL
 # source: telnetbbsguide.com, updated Mon, 23 Nov 2026 05:22:43 GMT
+# serial 2026112400
 v90d-bbs 2
 
 bbs 0xdecafbad 2270933223 bbs.decafbad.com:6523 0xDECAFBAD BBS
@@ -1083,4 +1084,4 @@ bbs wrongnumberiv 2279766472 wn4.wrgnbr.com:3000 Wrong Number IV BBS
 bbs zruspas 2279787727 bbs.zruspas.org Zruspa's BBS
 bbs z80 2279800000 bbs.probosci.de:3339 Z80
 bbs x84 2279840000 1984.ws X/84 BBS
-# sig ed25519 84f754bab492f150c927f95e23fec0a4f8ed5c7ddccc4f99c6938f36c38bfe81082aebcf618e0ff3a25354e0b050e82c7a9f3de1973c8b6c51f442214a5e4103
+# sig ed25519 7ef674d33f85956c78a1d0a130172a95aec5cde84e20a805b99d6770754db37205add53abbc77c1fb6305826b343be73106741ddd6f302f348e9fa588507c005

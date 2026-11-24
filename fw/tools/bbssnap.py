@@ -62,10 +62,13 @@ def check(data):
             pass
     else:
         sys.exit("no key in srv/bbskeys.h signed this list")
+    serials = re.findall(rb"^# serial ([0-9]{1,19})\r?$", data[:start], re.M)
+    if len(serials) != 1 or int(serials[0]) == 0:
+        sys.exit("the signed list has no serial line (or more than one): boxes would refuse it")
     lines = [l for l in data[:start].split(b"\n") if l and not l.startswith(b"#")]
     if not lines or lines[0].rstrip(b"\r") != b"v90d-bbs 2":
         sys.exit("signed, but not a list")
-    return sum(1 for l in lines if l.startswith(b"bbs "))
+    return sum(1 for l in lines if l.startswith(b"bbs ")), int(serials[0])
 
 
 def main():
@@ -85,9 +88,9 @@ def main():
         data = urllib.request.urlopen(req, timeout=30).read(512 * 1024 + 1)
     if len(data) > 256 * 1024:
         sys.exit("the list is larger than a box takes")
-    n = check(data)
+    n, serial = check(data)
     open(LIST, "wb").write(data)
-    print("lists/bbs.txt: %d boards, signed" % n)
+    print("lists/bbs.txt: %d boards, signed, serial %d" % (n, serial))
 
 
 if __name__ == "__main__":
