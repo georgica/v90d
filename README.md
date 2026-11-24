@@ -172,6 +172,16 @@ addresses it cannot reach. With it off the callers are given the two
 servers to ask themselves, as before. A Dreamcast port keeps its own name
 servers, and a call in archive mode keeps the archive's.
 
+## IPv6
+
+The box takes an IPv6 address on its LAN port when your network's router
+offers one (Network page, IPv6, on by default), and with it the router's
+IPv6 name servers. Its own connections to boards and services then go over
+IPv6 or IPv4, whichever the name has and works. The dial-up callers stay on
+IPv4 (their name server answers them no IPv6 addresses, above); on a
+network with IPv6 alone their names still resolve, through the router's
+name servers.
+
 ## The terminal menu
 
 With **Terminal menu** on (Services, Numbers page), a caller who dials a

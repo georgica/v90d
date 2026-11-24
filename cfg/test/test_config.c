@@ -188,6 +188,7 @@ static void test_defaults(void)
     CHECK(c.dns[1] == IP(1, 1, 1, 1));
     CHECK_EQ_I(c.nat, 1);
     CHECK_EQ_I(c.dns_relay, 1);
+    CHECK_EQ_I(c.ipv6, 1);
     CHECK_EQ_I(c.service, CFG_SERVICE_INTERNET);   /* archive mode is asked for, never the default */
     CHECK_EQ_I(c.auth, CFG_AUTH_NONE);
     CHECK_EQ_I(c.mru, 1500);
@@ -272,6 +273,7 @@ static const char full[] =
     "dns2 = none\n"
     "nat = off\n"
     "dns_relay = off\n"
+    "ipv6 = off\n"
     "archive = on\n"
     "\n"
     "[ ppp ]\n"
@@ -320,6 +322,7 @@ static void test_full(void)
     CHECK(c.dns[1] == 0);
     CHECK_EQ_I(c.nat, 0);
     CHECK_EQ_I(c.dns_relay, 0);
+    CHECK_EQ_I(c.ipv6, 0);
     CHECK_EQ_I(c.service, CFG_SERVICE_ARCHIVE);
     CHECK_EQ_I(c.auth, CFG_AUTH_CHAP);
     CHECK_EQ_I(c.mru, 576);

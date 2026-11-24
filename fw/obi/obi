@@ -98,6 +98,12 @@ fi
 eval "$(/usr/sbin/v90d -c $CONF -p)" || LAN_MODE=dhcp
 ifconfig lo 127.0.0.1 up
 ifconfig $LAN 0.0.0.0 allmulti up
+# [network] ipv6 = off: no IPv6 on the LAN port (the kernel would take an
+# address from any router advertisement). Under a kernel without IPv6 there
+# is nothing to turn off.
+if [ "$LAN_IPV6" = off ]; then
+    for k in all default $LAN; do echo 1 > /proc/sys/net/ipv6/conf/$k/disable_ipv6; done 2>/dev/null
+fi
 # the rescue address, as the HT802 has it: whatever the settings say and
 # whether DHCP answers or not, the box's pages are also at 169.254.90.1 (a
 # computer on the same cable with an address in 169.254.0.0/16 reaches it)

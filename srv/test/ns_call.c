@@ -1404,7 +1404,9 @@ int main(int argc, char **argv)
         channel_init(&CH, &cc);
         memset(prev_tx, 0xFF, sizeof prev_tx);
         /* the menu wants the lists: the details are fetched, the directory made */
-        for (i = 0; i < 300 && !file_has(lanlog, "2 with the guide's details"); i++) { run_ms(100); usleep(5000); }
+        /* the fetch is a child in real time, started on the daemon's clock:
+         * up to about 20 s of both, for a loaded machine (it ends when seen) */
+        for (i = 0; i < 1000 && !file_has(lanlog, "2 with the guide's details"); i++) { run_ms(100); usleep(20000); }
         CHECK(file_has(lanlog, "menu: the BBS directory has 2 boards, 2 with the guide's details"));
         /* (a) Dial-Up Networking: PPP, no menu */
         hook = 1; run_ms(500);
@@ -1801,9 +1803,12 @@ int main(int argc, char **argv)
      * name server set (a stand-in on 127.0.0.1) and its answer comes back;
      * a AAAA question is answered by the box, with none, and never asked. */
     {
-        static char lanlog[300];
-        int dfd = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK, 0), asked = 0, asked_aaaa = 0, one = 1;
+        static char lanlog[300], rfile[300];
+        int dfd = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK, 0), asked = 0, asked_aaaa = 0, one = 1, asked6 = 0;
+        int dfd6 = socket(AF_INET6, SOCK_DGRAM | SOCK_NONBLOCK, 0);
         struct sockaddr_in da;
+        struct sockaddr_in6 da6;
+        FILE *rf;
         cfg_default(&c);
         strcpy(c.line_number, "5551234"); c.rings = 1; c.status_port = 8080;
         c.dns[0] = IP4(192, 0, 2, 53); c.dns[1] = 0;     /* the stand-in, on lo (a loopback address is no name server to the settings) */
@@ -1813,6 +1818,13 @@ int main(int argc, char **argv)
         setsockopt(dfd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
         memset(&da, 0, sizeof da); da.sin_family = AF_INET; da.sin_port = htons(53); da.sin_addr.s_addr = htonl(IP4(192, 0, 2, 53));
         CHECK(bind(dfd, (struct sockaddr *)(void *)&da, sizeof da) == 0);
+        /* a system name server (as a router's advertisement would put one in
+         * resolv.conf) that is there and answers: with the settings' own set
+         * and reachable it is never asked */
+        memset(&da6, 0, sizeof da6); da6.sin6_family = AF_INET6; da6.sin6_port = htons(53); da6.sin6_addr = in6addr_loopback;
+        CHECK(dfd6 >= 0 && bind(dfd6, (struct sockaddr *)(void *)&da6, sizeof da6) == 0);
+        snprintf(rfile, sizeof rfile, "%s/ns_dns.resolv", argv[2]);
+        rf = fopen(rfile, "w"); if (rf) { fputs("nameserver ::1\n", rf); fclose(rf); }
         CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
         snprintf(lanlog, sizeof lanlog, "%s/ns_dns.log", argv[2]);
         pid = fork();
@@ -1820,6 +1832,7 @@ int main(int argc, char **argv)
             int a = fcntl(sv[1], F_DUPFD, 20), lfd = open(lanlog, O_WRONLY | O_CREAT | O_TRUNC, 0644);
             dup2(a, 3); if (lfd >= 0) dup2(lfd, 2);
             for (i = 4; i < 64; i++) close(i);
+            setenv("V90D_RESOLV", rfile, 1);
             execl(argv[1], "v90d", "-c", conf, "-l", "fd:3", "-i", "lo", "-t", "ppp0", "-b", "", "-f", "", (char *)NULL);
             _exit(127);
         }
@@ -1859,6 +1872,7 @@ int main(int argc, char **argv)
                     if (t % BLK == 0) {                 /* the name server stand-in: A only, 192.0.2.7 */
                         uint8_t m[512]; struct sockaddr_in fa; socklen_t fl = sizeof fa;
                         ssize_t r = recvfrom(dfd, m, sizeof m, 0, (struct sockaddr *)(void *)&fa, &fl);
+                        {   uint8_t m6[512]; if (recv(dfd6, m6, sizeof m6, 0) > 0) asked6++; }
                         if (r > 12 + 5) {
                             size_t e = (size_t)r;
                             int mt = m[e - 3];
@@ -1910,9 +1924,35 @@ int main(int argc, char **argv)
                    got_a, got_none, asked, asked_aaaa);
             CHECK_EQ_I(asked, 1);
             CHECK_EQ_I(asked_aaaa, 0);
+            CHECK_EQ_I(asked6, 0);                  /* the system's IPv6 server: not beside the settings' */
+            {   /* the settings' server is there but does not answer: the relay
+                 * tries it again, and still never the system's */
+                uint8_t p[200]; size_t qn = 12, n; uint16_t ck; long t; int quiet = 0;
+                memset(p, 0, sizeof p);
+                p[28] = 0x43; p[29] = 0x43; p[30] = 0x01; p[33] = 1;
+                memcpy(p + 28 + qn, name, sizeof name); qn += sizeof name;
+                p[28 + qn++] = 0; p[28 + qn++] = 1; p[28 + qn++] = 0; p[28 + qn++] = 1;
+                n = 28 + qn;
+                p[0] = 0x45; p[2] = (uint8_t)(n >> 8); p[3] = (uint8_t)n; p[8] = 64; p[9] = 17;
+                put32(p + 12, C.ppp.my_ip); put32(p + 16, PPP_LOCAL);
+                ck = csum(p, 20); p[10] = (uint8_t)(ck >> 8); p[11] = (uint8_t)ck;
+                p[20] = 0x14; p[21] = 0xe9; p[23] = 53; p[24] = (uint8_t)((n - 20) >> 8); p[25] = (uint8_t)(n - 20);
+                (void)caller_send_ip(&C, p, n);
+                for (t = 0; t < 7L * FS && !dead; t++) {
+                    if (t % BLK == 0) {
+                        uint8_t m[512];
+                        if (recv(dfd, m, sizeof m, 0) > 0) quiet++;             /* heard, not answered */
+                        if (recv(dfd6, m, sizeof m, 0) > 0) asked6++;
+                    }
+                    step(0);
+                }
+                printf("  a settings' server that does not answer: asked %d time(s); the system's %d\n", quiet, asked6);
+                CHECK(quiet >= 2);                  /* tried again */
+                CHECK_EQ_I(asked6, 0);
+            }
         }
         hang_up();
-        close(dfd);
+        close(dfd); close(dfd6);
         quiet_exit = 1;
         kill(pid, SIGTERM);
         for (i = 0; i < 400 && !dead; i++) step(0);
@@ -1920,5 +1960,121 @@ int main(int argc, char **argv)
         CHECK_EQ_I(waitpid(pid, &st, 0), pid);
         CHECK(WIFEXITED(st) && WEXITSTATUS(st) == 0);
     }
+    /* 19. IPv6 alone on the LAN (#7, srv/ra6.h): the router's advertisement
+     * (from the far end of a veth pair, the daemon's LAN port the near one)
+     * names an IPv6 name server; the daemon logs it and puts it in its
+     * resolv.conf; the name server set in the settings (IPv4) is not
+     * reached, so the callers' relay asks the IPv6 one, and a caller's
+     * question is answered. */
+    {
+        static char lanlog[300], rfile[300];
+        int dfd = socket(AF_INET6, SOCK_DGRAM | SOCK_NONBLOCK, 0), rs = -1, one = 1, k, asked = 0, answered = 0;
+        struct sockaddr_in6 da, to;
+        FILE *f;
+        if (system("ip link add v0 type veth peer name v1 2>/dev/null && echo 0 > /proc/sys/net/ipv6/conf/v1/accept_dad"
+                   " && ip link set v0 up && ip link set v1 up && ip -6 addr add 2001:db8::53/128 dev lo") != 0) {
+            printf("  (no veth here: IPv6 on the LAN not tried)\n");
+            if (dfd >= 0) close(dfd);
+            goto no_veth;
+        }
+        setsockopt(dfd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+        memset(&da, 0, sizeof da); da.sin6_family = AF_INET6; da.sin6_port = htons(53);
+        inet_pton(AF_INET6, "2001:db8::53", &da.sin6_addr);
+        CHECK(bind(dfd, (struct sockaddr *)(void *)&da, sizeof da) == 0);
+        cfg_default(&c);
+        strcpy(c.line_number, "5551234"); c.rings = 1; c.status_port = 8080;
+        c.dns[0] = IP4(192, 0, 2, 99); c.dns[1] = 0;        /* no route to it: IPv6 alone */
+        CHECK_EQ_I(cfg_save(&c, conf, err, sizeof err), CFG_OK);
+        snprintf(rfile, sizeof rfile, "%s/ns_ra6.resolv", argv[2]);
+        f = fopen(rfile, "w"); if (f) { fputs("search example\n", f); fclose(f); }
+        CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
+        snprintf(lanlog, sizeof lanlog, "%s/ns_ra6.log", argv[2]);
+        unlink(lanlog);                                     /* a last run's lines are not this one's */
+        pid = fork();
+        if (pid == 0) {
+            int a = fcntl(sv[1], F_DUPFD, 20), lfd = open(lanlog, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            dup2(a, 3); if (lfd >= 0) dup2(lfd, 2);
+            for (i = 4; i < 64; i++) close(i);
+            setenv("V90D_RESOLV", rfile, 1);
+            execl(argv[1], "v90d", "-c", conf, "-l", "fd:3", "-i", "v0", "-t", "ppp0", "-b", "", "-f", "", (char *)NULL);
+            _exit(127);
+        }
+        close(sv[1]);
+        line_fd = sv[0]; idle_fd = -1;
+        dead = quiet_exit = 0; hook = modem_on = 0; blk_n = 0; c_tx = 0; c_rx_pw = 0;
+        channel_init(&CH, &cc);
+        memset(prev_tx, 0xFF, sizeof prev_tx);
+        /* the router: an advertisement each half second from v1 (link-local,
+         * hop limit 255), with RDNSS 2001:db8::53 and PREF64 64:ff9b::/96 */
+        rs = socket(AF_INET6, SOCK_RAW, IPPROTO_ICMPV6);
+        {
+            int hops = 255; unsigned ix = if_nametoindex("v1");
+            setsockopt(rs, IPPROTO_IPV6, IPV6_MULTICAST_HOPS, &hops, sizeof hops);
+            setsockopt(rs, IPPROTO_IPV6, IPV6_MULTICAST_IF, &ix, sizeof ix);
+            memset(&to, 0, sizeof to); to.sin6_family = AF_INET6; inet_pton(AF_INET6, "ff02::1", &to.sin6_addr); to.sin6_scope_id = ix;
+        }
+        for (k = 0; k < 60 && !(file_has(lanlog, "ipv6: the router gives") && file_has(rfile, "nameserver 2001:db8::53")); k++) {
+            uint8_t ra[16 + 24 + 16];
+            memset(ra, 0, sizeof ra);
+            ra[0] = 134; ra[4] = 64; ra[6] = 0x07; ra[7] = 0x08;
+            ra[16] = 25; ra[17] = 3; ra[22] = 0x02; ra[23] = 0x58;                     /* 600 s */
+            inet_pton(AF_INET6, "2001:db8::53", ra + 24);
+            ra[40] = 38; ra[41] = 2; ra[42] = (uint8_t)((225 << 3) >> 8); ra[43] = (uint8_t)(225 << 3);   /* 1800 s, /96 */
+            { uint8_t pf[16]; inet_pton(AF_INET6, "64:ff9b::", pf); memcpy(ra + 44, pf, 12); }   /* the top 96 bits */
+            (void)sendto(rs, ra, sizeof ra, 0, (struct sockaddr *)(void *)&to, sizeof to);
+            run_ms(500); usleep(100000);
+        }
+        CHECK(file_has(lanlog, "ipv6: the router gives name servers 2001:db8::53; NAT64 prefix 64:ff9b::/96"));
+        CHECK(file_has(rfile, "search example"));               /* what was there stays */
+        CHECK(file_has(rfile, "# v90d: IPv6 name servers from the router (ra6)\nnameserver 2001:db8::53"));
+        /* a caller's question, answered through the IPv6 name server */
+        hook = 1; run_ms(500);
+        dial("5551234");
+        run_ms(2000 + 300);
+        start_modem(0);
+        CHECK(wait_ip(60000) >= 0);
+        {
+            static const uint8_t name[] = "\7example\3com";
+            uint8_t p[200]; size_t qn = 12, n; uint16_t ck; long t; int n0 = cli_n;
+            memset(p, 0, sizeof p);
+            p[28] = 0x77; p[29] = 0x77; p[30] = 0x01; p[33] = 1;
+            memcpy(p + 28 + qn, name, sizeof name); qn += sizeof name;
+            p[28 + qn++] = 0; p[28 + qn++] = 1; p[28 + qn++] = 0; p[28 + qn++] = 1;
+            n = 28 + qn;
+            p[0] = 0x45; p[2] = (uint8_t)(n >> 8); p[3] = (uint8_t)n; p[8] = 64; p[9] = 17;
+            put32(p + 12, C.ppp.my_ip); put32(p + 16, PPP_LOCAL);
+            ck = csum(p, 20); p[10] = (uint8_t)(ck >> 8); p[11] = (uint8_t)ck;
+            p[20] = 0x14; p[21] = 0xe9; p[23] = 53; p[24] = (uint8_t)((n - 20) >> 8); p[25] = (uint8_t)(n - 20);
+            for (t = 0; t < 10L * FS && !dead && !answered; t++) {
+                if (t % FS == 0) (void)caller_send_ip(&C, p, n);
+                if (t % BLK == 0) {
+                    uint8_t m[512]; struct sockaddr_in6 fa; socklen_t fl = sizeof fa;
+                    ssize_t r = recvfrom(dfd, m, sizeof m, 0, (struct sockaddr *)(void *)&fa, &fl);
+                    if (r > 12 + 5) {
+                        size_t e = (size_t)r;
+                        static const uint8_t ans[] = { 0xc0, 0x0c, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4, 192, 0, 2, 66 };
+                        asked++;
+                        m[2] |= 0x80; m[3] = 0x80; m[7] = 1;
+                        memcpy(m + e, ans, sizeof ans); e += sizeof ans;
+                        (void)sendto(dfd, m, e, 0, (struct sockaddr *)(void *)&fa, fl);
+                    }
+                }
+                step(0);
+                if (cli_n > n0 && cli_len > 28 && cli_pkt[9] == 17 && memcmp(cli_pkt + cli_len - 4, "\xc0\x00\x02\x42", 4) == 0) answered = 1;
+            }
+            printf("  IPv6 alone: the IPv6 name server was asked %d time(s); the caller answered %d\n", asked, answered);
+            CHECK(asked >= 1);
+            CHECK(answered);
+        }
+        hang_up();
+        close(dfd); close(rs);
+        quiet_exit = 1;
+        kill(pid, SIGTERM);
+        for (i = 0; i < 400 && !dead; i++) step(0);
+        close(line_fd);
+        CHECK_EQ_I(waitpid(pid, &st, 0), pid);
+        CHECK(WIFEXITED(st) && WEXITSTATUS(st) == 0);
+    }
+no_veth:
     T_REPORT("ns_call");
 }

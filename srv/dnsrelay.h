@@ -11,7 +11,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define DNSRELAY_UP_MAX   2         /* name servers asked, in turn */
+#define DNSRELAY_UP_MAX   2         /* the settings' name servers (IPv4) */
+#define DNSRELAY_SRV_MAX  5         /* with the system's: asked in turn */
 #define DNSRELAY_PENDING  64        /* questions in flight */
 #define DNSRELAY_WAIT_MS  2000      /* before the next server is asked */
 #define DNSRELAY_TRIES    3

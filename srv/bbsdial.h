@@ -14,7 +14,8 @@
  * to it, is not connected to, 1 = the tests' listener, BBSDIAL_PUBLIC =
  * only an address on the internet at large (bbsdial_is_public), for an
  * entry of Netstalgia's list of services. Whatever the name, it is looked
- * up once and the address it gave is the one connected to.
+ * up once (IPv4 and IPv6 both) and each address it gave that passes is
+ * tried in turn, each with its share of connect_s (at least 3 s).
  * Returns 0 when the board or the daemon ended the connection, 1 when the
  * board was not reached. */
 #define BBSDIAL_PUBLIC 2
@@ -35,5 +36,24 @@ int bbsdial_is_self(uint32_t addr);
  * 192.0.2/24, 192.168/16, 198.18/15, 198.51.100/24, 203.0.113/24, nor
  * multicast, 240/4 or broadcast. */
 int bbsdial_is_public(uint32_t a);
+
+/* The same for an IPv6 address (16 octets, network order). is_self6: ::
+ * and ::1, link-local fe80::/10, multicast ff00::/8, the old IPv4-
+ * compatible ::/96, an IPv4-mapped ::ffff:0:0/96 whose IPv4 address is,
+ * and the address of any of the box's interfaces. is_public6: global
+ * unicast 2000::/3 but not the documentation 2001:db8::/32 and 3fff::/20,
+ * Teredo 2001::/32, benchmarking 2001:2::/48, ORCHID 2001:10::/28 and
+ * 2001:20::/28; 6to4 2002::/16 and NAT64's 64:ff9b::/96 by the IPv4
+ * address in them (bbsdial_is_public); nothing else (unique local
+ * fc00::/7, NAT64's local 64:ff9b:1::/48, site-local, ...). */
+int bbsdial_is_self6(const uint8_t a[16]);
+int bbsdial_is_public6(const uint8_t a[16]);
+/* The network's own NAT64 prefix (PREF64, srv/ra6.h; len 32, 40, 48, 56,
+ * 64 or 96; 0 = none): its addresses carry an IPv4 address (RFC 6052) and
+ * are also judged by it: one that is public by its own range must carry a
+ * public IPv4 address too (a prefix only narrows: anyone on the LAN can
+ * advertise one). The box itself by it, as for 64:ff9b::/96.
+ * The daemon sets it when the router says; a connection's child has it. */
+void bbsdial_set_pref64(const uint8_t p[16], int len);
 
 #endif

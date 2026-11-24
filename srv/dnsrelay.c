@@ -2,6 +2,7 @@
 #define _GNU_SOURCE
 #include <fcntl.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
@@ -14,7 +15,7 @@
 #define Q_MAX     512           /* a question from a caller: a UDP DNS message as RFC 1035 has it */
 #define A_MAX     4096          /* an answer: EDNS sizes */
 #define REBIND_MS 5000
-#define RESOLV_MS 30000
+#define RESOLV_MS 5000
 
 /* ------------------------------------------------------------ messages */
 int dnsrelay_qtype(const uint8_t *m, size_t n)
@@ -53,7 +54,9 @@ static struct {
     uint32_t lis[LIS_MAX], bound[LIS_MAX];
     int fd[LIS_MAX];
     uint32_t rebind_at[LIS_MAX];
-    uint32_t up_set[DNSRELAY_UP_MAX], up[DNSRELAY_UP_MAX];
+    uint32_t up_set[DNSRELAY_UP_MAX];
+    struct { int fam; uint8_t a[16]; } up[DNSRELAY_SRV_MAX];   /* IPv4 in a[0..4) */
+    int nup, nown;              /* up[0..nown): the settings'; the rest the system's */
     uint32_t peer[DNSRELAY_PEERS_MAX]; int npeer;
     uint32_t resolv_at; int resolv_read;
     int urnd;                   /* /dev/urandom */
@@ -123,20 +126,32 @@ void dnsrelay_set(int on, const uint32_t listen[], int n_listen, const uint32_t 
     }
 }
 
-/* the servers to ask: the settings', or else the system's (DHCP) */
+/* The servers to ask: the settings' (IPv4), or with none set the system's
+ * (DHCP's and the router's, ra6.h). With the settings', the system's IPv6
+ * ones are kept as a fallback, asked only when none of the settings' can be
+ * sent to (a network with IPv6 alone): a router advertisement, which anyone
+ * on the LAN can send, does not stand beside servers the owner chose. */
 static void servers(uint32_t now)
 {
-    int i, n = 0;
+    int i, own = R.up_set[0] || R.up_set[1];
     FILE *f;
     char l[256];
-    if (R.up_set[0] || R.up_set[1]) { for (i = 0; i < DNSRELAY_UP_MAX; i++) R.up[i] = R.up_set[i]; return; }
     if (R.resolv_read && now - R.resolv_at < RESOLV_MS) return;
     R.resolv_read = 1; R.resolv_at = now;
-    memset(R.up, 0, sizeof R.up);
-    f = fopen("/etc/resolv.conf", "r");
-    while (f && n < DNSRELAY_UP_MAX && fgets(l, sizeof l, f)) {
-        char a[64]; struct in_addr x;
-        if (sscanf(l, " nameserver %63s", a) == 1 && inet_pton(AF_INET, a, &x) == 1) R.up[n++] = ntohl(x.s_addr);
+    R.nup = 0;
+    for (i = 0; i < DNSRELAY_UP_MAX; i++) if (R.up_set[i]) {
+        uint32_t v = R.up_set[i];
+        R.up[R.nup].fam = AF_INET;
+        R.up[R.nup].a[0] = (uint8_t)(v >> 24); R.up[R.nup].a[1] = (uint8_t)(v >> 16); R.up[R.nup].a[2] = (uint8_t)(v >> 8); R.up[R.nup].a[3] = (uint8_t)v;
+        R.nup++;
+    }
+    R.nown = R.nup;
+    f = fopen(getenv("V90D_RESOLV") ? getenv("V90D_RESOLV") : "/etc/resolv.conf", "r");   /* ra6.c writes the same */
+    while (f && R.nup < DNSRELAY_SRV_MAX && fgets(l, sizeof l, f)) {
+        char a[64];
+        if (sscanf(l, " nameserver %63s", a) != 1) continue;
+        if (!own && inet_pton(AF_INET, a, R.up[R.nup].a) == 1) R.up[R.nup++].fam = AF_INET;
+        else if (inet_pton(AF_INET6, a, R.up[R.nup].a) == 1) R.up[R.nup++].fam = AF_INET6;
     }
     if (f) fclose(f);
 }
@@ -171,19 +186,40 @@ static void bind_all(uint32_t now)
 /* ask the question's current server, on a new socket connected to it: a
  * random port of the kernel's, and nothing from any other address is
  * taken on it */
+static int ask_in(int k, int from, int n);
 static void ask(int k)
 {
-    struct sockaddr_in a;
-    uint32_t to = R.up[R.p[k].srv % DNSRELAY_UP_MAX];
-    if (!to) { R.p[k].srv++; to = R.up[R.p[k].srv % DNSRELAY_UP_MAX]; }
     close_fd(&R.p[k].fd);
-    if (!to) return;
-    R.p[k].fd = udp();
-    if (R.p[k].fd < 0) return;
-    memset(&a, 0, sizeof a);
-    a.sin_family = AF_INET; a.sin_port = htons(53); a.sin_addr.s_addr = htonl(to);
-    if (connect(R.p[k].fd, (struct sockaddr *)(void *)&a, sizeof a) < 0) { close_fd(&R.p[k].fd); return; }
-    (void)send(R.p[k].fd, R.p[k].q, R.p[k].qn, 0);
+    /* the settings' servers if there are any, else the system's; the
+     * system's after the settings' only when none of those can be sent to */
+    if (R.nown) { if (ask_in(k, 0, R.nown) || R.nup == R.nown) return; ask_in(k, R.nown, R.nup - R.nown); }
+    else ask_in(k, 0, R.nup);
+}
+
+/* from the question's current server on, among up[from..from+n): the first
+ * that can be sent to (no route to one: the next); 1 = sent */
+static int ask_in(int k, int from, int n)
+{
+    int tried;
+    for (tried = 0; tried < n; tried++, R.p[k].srv++) {
+        int i = from + R.p[k].srv % n;
+        struct sockaddr_in a4; struct sockaddr_in6 a6;
+        const struct sockaddr *sa; socklen_t sl;
+        if (R.up[i].fam == AF_INET) {
+            memset(&a4, 0, sizeof a4); a4.sin_family = AF_INET; a4.sin_port = htons(53);
+            memcpy(&a4.sin_addr, R.up[i].a, 4);
+            sa = (const struct sockaddr *)(const void *)&a4; sl = sizeof a4;
+        } else {
+            memset(&a6, 0, sizeof a6); a6.sin6_family = AF_INET6; a6.sin6_port = htons(53);
+            memcpy(&a6.sin6_addr, R.up[i].a, 16);
+            sa = (const struct sockaddr *)(const void *)&a6; sl = sizeof a6;
+        }
+        R.p[k].fd = socket(R.up[i].fam, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+        if (R.p[k].fd < 0) continue;
+        if (connect(R.p[k].fd, sa, sl) == 0 && send(R.p[k].fd, R.p[k].q, R.p[k].qn, 0) >= 0) return 1;
+        close_fd(&R.p[k].fd);
+    }
+    return 0;
 }
 
 /* the answer's question is the one asked (the id alone is 16 bits) */
