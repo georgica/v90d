@@ -7,7 +7,7 @@ CFLAGS  ?= -std=gnu99 -O2 -Wall -Wextra -Werror
 DRV     := ../drv
 BUILD   := build
 VERSION := $(shell cat ../VERSION)
-.PHONY: all image test clean kernel
+.PHONY: image-rootfs all image test clean kernel
 all: $(BUILD)/obiline $(BUILD)/obinv $(BUILD)/kernel.xz
 $(BUILD):
 	@mkdir -p $(BUILD)
@@ -56,10 +56,24 @@ image: $(BUILD)/obiline $(BUILD)/obinv $(BUILD)/kernel.xz ../../srv/build/v90d-o
 	cp ../../lists/bbs.txt $(BUILD)/image/bbs.txt
 	cp ../../lists/services.txt $(BUILD)/image/services.txt
 	python3 mkobifw.py --full --files $(BUILD)/image "$(BASE)" $(BUILD)/v90d-obi200.fw
+# The same with v90d's own root file system (mkrootfs.py) in place of the
+# maker's: the archive gateway and OpenVPN on the box too. Not the release
+# image until it has been proven on a unit.
+BUSYBOX = ../build/busybox-1.36.1
+$(BUILD)/rootfs.sqsh: mkrootfs.py rootfs/etc/inittab rootfs/etc/init.d/rcS rootfs/etc/passwd rootfs/etc/group \
+                      $(BUSYBOX)/busybox ../../arch/build/v90arch-arm ../build/vpn/openvpn FORCE
+	@test -n "$(BASE)" || { echo "make image-rootfs BASE=your-OBi-firmware.fw"; exit 1; }
+	$(MAKE) -s -C $(BUSYBOX) busybox.links
+	python3 mkrootfs.py "$(BASE)" $@ --busybox $(BUSYBOX)/busybox \
+	    --add ../../arch/build/v90arch-arm:/usr/sbin/v90arch --add ../build/vpn/openvpn:/usr/sbin/openvpn
+../../arch/build/v90arch-arm:
+	$(MAKE) -C ../../arch v90arch-arm
+image-rootfs: image $(BUILD)/rootfs.sqsh
+	python3 mkobifw.py --full --rootfs $(BUILD)/rootfs.sqsh --files $(BUILD)/image "$(BASE)" $(BUILD)/v90d-obi200-rootfs.fw
 # obinv and the builder on the host, against a stand-in flash (needs BASE and the image)
 $(BUILD)/obinv.host: obinv.c ../../ppp/ppp_md5.c ../../cfg/page.h ../../cfg/sbuf.h | $(BUILD)
 	cc -std=gnu99 -O2 -Wall -Wextra -Werror -I../../ppp -I../../cfg -o $@ obinv.c ../../ppp/ppp_md5.c
-test: $(BUILD)/obinv.host image
-	python3 test_obinv.py $(BUILD)/obinv.host "$(BASE)" $(BUILD)/v90d-obi200.fw
+test: $(BUILD)/obinv.host image image-rootfs
+	python3 test_obinv.py $(BUILD)/obinv.host "$(BASE)" $(BUILD)/v90d-obi200.fw $(BUILD)/v90d-obi200-rootfs.fw
 clean:
 	rm -rf $(BUILD)

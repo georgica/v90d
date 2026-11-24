@@ -39,6 +39,13 @@ if [ -z "$OWN" ]; then
     for m in ffxav_mp ffxav_led ffxav_wdt; do
         grep -q "^$m " /proc/modules || insmod $D/$m.ko || say "cannot load $m.ko"
     done
+    # their device nodes, at once (the maker's udev, or v90d's root file
+    # system's mdev, would make them a moment later: kjump needs /dev/led now)
+    for c in /sys/class/telephony/* /sys/class/led/* /sys/class/watchdog/*; do
+        [ -f "$c/dev" ] && [ ! -e "/dev/${c##*/}" ] || continue
+        IFS=: read ma mi < "$c/dev"
+        mknod "/dev/${c##*/}" c "$ma" "$mi"
+    done
     # v90d's own kernel, if it is here and may start (see above). kjump
     # needs the LED module (it runs its last step through /dev/led); the
     # telephony module's audio keeps running and the new kernel takes it over.
@@ -99,7 +106,11 @@ if [ "$LAN_MODE" = static ]; then
     for d in $LAN_DNS1 $LAN_DNS2; do echo "nameserver $d" >> /var/tmp/resolv.conf; done
     say "LAN $LAN_ADDRESS (fixed)"
 else
-    udhcpc -i $LAN -b -s $D/udhcpc.script -H v90d -p /var/run/${LAN}udhcpc.pid >/dev/null 2>&1
+    # -x hostname: is today's BusyBox (v90d's root file system); the maker's
+    # older one knows only -H, and refuses the other
+    udhcpc -i $LAN -b -s $D/udhcpc.script -x hostname:v90d -p /var/run/${LAN}udhcpc.pid >/dev/null 2>&1 ||
+        udhcpc -i $LAN -b -s $D/udhcpc.script -H v90d -p /var/run/${LAN}udhcpc.pid >/dev/null 2>&1 ||
+        say "cannot start udhcpc"
     say "LAN by DHCP"
 fi
 

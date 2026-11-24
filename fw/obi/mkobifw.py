@@ -44,6 +44,9 @@ SEG_MAGIC = b"\x00\x00\x01\xba"
 OBI_TYPE = 3
 OBI_FLASH = 0xC00000
 OBI_PART = 0x240000             # size of the /obi partition (mtd7)
+ROOTFS_TYPE = 4                 # the root file system
+ROOTFS_FLASH = 0x480000
+ROOTFS_PART = 0x780000
 FIRST_SEG = 0x400
 KEEP_FROM_BASE = ("ffxav_mp.ko", "ffxav_led.ko", "ffxav_wdt.ko")
 OURS = ("obi", "kinit", "udhcpc.script", "obiline", "obinv", "v90d", "v90d.conf", "VERSION",
@@ -133,6 +136,7 @@ def main():
     ap.add_argument("--files", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "build", "image"),
                     help="directory with our files (%s)" % ", ".join(OURS))
     ap.add_argument("--full", action="store_true", help="all of BASE's segments, not only /obi")
+    ap.add_argument("--rootfs", help="v90d's root file system (mkrootfs.py) in place of BASE's (needs --full)")
     a = ap.parse_args()
 
     base = open(a.base, "rb").read()
@@ -170,8 +174,18 @@ def main():
         sys.exit("the /obi image is %d octets, the partition %d" % (len(payload), OBI_PART))
 
     new = [(OBI_TYPE, OBI_FLASH, payload)]
+    rootfs = None
+    if a.rootfs:
+        if not a.full:
+            sys.exit("--rootfs goes with --full: the boot checks every part against the file's header")
+        rootfs = open(a.rootfs, "rb").read()
+        if rootfs[:4] != b"hsqs" or len(rootfs) > ROOTFS_PART:
+            sys.exit("%s is not a squashfs of at most %d octets" % (a.rootfs, ROOTFS_PART))
+        if [fl for t, fl, _ in segs if t == ROOTFS_TYPE] != [ROOTFS_FLASH]:
+            sys.exit("BASE has no root file system part at 0x%x" % ROOTFS_FLASH)
     if a.full:
-        new = [(t, fl, payload if t == OBI_TYPE else seg[0x40:]) for t, fl, seg in segs]
+        new = [(t, fl, payload if t == OBI_TYPE else rootfs if (t == ROOTFS_TYPE and rootfs) else seg[0x40:])
+               for t, fl, seg in segs]
     # the update page reads the version and build number off this text and
     # refuses a lower build: keep BASE's, name ours after the dash
     base_ver = base[0x40:0x80].split(b"\0")[0].decode(errors="replace")
@@ -181,8 +195,10 @@ def main():
     vtext = "%s (Build: %s%s-v90d-%s)" % (m.group(1), m.group(2), m.group(3), version)
     fw = pack(key, base, new, vtext)
     open(a.out, "wb").write(fw)
-    print("%s: %d octets, %s, /obi %d of %d octets (%d%%), md5 %s" % (
-        a.out, len(fw), vtext, len(payload), OBI_PART, 100 * len(payload) // OBI_PART, hashlib.md5(fw).hexdigest()))
+    print("%s: %d octets, %s, /obi %d of %d octets (%d%%)%s, md5 %s" % (
+        a.out, len(fw), vtext, len(payload), OBI_PART, 100 * len(payload) // OBI_PART,
+        ", root file system %d of %d octets (%d%%)" % (len(rootfs), ROOTFS_PART, 100 * len(rootfs) // ROOTFS_PART) if rootfs else "",
+        hashlib.md5(fw).hexdigest()))
 
 
 if __name__ == "__main__":
