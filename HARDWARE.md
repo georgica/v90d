@@ -803,6 +803,63 @@ left alone.
   `upgrade` (both drive `new_provision`), demonstrated working. UART + external
   SPI programmer remain the ultimate backstops (not yet wired up).
 
+## The HT801 V1.1A, from a real unit (2026-11-24)
+
+A first physical HT801 (hardware V1.1A, part 9610003611A) was reconned the
+HT802 way: a root shell on the stock firmware from a same-version prog
+repack (see "Root access" below, built from this unit's own 1.0.65.3
+firmware), then a RAM boot of our system. Facts measured on the unit:
+
+- SoC ARM926EJ-S rev 5 (ARMv5TEJ), `Hardware: DSPG DVF99`, the DVF9918 class
+  as expected. `/proc/mtd` is this HT802's map exactly: 15 partitions,
+  bootastic 16k, factory 48k, nvram 64k, uboot2 256k, core2/core 1280k,
+  base2/base 3072k, prog2/prog 3324k, lang/lang2/oem 128k, uboot_env 8k,
+  uboot rest. Stock boots set B (`bootpartition=1`, root `/dev/mtdblock7`).
+- Flash: Winbond W25Q128FV, JEDEC id 0xEF4018 on CS0 (stock log
+  `CS0: jedecid: 0xef4018`, run at 33 then 50 MHz). The id is already in our
+  table (`refs/qspi-chips.md`): the board is not an unknown chip.
+- Ethernet PHY: Micrel/Microchip KSZ8081, PHY id 0x00221561 at MDIO address
+  0 (stock `eth0: PHY ID 00221561 at 0`), over stmmac/DWMAC1000; link
+  100/Full. This is the V1.x board PHY BOARDS.md anticipated, and our kernel
+  drives it with the generic PHY path.
+- SLIC: one Si3217x on channel 0; the second chip select has no SLIC.
+- Model key 0xFD20 and container hardware bits 0xFFFF (from this unit's own
+  stock firmware, Release_HT801_1.0.65.3). These differ from the HT802
+  (0xFD21 / 0x7FFF): an install image for an HT801 must carry 0xFD20 /
+  0xFFFF, or the stock upgrader refuses it on the model-key check.
+- Part number 9610003611A and model HT801 are ASCII in the factory
+  partition (mtd1), but not at offset 0x4020 on this unit (that region reads
+  empty); they sit further in.
+
+RAM boot (`fw/tools/ramboot.sh`, writes nothing; RAMBOOT_ME = the
+workstation, our telnet on 23): our Linux 6.6.63 came up and ran steadily
+past the 100 s watchdog window, Ethernet up by DHCP on eth0 plus the
+169.254.90.1 rescue, generic PHY link 100/Full. The line driver found one
+port and brought it up without the vendor patch: `port 1: SLIC id b2 up,
+battery 58612 mV, mu-law`; `port 2: no SLIC answers, this is a one-port
+board`. The daemon started on /dev/v90line and the web interface served. A
+power cycle returns the unit to stock.
+
+Flash install (2026-11-24): with the per-model release (#17), whose HT801
+file carries model key 0xFD20 and bits 0xFFFF, the stock upgrade page took
+`v90d-ht801fw.bin` (uploaded as `ht801fw.bin`) and wrote it, and the unit
+came up on v90d from flash: started by the loader from set A, board known,
+start confirmed, Ethernet, web and the one FXS port up; the stock set
+stays intact in set B. Our QSPI code drives this Winbond chip as it is (its
+id is in the table since commit dd84708). An earlier RAM boot that reported
+`flash not recognised` had used a kernel image built before that commit,
+not a fault in the driver. The first install attempt failed only on the
+model key (the HT802's 0xFD21), which the stock upgrader refuses.
+
+## RECOVERY (tested)
+- **Full 16 MiB flash backup taken and verified**: all 15 partitions md5-match
+  the box, in `~/v90d/recon/backup/` (`flash_all.bin` + `mtd_<name>.bin`,
+  sha256 recorded). `mtd_prog2.bin` is the clean stock /app; `mtd_base.bin`,
+  `mtd_uboot.bin`, `mtd_factory.bin` are the stock rootfs / bootloader / DTB.
+- The device reflashes through its own validated web upload / restricted-shell
+  `upgrade` (both drive `new_provision`), demonstrated working. UART + external
+  SPI programmer remain the ultimate backstops (not yet wired up).
+
 ## Root access (recon tool, temporary)
 - gssu is removed from all firmware ≥ 1.0.19.x; downgrade to a gssu build is
   refused by the version check. Root was obtained instead by injecting a line
@@ -810,3 +867,12 @@ left alone.
   `busybox telnetd -l /bin/sh -p 2323`, firewalled to the workstation, and
   flashing that same-version repack via the validated web upload. `telnet
   192.168.1.172 2323` → root (uid 0). To be removed before any production image.
+- Same route proven on the HT801 V1.1A (2026-11-24): its own stock
+  Release_HT801_1.0.65.3 was taken, only the prog partition changed (the
+  telnetd line injected into `/app/bin/ht_start.sh`, firewalled to the
+  workstation 10.42.90.1), prog bumped 1.0.65.3 -> 1.0.65.4 so the upgrader
+  installs it, the rest of the container kept byte for byte (so the HT801
+  model key 0xFD20 and bits 0xFFFF are preserved), rebuilt with the ht801
+  partition names and uploaded as `ht801fw.bin`. `telnet 10.42.90.143 2323`
+  -> root (uid 0). The injected prog stays in the stock set (set B) of that unit, now that
+  v90d is installed in set A.
