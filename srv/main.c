@@ -70,6 +70,7 @@
 #include "daemon.h"
 #include "satlink.h"
 #include "bbslink.h"
+#include "termsvc.h"
 #include "update.h"
 #include "netsvc.h"
 #include "vpn.h"
@@ -183,6 +184,14 @@ static void ip_to_kernel(void *ctx, const uint8_t *pkt, size_t len)
 {
     int i = (int)(((srv_t *)ctx) - S);
     if (tun_fd[i] >= 0 && tun_write(tun_fd[i], pkt, len) < 0) S[i].status.rx_errors++;
+}
+
+/* the terminal menu ([services] menu) is for the PPP services' numbers */
+static int menu_wanted(const cfg_t *c)
+{
+    int ppp1 = c->service == CFG_SERVICE_INTERNET || c->service == CFG_SERVICE_ARCHIVE;
+    int ppp2 = n_ports > 1 && (c->port2.service == CFG_SERVICE_INTERNET || c->port2.service == CFG_SERVICE_ARCHIVE);
+    return c->svc_menu && (ppp1 || ppp2);
 }
 
 static int all_onhook(void)
@@ -302,6 +311,7 @@ static void adopt(const cfg_t *n)
     }
     update_config(n->update_check, V90D_VERSION);
     bbslink_svc_want(n->svc_netstalgia);
+    termsvc_want(menu_wanted(n));
 }
 
 static int store(const cfg_t *n)
@@ -435,6 +445,7 @@ static void raw_from_modem(void *ctx, const uint8_t *oct, size_t n)
     uint32_t addr; int on;
     int kind = srv_link((srv_t *)ctx, &addr, &on);
     if (kind == SRV_LINK_BBS || kind == SRV_LINK_SVC) bbslink_from_modem(ctx, oct, n);
+    else if (kind == SRV_LINK_MENU) termsvc_from_modem(ctx, oct, n);
     else satlink_from_modem(ctx, oct, n);
 }
 
@@ -467,7 +478,7 @@ int main(int argc, char **argv)
     /* tests: the loop's millisecond clock may start anywhere, so that its
      * wrap at 2^32 can be crossed in a test run */
     { const char *c0 = getenv("V90D_CLOCK0"); if (c0) now_ms = (uint32_t)strtoul(c0, NULL, 0); }
-    while ((opt = getopt(argc, argv, "c:l:d:i:t:vpow:W:L:A:N:R:P:D:G:E:O:V:M:S:XB:b:J:T:u:U:Y:F:f:K:")) != -1) {
+    while ((opt = getopt(argc, argv, "c:l:d:i:t:vpow:W:L:A:N:R:P:D:G:E:O:V:M:S:XB:b:J:T:u:U:Y:F:f:K:z:Z:")) != -1) {
         switch (opt) {
         case 'c': cfg_path = optarg; break;
         case 'l': if (n_ports >= PORTS) usage(); line_spec[n_ports++] = optarg; break;
@@ -502,6 +513,8 @@ int main(int argc, char **argv)
         case 'F': bbslink_svc_set_builtin(optarg); break; /* the list of services' numbers in the image */
         case 'f': bbslink_svc_set_fetch(optarg); break;   /* the command that prints it; "" = never fetch */
         case 'K': bbslink_svc_set_live(optarg); break;    /* where a fetched one is kept */
+        case 'z': bbslink_info_set_fetch(optarg); break;  /* the command that prints the board details; "" = never fetch */
+        case 'Z': bbslink_info_set_live(optarg); break;   /* where fetched ones are kept */
         case 'T': bbslink_set_prog(optarg); break;    /* run instead of nc to reach a board: PROG HOST PORT */
         case 'u': update_set_cmd(optarg); break;      /* the command that prints the latest release version; "" = never check */
         case 'U': fw_update_cmd = optarg; break;      /* run as CMD VERSION to install an update (instead of fwupdate.sh) */
@@ -579,6 +592,7 @@ int main(int argc, char **argv)
     }
     update_config(live.update_check, V90D_VERSION);
     bbslink_svc_want(live.svc_netstalgia);
+    termsvc_want(menu_wanted(&live));
     settings_set_svc_rows(bbslink_svc_rows);
 
     /* The line gives us 10 ms blocks and wants each answered in time; a late
@@ -664,6 +678,7 @@ int main(int argc, char **argv)
             }
             satlink_poll(now_ms);
             bbslink_poll(now_ms);
+            termsvc_poll(now_ms);
             update_poll(now_ms);
             netsvc_poll(now_ms);
             if (fw_pid > 0 && blocks == 50 && waitpid(fw_pid, NULL, WNOHANG) == fw_pid) fw_pid = 0;   /* once a second (blocks counts to 100 and starts again) */

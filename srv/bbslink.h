@@ -45,4 +45,22 @@ void bbslink_svc_want(int on);
 int  bbslink_svc_known(const char *dialed);
 size_t bbslink_svc_rows(char *buf, size_t cap, int *shown, int *left);
 
+/* The terminal menu (srv/termsvc.c). want: a port has it, so the list of
+ * boards and Netstalgia's board details ("v90d-bbsinfo 1", term/guide.h:
+ * none in the image; live [/tmp/v90d.bbsinfo], fetched by [sh
+ * /etc/bbsfetch.sh <the API> 'v90d-bbsinfo 1' 524288]) are kept up to
+ * date. lists_gen goes up whenever a list is taken; list_path and
+ * info_path name the ones in force ("" = no details). menu_dial puts the
+ * caller of port k (in the menu) through to the board with that login, as
+ * the BBS: prompt would; menu_busy stays 1 until that is over and the
+ * caller is the menu's again. */
+void        bbslink_info_set_live(const char *path);
+void        bbslink_info_set_fetch(const char *cmd);
+void        bbslink_menu_want(int on);
+unsigned    bbslink_lists_gen(void);
+const char *bbslink_list_path(void);
+const char *bbslink_info_path(void);
+int         bbslink_menu_dial(int k, const char *login);
+int         bbslink_menu_busy(int k);
+
 #endif

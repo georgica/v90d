@@ -12,10 +12,11 @@
 # connection. BBS_API names another place for the default list (tests).
 api=${1:-${BBS_API:-http://api.netstalgia.online/v1/bbs.txt}}
 want=${2:-v90d-bbs 2}
+max=${3:-262144}                              # octets: the board details are larger
 tmp=${BBS_TMP:-/tmp/v90d.${api##*/}.dl}       # one each: the two lists may be fetched at once
 trap 'rm -f "$tmp"' EXIT
 rm -f "$tmp"; umask 077
-wget -q -T 20 -O - "$api" 2>/dev/null | head -c 262144 > "$tmp"
+wget -q -T 20 -O - "$api" 2>/dev/null | head -c "$max" > "$tmp"
 # an error or challenge page is no list: no need to check its signature
 [ "$(grep -v -e '^#' -e '^$' "$tmp" 2>/dev/null | head -n 1)" = "$want" ] || exit 1
 cat "$tmp"

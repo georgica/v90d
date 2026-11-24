@@ -143,6 +143,26 @@ signed list of services, which it fetches once a day (switch it off on the
 same tab and it never asks). Your numbers come first. The list as it was
 at the release ([lists/services.txt](lists/services.txt)) is in the image.
 
+## The terminal menu
+
+With **Terminal menu** on (Services, Numbers page), a caller who dials a
+port's Internet number with a terminal program (HyperTerminal, Telix,
+minicom) gets Netstalgia's main menu instead of silence: the planet and
+the wordmark in ANSI art, "ANSI colour? Y/n" (n: plain ASCII), then a
+menu with a highlight bar. **1 Start PPP** hands the same call over to PPP,
+**2 Who's online** shows what the box's lines are doing, **3 BBS
+directory** lists every board of 1-800-BBS-DIAL, 15 a page, with a search
+over names, places, software and descriptions and a page for each board
+(location, software, nodes, the login for new users, the guide's
+description), and **C** there connects to the board on the same call;
+logging off the board comes back to the directory. **G** says goodbye.
+Dial-Up Networking callers never see it: their first PPP frame takes them
+straight to PPP. The board details come from the Telnet BBS Guide, by way
+of a second signed list from Netstalgia; until the box has it, the
+directory shows names and numbers. Off by default: a PPP program that waits
+for the box to speak first needs it off. The menu is shared with
+Netstalgia's own dial-in (`term/`).
+
 ## What it is made of
 
 Linux, busybox and a C library are used as they are. Everything else in the
@@ -269,6 +289,7 @@ make -C fw test-release # the firmware file, the flash tools and the loader agai
 | `tel/` | tones, dialling, the call's life |
 | `dce/` | modem, link layer and PPP tied into one call |
 | `srv/` | the daemon: calls, network, NAT, the per-port services, the bulletin board and service calls |
+| `term/` | the terminal menu: screen, art, the BBS directory and the Telnet BBS Guide's details (shared with Netstalgia) |
 | `lists/` | Netstalgia's signed lists in the image: the bulletin boards, the numbers to services |
 | `cfg/` | settings, status and the web interface |
 | `arch/` | the Archive service's helpers |

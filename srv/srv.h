@@ -32,6 +32,11 @@ typedef void (*srv_raw_fn)(void *ctx, const uint8_t *oct, size_t n);
 #define SRV_LINK_BBS 16
 /* srv_link(): a call to a number of a service ([services], srv/svc.h) */
 #define SRV_LINK_SVC 17
+/* srv_link(): a call on the Internet number with [services] menu on, still
+ * in its terminal menu (term/tmenu.h, srv/termsvc.c); once it goes over to
+ * PPP (srv_start_ppp, or Dial-Up Networking found by its first frame) it
+ * is an ordinary call (SATURN_NONE) */
+#define SRV_LINK_MENU 18
 /* PROTOWEB on the keypad with zeros behind (the rule of the board numbers):
  * the old web of Protoweb, as Netstalgia also has it */
 #define SRV_PROTOWEB "7768693200"
@@ -63,6 +68,7 @@ typedef struct {
     uint32_t   call_start;      /* clock when the line was answered */
     uint32_t   call_s;          /* seconds since the answer */
     int        ppp_up_once;     /* this call's PPP has had its network up (the login deadline is over) */
+    uint32_t   ppp_from_s;      /* call_s when its PPP began (after the terminal menu: later than 0) */
     dce_status_t ds;            /* scratch */
     srv_raw_fn raw_out;         /* service = saturn: octets from the caller's modem */
     int        link; uint32_t link_addr;   /* the call in progress there: SATURN_*, whom to call */
@@ -127,6 +133,10 @@ int     srv_link(const srv_t *s, uint32_t *addr, int *online);
 /* matchmaking kinds: the two-character game id (NUL-terminated), or "". */
 const char *srv_link_game(const srv_t *s);
 size_t  srv_send_raw(srv_t *s, const uint8_t *oct, size_t n);
+/* A call in its terminal menu (SRV_LINK_MENU) goes over to PPP on the same
+ * connection (dce_start_ppp): from now on it is a PPP call, and its login
+ * deadline counts from here. -1 when it is not in the menu. */
+int     srv_start_ppp(srv_t *s);
 void    srv_hangup(srv_t *s);
 /* The bulletin board number (bbs.h) answers on a port of any service. That
  * call carries octets like a saturn call (srv_set_raw, srv_send_raw,

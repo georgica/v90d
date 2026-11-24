@@ -403,6 +403,31 @@ of boards. Format and rules: `[services]` in `cfg/config.h` and
   network leads nowhere. The owner's own entries may name a host on the
   LAN.
 
+### 5e. The terminal menu
+
+`[services] menu = on` (off by default) puts Netstalgia's terminal main menu
+on the PPP services' own numbers (`term/`, shared with Netstalgia's
+nsdiald; `srv/termsvc.c` is v90d's side).
+
+- **Answering.** Such a call starts in octet mode with V.42 as `[modem]`
+  says (`SRV_LINK_MENU`) and `dce` watching for PPP (`ppp_detect`): a caller
+  whose first octets begin a PPP frame (Dial-Up Networking's first LCP) is
+  a PPP call at once and never sees the menu. Anyone else gets it 1.5 s
+  after the modems connect, or at the first key.
+- **Start PPP** queues its last screen, then `srv_start_ppp()` turns the
+  call into a PPP call on the same V.42 link (`dce_start_ppp`); its login
+  deadline (`SRV_LOGIN_MAX_S`) counts from there.
+- **The directory** is one `tdir_t` for both ports, made from the list of
+  boards and Netstalgia's board details (`v90d-bbsinfo 1`, a third signed
+  list in `bbslink.c`, none in the image), a slice per block, again when one
+  of them changes and nobody is in the menu. A search runs a slice per poll
+  too. **C** on a board goes through `bbslink_menu_dial()` (the BBS: prompt's
+  connection child); when the board hangs up the caller is the menu's again.
+- **The line.** Screens go out as the changes from the last one, as fast as
+  the modem takes them; keys that pile up on a slow line become one change.
+  Ten minutes without a key end the call (the menu's clock would otherwise
+  keep the line from ever being idle).
+
 ## 6. Firmware (Track A)
 
 A mainline-derived Linux kernel with board support for the DVF9918 SoC written

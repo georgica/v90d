@@ -288,6 +288,8 @@ typedef struct {
     int        log_level;       /* CFG_LOG_* */
     /* [services] */
     int        svc_netstalgia;  /* 1 = answer the numbers of Netstalgia's list too */
+    int        svc_menu;        /* 1 = the terminal menu on the Internet service (term/tmenu.h): a
+                                   terminal program gets it, Dial-Up Networking still goes straight to PPP */
     int        n_services;
     cfg_service_t services[CFG_MAX_SERVICES];
     /* [system] */

@@ -115,6 +115,14 @@ size_t srv_send_raw(srv_t *s, const uint8_t *oct, size_t n)
     return r;
 }
 
+int srv_start_ppp(srv_t *s)
+{
+    if (!s->in_call || s->link != SRV_LINK_MENU || dce_start_ppp(&s->dce) < 0) return -1;
+    s->link = SATURN_NONE;
+    s->ppp_from_s = s->call_s;
+    return 0;
+}
+
 void srv_hangup(srv_t *s)
 {
     if (s->in_call && !s->hangup_sent) { dce_hangup(&s->dce); s->hangup_sent = 1; }
@@ -236,7 +244,7 @@ static void call_start(srv_t *s)
     const cfg_t *c = &s->cfg;
     int bbs, svc, enc; char board[BBS_NUMBER_LEN + 1];
     s->link = SATURN_NONE;
-    s->call_start = s->clock; s->call_s = 0; s->ppp_up_once = 0;
+    s->call_start = s->clock; s->call_s = 0; s->ppp_up_once = 0; s->ppp_from_s = 0;
     /* a terminal program for a bulletin board (bbs.h), unless the number is the port's own */
     bbs = strcmp(s->tel.dialed, c->line_number) != 0 && bbs_number(s->tel.dialed, board) != BBS_NUM_NONE;
     /* a number that connects straight to a service ([services]), the same way */
@@ -345,6 +353,14 @@ static void call_start(srv_t *s)
     d.ppp.ctx = s; d.ppp.ip_rx = ip_from_caller;
     if (for_link(c) || bbs) d.raw_rx = raw_from_caller;
     d.raw_ec = bbs;
+    /* The terminal menu on a PPP service's own number: the call starts as
+     * octets with V.42 kept; a Dial-Up Networking caller's first PPP frame
+     * takes it to PPP at once (dce.h, ppp_detect), anyone else gets the
+     * menu, whose Start PPP does the same later (srv_start_ppp). */
+    if (c->svc_menu && !bbs && !s->protoweb && !s->originate && !for_console(c) && !for_link(c)) {
+        s->link = SRV_LINK_MENU;
+        d.raw_rx = raw_from_caller; d.raw_ec = 1; d.ppp_detect = 1;
+    }
     dce_init(&s->dce, &d);
     dce_get_status(&s->dce, &s->ds);
     s->in_call = 1; s->hangup_sent = 0;
@@ -513,7 +529,11 @@ uint8_t srv_tick_lin(srv_t *s, int offhook, int16_t lin)
              * in and have its network up, once: renegotiating LCP or
              * answering every request with a Nak does not hold a port. */
             if (s->ds.ppp_phase == PPP_PHASE_NETWORK) s->ppp_up_once = 1;
-            if (s->link == SATURN_NONE && !s->originate && !s->ppp_up_once && s->call_s >= SRV_LOGIN_MAX_S)
+            /* the menu's caller went over to PPP by itself (its first frame) */
+            if (s->link == SRV_LINK_MENU && s->ds.state == DCE_ONLINE && !s->ds.raw) {
+                s->link = SATURN_NONE; s->ppp_from_s = s->call_s;
+            }
+            if (s->link == SATURN_NONE && !s->originate && !s->ppp_up_once && s->call_s - s->ppp_from_s >= SRV_LOGIN_MAX_S)
                 srv_hangup(s);
         }
         refresh(s);

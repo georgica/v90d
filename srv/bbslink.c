@@ -19,6 +19,7 @@
 #include "bbsdial.h"
 #include "bbssig.h"
 #include "svc.h"
+#include "guide.h"
 
 static const char *dial_prog = "";
 
@@ -114,8 +115,26 @@ static int svc_check_line(lister_t *L, const char *line, size_t n)
 }
 static void svc_taken(lister_t *L) { (void)L; svc_cur = !svc_cur; }
 
-static lister_t bbs_list = { "bbs", "/etc/v90d.bbs", "/tmp/v90d.bbs", "sh /etc/bbsfetch.sh", 1, bbs_check_line, NULL,
+/* the terminal menu's directory reads the lists themselves (srv/termsvc.c):
+ * it is told when one is taken */
+static unsigned lists_gen;
+static void gen_taken(lister_t *L) { (void)L; lists_gen++; }
+
+/* the board details for the directory (term/guide.h): a board line counts */
+static int info_check_line(lister_t *L, const char *line, size_t n)
+{
+    const char *k, *v; size_t kn, vn; int kind;
+    (void)L;
+    kind = line ? bi_line(line, n, &k, &kn, &v, &vn) : BI_BAD;
+    return kind == BI_HEAD_LINE ? LK_HEAD : kind == BI_BOARD ? LK_OK : kind == BI_BAD ? LK_BAD : LK_NONE;
+}
+
+static lister_t bbs_list = { "bbs", "/etc/v90d.bbs", "/tmp/v90d.bbs", "sh /etc/bbsfetch.sh", 1, bbs_check_line, gen_taken,
                              .sc = { .fd = -1 } };
+/* none in the image (there is no room for it); up to 512 KB, what a signature is checked over */
+static lister_t info_list = { "bbsinfo", "", "/tmp/v90d.bbsinfo",
+                              "sh /etc/bbsfetch.sh http://api.netstalgia.online/v1/bbsinfo.txt 'v90d-bbsinfo 1' 524288",
+                              1, info_check_line, gen_taken, .sc = { .fd = -1 } };
 static lister_t svc_list = { "svc", "/etc/v90d.svc", "/tmp/v90d.svc",
                              "sh /etc/bbsfetch.sh http://api.netstalgia.online/v1/services.txt 'v90d-svc 1'",
                              0, svc_check_line, svc_taken, .sc = { .fd = -1 } };
@@ -183,11 +202,13 @@ static void lf_poll(lister_t *L, uint32_t now_ms)
         if (rename(L->tmp, L->live) < 0) { logf_(CFG_LOG_WARN, "%s: the list that came cannot be kept: %s", L->tag, strerror(errno)); return; }
         L->have_live = 1; L->live_serial = L->sc.serial;
         if (L->taken) L->taken(L);
-        logf_(CFG_LOG_INFO, "%s: fetched list with %d %s%s", L->tag, L->n_ok, L == &bbs_list ? "boards" : "numbers",
+        logf_(CFG_LOG_INFO, "%s: fetched list with %d %s%s", L->tag, L->n_ok, L == &svc_list ? "numbers" : "boards",
               L->n_bad ? " (some lines not understood)" : "");
         return;
     }
-    if (L->taken && !L->builtin_done) { lf_check(L, L->builtin, 1); return; }    /* the image's list, first */
+    if (L->taken && !L->builtin_done) {                 /* the image's list, first */
+        if (!L->builtin[0]) L->builtin_done = 1; else { lf_check(L, L->builtin, 1); return; }
+    }
     if (L->pid > 0) {
         if (waitpid(L->pid, &st, WNOHANG) != L->pid) return;
         L->pid = 0;
@@ -246,7 +267,9 @@ int bbslink_svc_known(const char *dialed)
 void bbslink_svc_want(int on) { svc_list.wanted = on != 0; }
 
 /* ---- one caller ---- */
-enum { BL_IDLE = 0, BL_RINGING, BL_PROMPT, BL_FIND, BL_LIST, BL_LINKED, BL_CLOSING, BL_OVER };
+enum { BL_IDLE = 0, BL_RINGING, BL_PROMPT, BL_FIND, BL_LIST, BL_LINKED, BL_CLOSING, BL_OVER,
+       BL_MENUBACK };           /* a board dialled from the terminal menu is over: back to it once said */
+static int menu_want;           /* a port has the terminal menu: keep its lists */
 #define BL_IDLE_MS   180000u    /* at the prompt with nothing typed */
 #define BL_LIST_MAX  40         /* boards shown for one search */
 #define BL_GREET_MS  1500u      /* after the modems connect: a terminal program is not listening at once */
@@ -262,6 +285,7 @@ static struct bbs_link {
     telnet_t   tn;
     int        fd; pid_t pid; long got;
     int        svc, raw, policy;                    /* a number of a service; its mode raw; bbsdial_run's self_ok */
+    int        menu;                                /* dialled from the terminal menu (bbslink_menu_dial) */
     uint8_t    dn[4096]; size_t dn_n;               /* for the modem, as it takes them */
     uint8_t    up[4096]; size_t up_n;               /* for the board (raw: the caller's first octets wait here) */
 } bl[PORTS] = { { .fd = -1, .sc = { .fd = -1 } }, { .fd = -1, .sc = { .fd = -1 } } };
@@ -290,7 +314,7 @@ static void bl_bye(struct bbs_link *l, const char *words)
 {
     bl_close(l);
     say(l, words);
-    l->st = BL_CLOSING; l->t0 = l->now;
+    l->st = l->menu ? BL_MENUBACK : BL_CLOSING; l->t0 = l->now;    /* from the menu: back to it, not off the line */
 }
 /* the service of the number dialled on port k into l->to: the owner's
  * first, then Netstalgia's. 0 if it is none (the list changed meanwhile). */
@@ -413,11 +437,16 @@ void bbslink_from_modem(void *ctx, const uint8_t *oct, size_t n)
 void bbslink_poll(uint32_t now_ms)
 {
     int k;
+    if (menu_want) bbs_list.wanted = info_list.wanted = 1;
     lf_poll(&bbs_list, now_ms);
     lf_poll(&svc_list, now_ms);
+    lf_poll(&info_list, now_ms);
     for (k = 0; k < n_ports; k++) {
         struct bbs_link *l = &bl[k]; uint32_t addr = 0; int on = 0, kind = srv_link(&S[k], &addr, &on);
-        if (kind != SRV_LINK_BBS && kind != SRV_LINK_SVC) { if (l->st != BL_IDLE) { bl_close(l); l->st = BL_IDLE; } continue; }
+        if (!(kind == SRV_LINK_MENU && l->menu) && kind != SRV_LINK_BBS && kind != SRV_LINK_SVC) {
+            if (l->st != BL_IDLE || l->menu) { bl_close(l); l->st = BL_IDLE; l->menu = 0; }
+            continue;
+        }
         l->now = now_ms;
         switch (l->st) {
         case BL_IDLE:
@@ -446,6 +475,7 @@ void bbslink_poll(uint32_t now_ms)
         case BL_FIND:
             if (l->sc.fd >= 0 && !scan_step(&l->sc, find_line, l)) break;
             if (l->found) { bl_dial(k); break; }
+            if (l->menu) { bl_bye(l, "That board is not on the list any more.\r\n"); break; }
             say(l, l->num[0] ? "No board has that number. ? and part of a name searches.\r\n"
                              : "No board of that name. ? and part of a name searches.\r\n");
             bl_prompt(l);
@@ -482,13 +512,16 @@ void bbslink_poll(uint32_t now_ms)
             bl_close(l);
             if (l->got) { logf_(CFG_LOG_INFO, "port %d: %s: the %s hung up", k + 1, l->svc ? "svc" : "bbs", l->svc ? "service" : "board"); bl_bye(l, ""); break; }
             logf_(CFG_LOG_INFO, "port %d: %s: no answer from %s", k + 1, l->svc ? "svc" : "bbs", l->to.host);
-            if (l->svc) { bl_bye(l, l->raw ? "" : "No answer.\r\n"); break; }     /* nothing else to call */
+            if (l->svc || l->menu) { bl_bye(l, l->raw ? "" : "No answer.\r\n"); break; }     /* nothing else to call */
             say(l, "No answer.\r\n");
             bl_prompt(l);
             break; }
         case BL_CLOSING:
             if (l->dn_n == 0 && now_ms - l->t0 >= BL_LAST_MS) { l->st = BL_OVER; srv_hangup(&S[k]); }
             else if (l->dn_n) l->t0 = now_ms;
+            break;
+        case BL_MENUBACK:
+            if (l->dn_n == 0) { l->menu = 0; l->st = BL_IDLE; }       /* the last words are out: the menu's again */
             break;
         default:        /* BL_OVER: until the call has ended */
             break;
@@ -584,3 +617,26 @@ void bbslink_svc_set_builtin(const char *path) { svc_list.builtin = path; }
 void bbslink_svc_set_live(const char *path)    { svc_list.live = path; }
 void bbslink_svc_set_fetch(const char *cmd)    { svc_list.cmd = cmd ? cmd : ""; }
 void bbslink_set_prog(const char *prog)    { dial_prog = prog ? prog : ""; }
+void bbslink_info_set_live(const char *path)  { info_list.live = path; }
+void bbslink_info_set_fetch(const char *cmd)  { info_list.cmd = cmd ? cmd : ""; }
+
+/* ---- for the terminal menu (srv/termsvc.c) ---- */
+void        bbslink_menu_want(int on) { menu_want = on != 0; }
+unsigned    bbslink_lists_gen(void)   { return lists_gen; }
+const char *bbslink_list_path(void)   { return list_path(); }
+const char *bbslink_info_path(void)   { return info_list.have_live ? info_list.live : ""; }
+int         bbslink_menu_busy(int k)  { return k >= 0 && k < PORTS && bl[k].menu; }
+
+int bbslink_menu_dial(int k, const char *login)
+{
+    struct bbs_link *l;
+    if (k < 0 || k >= n_ports || bl[k].menu || !login[0]) return -1;
+    l = &bl[k];
+    bl_close(l);
+    l->dn_n = l->up_n = 0;
+    l->menu = 1; l->svc = 0; l->raw = 0; l->policy = BBSDIAL_PUBLIC;
+    snprintf(l->key, sizeof l->key, "%s", login);
+    l->num[0] = 0;
+    bl_find(l);
+    return 0;
+}

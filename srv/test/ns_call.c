@@ -1349,6 +1349,109 @@ int main(int argc, char **argv)
         CHECK_EQ_I(waitpid(pid, &st, 0), pid);
         CHECK(WIFEXITED(st) && WEXITSTATUS(st) == 0);
     }
+    /* 13b. the terminal menu on the Internet number ([services] menu): Dial-Up
+     * Networking is not touched (its first frame goes straight to PPP); a
+     * terminal program gets the menu: colour, the BBS directory with the
+     * board details (Netstalgia's list, signed with the test key), a board
+     * on the same call and back, then Start PPP and IP on the same call. */
+    {
+        static char lanlog[300], board[300], builtin[300], info[300], infolive[300], live[300], icmd[700]; FILE *f;
+        snprintf(board, sizeof board, "%s/ns_menu.sh", argv[2]);
+        snprintf(builtin, sizeof builtin, "%s/ns_menu.builtin", argv[2]);
+        snprintf(info, sizeof info, "%s/ns_menu.info", argv[2]);
+        snprintf(infolive, sizeof infolive, "%s/ns_menu.infolive", argv[2]);
+        snprintf(live, sizeof live, "%s/ns_menu.live", argv[2]);
+        snprintf(icmd, sizeof icmd, "cat %s", info);
+        f = fopen(board, "w");
+        if (f) {
+            fprintf(f, "#!/bin/sh\nprintf 'Welcome to %%s port %%s\\r\\n'  \"$1\" \"$2\"\n"
+                       "x=$(dd bs=1 count=2 2>/dev/null)\nprintf 'bye %%s\\r\\n' \"$x\"\n");
+            fclose(f); chmod(board, 0755);
+        }
+        f = fopen(builtin, "w");
+        if (f) {
+            fprintf(f, "# serial 6\nv90d-bbs 2\nbbs telehack 2278353422 tele.example Telehack\n"
+                       "bbs 20forbeers 2272036723 b.example:1337 20 For Beers <BBS>\n");
+            fclose(f);
+        }
+        f = fopen(info, "w");
+        if (f) {
+            fprintf(f, "# serial 3\nv90d-bbsinfo 1\nboard telehack\nloc Berkeley, CA, USA\nsw Telehack\nnew guest\n"
+                       "d The original telehack: a board of 1980s computing.\nboard 20forbeers\nloc Portland, OR, USA\nsw Mystic\nnodes 4\n"
+                       "# sig ed25519 3bc5ab08665d3c2d2a5ea6e4da35cfec4adb2c96381b04892a790dfff5d00d9ccfae9cb5a26c45e79091b14af0a82226516f0f4818516ba7bee4cb753946870b\n");
+            fclose(f);
+        }
+        unlink(live); unlink(infolive);
+        cfg_default(&c);
+        strcpy(c.line_number, "5551234"); c.rings = 1; c.status_port = 8080; c.svc_menu = 1;
+        c.auth = CFG_AUTH_CHAP; c.n_users = 1; strcpy(c.users[0].name, "alice"); strcpy(c.users[0].secret, "wonderland");
+        CHECK_EQ_I(cfg_save(&c, conf, err, sizeof err), CFG_OK);
+        CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
+        snprintf(lanlog, sizeof lanlog, "%s/ns_menu.log", argv[2]);
+        pid = fork();
+        if (pid == 0) {
+            int a = fcntl(sv[1], F_DUPFD, 20), lfd = open(lanlog, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            dup2(a, 3); if (lfd >= 0) dup2(lfd, 2);
+            for (i = 4; i < 64; i++) close(i);
+            execl(argv[1], "v90d", "-c", conf, "-l", "fd:3", "-i", "lo", "-t", "ppp0", "-A", "",
+                  "-B", builtin, "-b", "", "-J", live, "-T", board, "-z", icmd, "-Z", infolive, (char *)NULL);
+            _exit(127);
+        }
+        close(sv[1]);
+        line_fd = sv[0]; idle_fd = -1;
+        dead = quiet_exit = 0; hook = modem_on = 0; blk_n = 0; c_tx = 0; c_rx_pw = 0;
+        channel_init(&CH, &cc);
+        memset(prev_tx, 0xFF, sizeof prev_tx);
+        /* the menu wants the lists: the details are fetched, the directory made */
+        for (i = 0; i < 300 && !file_has(lanlog, "2 with the guide's details"); i++) { run_ms(100); usleep(5000); }
+        CHECK(file_has(lanlog, "menu: the BBS directory has 2 boards, 2 with the guide's details"));
+        /* (a) Dial-Up Networking: PPP, no menu */
+        hook = 1; run_ms(500);
+        dial("5551234");
+        run_ms(2000 + 300);
+        start_modem(0);
+        CHECK(wait_ip(60000) > 0);
+        CHECK(!file_has(lanlog, "menu: a terminal program called"));
+        hang_up();
+        /* (b) a terminal program: the menu */
+        CHECK_EQ_I(bt_call("5551234"), 1);
+        CHECK(bt_wait("ANSI colour?", 6000));
+        CHECK(bt_saw("\x1b[2J"));
+        bt_got_n = 0; bt_type("y");
+        CHECK(bt_wait("MAIN MENU", 6000));
+        CHECK(bt_saw("Tonight on the network"));
+        bt_got_n = 0; bt_type("3");
+        CHECK(bt_wait("BBS DIRECTORY", 6000));
+        CHECK(bt_wait("Telehack", 2000));
+        CHECK(bt_saw("227-835-3422") && bt_saw("Portland, OR, USA") && bt_saw("from the Telnet BBS Guide"));
+        bt_got_n = 0; bt_type("t\r");
+        CHECK(bt_wait("Berkeley, CA, USA", 6000));
+        CHECK(bt_wait("The original telehack", 2000));
+        CHECK(bt_saw("log in as guest"));
+        /* the board on the same call, and back to the directory */
+        bt_got_n = 0; bt_type("c");
+        CHECK(bt_wait("Putting you through to Telehack", 6000));
+        CHECK(bt_wait("Welcome to tele.example port 23", 6000));
+        CHECK(file_has(lanlog, "menu: to the board telehack"));
+        bt_got_n = 0; bt_type("ok");
+        CHECK(bt_wait("bye ok", 4000));
+        CHECK(bt_wait("BBS DIRECTORY", 8000));
+        /* the menu, Start PPP, and the same call is a PPP call */
+        bt_got_n = 0; bt_type("\x1b");
+        run_ms(500);
+        bt_type("1");
+        CHECK(bt_wait("Starting PPP", 6000));
+        caller_to_ppp(&C);
+        CHECK(wait_ip(60000) > 0);
+        CHECK(file_has(lanlog, "menu: Start PPP"));
+        hang_up();
+        quiet_exit = 1;
+        kill(pid, SIGTERM);
+        for (i = 0; i < 400 && !dead; i++) step(0);
+        close(line_fd);
+        CHECK_EQ_I(waitpid(pid, &st, 0), pid);
+        CHECK(WIFEXITED(st) && WEXITSTATUS(st) == 0);
+    }
     /* 14. numbers that connect straight to a service ([services]): the
      * owner's, raw and telnet, on a port whose service is the internet, and
      * Netstalgia's list, the image's and then a fetched one (signed with the

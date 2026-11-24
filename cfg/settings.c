@@ -16,7 +16,7 @@ enum {
     F_LAN, F_ADDRESS, F_NETMASK, F_GATEWAY, F_DNS1, F_DNS2, F_PORT, F_SERVICE, F_V92, F_COMPRESSION,
     F_ENCRYPTION,
     F_DCNOW, F_DCLAN, F_DCUPNP, F_DCIWANGO, F_SATMATCH, F_UPDATE_CHECK, F_X2, F_K56,
-    F_SVCNET, F_ADD,
+    F_SVCNET, F_ADD, F_SVCMENU,
     F_COUNT,
     F_USER = 100, F_PASS = 200,     /* plus the row */
     F_SVC = 300                     /* plus 100 * the S_ column, plus the row */
@@ -40,7 +40,7 @@ static const struct { const char *name; const char *sec; } fields[F_COUNT] = {
     { "encryption", "ppp" },
     { "dreamcast_now", "line" }, { "dreamcast_lan", "line" }, { "dreamcast_upnp", "line" }, { "dreamcast_iwango", "line" }, { "saturn_matchmaking", "line" },
     { "update_check", "system" }, { "x2", "modem" }, { "k56", "modem" },
-    { "netstalgia", "services" }, { "add", "status" },
+    { "netstalgia", "services" }, { "add", "status" }, { "menu", "services" },
 };
 
 static const char *const n_tones[] = { "us", "eu" };
@@ -76,6 +76,8 @@ static const char *const t_mods[]  = { "V.90", "V.34", "V.32bis", "V.22bis", "V.
 static const char *const n_svcmode[] = { "raw", "telnet" };        /* CFG_SVC_* */
 static const char *const t_svcnet[] = { "Off: only the numbers above",
                                         "On: also Netstalgia's numbers, fetched once a day" };
+static const char *const t_svcmenu[] = { "Off: every call on the Internet service is PPP",
+                                         "On: a terminal program gets the menu first" };
 
 /* ---- the page -------------------------------------------------------------- */
 
@@ -501,6 +503,7 @@ int settings_render_page(const cfg_t *c, int page, int saved, const char *error,
     if (n < CFG_MAX_SERVICES) add_button(&b, "stpl", "srows", CFG_MAX_SERVICES);
     sb_puts(&b, "<table>\n");
     in_select(&b, "Netstalgia's numbers", F_SVCNET, c->svc_netstalgia, n_v92, t_svcnet, 2);
+    in_select(&b, "Terminal menu", F_SVCMENU, c->svc_menu, n_v92, t_svcmenu, 2);
     sb_puts(&b, "</table>\n<p>A caller who dials one of these numbers, on either port and whatever its"
                 " service, is connected straight to the host: no PPP, the call carries what the modems"
                 " send. Raw passes the octets both ways as they are, for a game or program with a protocol"
@@ -508,7 +511,12 @@ int settings_render_page(const cfg_t *c, int page, int saved, const char *error,
                 " board or text service. The call ends when the host hangs up or does not answer."
                 " A number is 3 to 15 digits as the caller dials it (an 11-digit number with a 1 in front also"
                 " answers without the 1); it may not be a port's own number or a BBS number. The host may be"
-                " on your network. A row without a number is not used.</p></section>\n");
+                " on your network. A row without a number is not used.</p>\n"
+                "<p>The terminal menu: a caller on a port's Internet number who uses a terminal program"
+                " (HyperTerminal, Telix, minicom) gets a menu in ANSI colour or plain text: start PPP on the"
+                " same call, see who is on the lines, and the BBS directory, whose boards it connects to."
+                " Dial-Up Networking callers are not affected: their first PPP frame takes them straight to"
+                " PPP. A PPP program that waits for the box to speak first needs it off.</p></section>\n");
     }
     /* Save, inside the last card of the form */
     {
@@ -806,6 +814,7 @@ static void set_field(form_t *f, int fi, const char *v, size_t len)
     case F_ENCRYPTION: set_enum(f, fi, &c->encryption, v, n_comp, 2, "on, off"); break;
     case F_UPDATE_CHECK: set_enum(f, fi, &c->update_check, v, n_v92, 2, "on, off"); break;
     case F_SVCNET:  set_enum(f, fi, &c->svc_netstalgia, v, n_v92, 2, "on, off"); break;
+    case F_SVCMENU: set_enum(f, fi, &c->svc_menu, v, n_v92, 2, "on, off"); break;
     case F_ADD:     f->add = 1; break;          /* the button's label, whatever it is */
     case F_ADDRESS: set_addr(f, fi, &c->lan_addr, v, 0); break;
     case F_NETMASK: set_addr(f, fi, &c->lan_netmask, v, 0); break;

@@ -15,7 +15,7 @@ LIBV90M_DEFS ?= $(filter-out -D_POSIX_C_SOURCE%,$(filter -D%,$(CFLAGS)))
 include ../libv90m.mk
 
 # the daemon sees the library's public header only; the tests see its internals
-DAEMON_INC := -I. -I../tel -I../dce -I../cfg -I../ppp $(LIBV90M_INC)
+DAEMON_INC := -I. -I../tel -I../dce -I../cfg -I../ppp -I../term $(LIBV90M_INC)
 INC := -I. -I../tel -I../dce -I../dce/test -I../cfg -I../test -I../ppp -I../ppp/test $(LIBV90M_DEV_INC)
 PPP_SRC := $(addprefix ../ppp/,ppp_md5.c ppp_crypto.c ppp_hdlc.c ppp_fsm.c ppp_deflate.c ppp_mppc.c ppp_mppe.c ppp.c)
 CFG_SRC := ../cfg/config.c ../cfg/status.c
@@ -26,9 +26,11 @@ CORE_SRC := srv.c console.c dclist.c dcnow.c upnp.c saturn.c stun.c bbs.c svc.c 
 # are in the library's dev archive (linked last, after the sources)
 SIM_SRC := ../dce/test/caller.c ../ppp/test/pppc.c $(LIBV90M_DEV)
 SIM_SRC_ARM := ../dce/test/caller.c ../ppp/test/pppc.c $(LIBV90M_DEV_ARM)
-HDRS := $(wildcard *.h ../tel/*.h ../dce/*.h ../dce/test/*.h ../cfg/*.h ../ppp/*.h) $(LIBV90M)/include/v90modem.h
+HDRS := $(wildcard *.h ../tel/*.h ../dce/*.h ../dce/test/*.h ../cfg/*.h ../ppp/*.h ../term/*.h) $(LIBV90M)/include/v90modem.h
+# the terminal menu (shared with Netstalgia's nsdiald)
+TERM_SRC := $(addprefix ../term/,tscr.c tart.c guide.c tdir.c tmenu.c)
 
-DAEMON_SRC := main.c satlink.c bbslink.c update.c netsvc.c tun.c nat.c ../cfg/httpd.c ../cfg/settings.c ../cfg/firmware.c ../cfg/vpn.c $(CORE_SRC)
+DAEMON_SRC := main.c satlink.c bbslink.c termsvc.c update.c netsvc.c tun.c nat.c ../cfg/httpd.c ../cfg/settings.c ../cfg/firmware.c ../cfg/vpn.c $(CORE_SRC) $(TERM_SRC)
 # the firmware's version, shown on the pages: one place, fw/VERSION
 VERSION := $(shell cat ../fw/VERSION 2>/dev/null || echo dev)
 DAEMON_DEF := -DV90D_VERSION='"$(VERSION)"'
