@@ -84,6 +84,9 @@ static int protoweb_here(const srv_t *s)
     return s->protoweb_ok && (s->cfg.service == CFG_SERVICE_INTERNET || s->cfg.service == CFG_SERVICE_ARCHIVE);
 }
 
+/* the time service answers: the box knows the time (srv_set_clock) */
+static int acts_here(const srv_t *s) { return s->clock >= 1600000000u; }
+
 /* the telephony layer's question while digits come in (tel_cfg.more) */
 static int tel_more(void *ctx, const char *dialed)
 {
@@ -93,6 +96,7 @@ static int tel_more(void *ctx, const char *dialed)
         if ((m = cfg_svc_number_begins(c->services[i].number, dialed)) > best) best = m;
     if (best < 2 && c->svc_netstalgia && s->svc_known && (m = s->svc_known(dialed)) > best) best = m;
     if (best < 2 && protoweb_here(s) && (m = cfg_svc_number_begins(SRV_PROTOWEB, dialed)) > best) best = m;
+    if (best < 2 && acts_here(s) && (m = cfg_svc_number_begins(SRV_ACTS, dialed)) > best) best = m;
     return best;
 }
 
@@ -247,7 +251,7 @@ static void call_start(srv_t *s)
 {
     dce_cfg_t d;
     const cfg_t *c = &s->cfg;
-    int bbs, svc, enc; char board[BBS_NUMBER_LEN + 1];
+    int bbs, svc, acts, enc; char board[BBS_NUMBER_LEN + 1];
     s->link = SATURN_NONE;
     s->call_start = s->clock; s->call_s = 0; s->ppp_up_once = 0; s->ppp_from_s = 0;
     /* a terminal program for a bulletin board (bbs.h), unless the number is the port's own */
@@ -257,8 +261,12 @@ static void call_start(srv_t *s)
     /* the PROTOWEB number: the port's dial-up connection, with the archive */
     s->protoweb = !bbs && !svc && protoweb_here(s) && strcmp(s->tel.dialed, c->line_number) != 0
                   && cfg_svc_number_match(SRV_PROTOWEB, s->tel.dialed);
+    /* the time service (SRV_ACTS): ACTS's own terms, octets at the line's rate */
+    acts = !bbs && !svc && !s->protoweb && strcmp(s->tel.dialed, c->line_number) != 0 && acts_here(s)
+           && cfg_svc_number_match(SRV_ACTS, s->tel.dialed);
     if (bbs) s->link = SRV_LINK_BBS;
     else if (svc) s->link = SRV_LINK_SVC;
+    else if (acts) s->link = SRV_LINK_ACTS;
     else if (for_link(c)) {
         s->link = saturn_number(s->tel.dialed, &s->link_addr, s->link_game);
         if ((s->link == SATURN_MATCH_WAIT || s->link == SATURN_MATCH_CALL) && !c->sat_match) s->link = SATURN_NONE;
@@ -299,7 +307,7 @@ static void call_start(srv_t *s)
      * originate strip below) only when we really will offer one, so the slot
      * never leaks. */
     if ((c->x2 || c->k56) && (c->modulations & CFG_MOD_V34) && !s->originate
-        && full_options(c, bbs)
+        && full_options(c, bbs) && !acts
         && (!s->heavy_slot || *s->heavy_slot == 0)) {
         if (c->x2)  d.modulations |= V90M_MOD_X2;
         if (c->k56) d.modulations |= V90M_MOD_K56;
@@ -316,6 +324,15 @@ static void call_start(srv_t *s)
         d.modulations &= V90M_MOD_V34 | V90M_MOD_V32BIS | V90M_MOD_V22 | V90M_MOD_V21;
     }
     if (!c->v42) { d.v42.detect = 1; d.v42.fallback = 1; d.v42.t400_ms = 1; }  /* straight to start-stop */
+    if (acts) {
+        /* ACTS's terms: up to 9600 bit/s and on (V.32bis here; no V.34 or
+         * V.90, whose delay wanders more), 8N1 with no error control or
+         * compression, so that an octet's time is its time on the line */
+        uint32_t m = d.modulations & (V90M_MOD_V32BIS | V90M_MOD_V22 | V90M_MOD_BELL212A | V90M_MOD_V21 | V90M_MOD_BELL103);
+        d.modulations = m ? m : d.modulations & V90M_MOD_V34;   /* the owner left only fast ones on */
+        d.v42.detect = 1; d.v42.fallback = 1; d.v42.t400_ms = 1;
+        d.v42.lapm.v42bis_tx = 0; d.v42.lapm.v42bis_rx = 0; d.v42.lapm.v44_tx = 0; d.v42.lapm.v44_rx = 0;
+    }
     if (!c->v42bis) {
         /* the switch is for data compression as a whole: V.42 bis and V.44 */
         d.v42.lapm.v42bis_tx = 0; d.v42.lapm.v42bis_rx = 0;
@@ -356,13 +373,13 @@ static void call_start(srv_t *s)
     d.ppp.seed = s->seed ^ s->clock;
     if (s->entropy_n) { d.ppp.entropy = s->entropy; d.ppp.entropy_n = s->entropy_n; }
     d.ppp.ctx = s; d.ppp.ip_rx = ip_from_caller;
-    if (for_link(c) || bbs) d.raw_rx = raw_from_caller;
+    if (for_link(c) || bbs || acts) d.raw_rx = raw_from_caller;
     d.raw_ec = bbs;
     /* The terminal menu on a PPP service's own number: the call starts as
      * octets with V.42 kept; a Dial-Up Networking caller's first PPP frame
      * takes it to PPP at once (dce.h, ppp_detect), anyone else gets the
      * menu, whose Start PPP does the same later (srv_start_ppp). */
-    if (c->svc_menu && !bbs && !s->protoweb && !s->originate && !for_console(c) && !for_link(c)) {
+    if (c->svc_menu && !bbs && !acts && !s->protoweb && !s->originate && !for_console(c) && !for_link(c)) {
         s->link = SRV_LINK_MENU;
         d.raw_rx = raw_from_caller; d.raw_ec = 1; d.ppp_detect = 1;
     }

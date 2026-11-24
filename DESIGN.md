@@ -433,6 +433,34 @@ nsdiald; `srv/termsvc.c` is v90d's side).
   Ten minutes without a key end the call (the menu's clock would otherwise
   keep the line from ever being idle).
 
+### 5f. The time service (ACTS)
+
+`SRV_ACTS` (303 494 4774, NIST's ACTS number, fixed and reserved: no
+service of the owner's may take it) answers on every port while the box's
+clock is set (`srv_set_clock`, the clock NTP keeps). `srv/acts.[ch]` is the
+pure core, shared with Netstalgia's nsdiald: no I/O, no clock of its own;
+the host gives it the UTC time in microseconds and writes what
+`acts_poll()` returns at once. `srv/actsvc.c` is the box's side.
+
+- **The call** (`SRV_LINK_ACTS`) is as ACTS offered it: V.32bis and below
+  (V.34 and V.90 only when the owner has turned the slow ones off), 8N1
+  with no V.42 or compression, octets straight to and from the core.
+- **The line** names the second at which its OTM reaches the caller: the
+  text goes out early enough to be out at the line rate, the OTM is handed
+  out msADV (45 ms to begin with) before the second, the CR LF follows.
+  The OTM goes at the first poll from 5 ms before its time; the box polls
+  every 10 ms block, so it is within 5 ms either way.
+- **The echo**: an OTM the caller sends back within a second is timed from
+  when it went; msADV becomes half that round trip, the mean of a run of
+  measurements within 6 ms of it, and after three such the OTM is `#`.
+  The 10 ms blocks are in the round trip too, so one measurement wanders
+  by some 5 ms; the mean steadies it. Measured over a Windows 98 modem at
+  V.32bis: 65 ms.
+- **Fields the box does not know** (DUT1, a coming leap second) are sent as
+  zero. The daylight time code follows the US rule since 2007, the changes
+  at 2 a.m. Mountain time (NIST's).
+- After 55 s the line in hand ends and the box hangs up once it is out.
+
 ## 6. Firmware (Track A)
 
 A mainline-derived Linux kernel with board support for the DVF9918 SoC written

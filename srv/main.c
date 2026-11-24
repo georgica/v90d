@@ -71,6 +71,7 @@
 #include "satlink.h"
 #include "bbslink.h"
 #include "termsvc.h"
+#include "actsvc.h"
 #include "update.h"
 #include "netsvc.h"
 #include "vpn.h"
@@ -446,6 +447,7 @@ static void raw_from_modem(void *ctx, const uint8_t *oct, size_t n)
     int kind = srv_link((srv_t *)ctx, &addr, &on);
     if (kind == SRV_LINK_BBS || kind == SRV_LINK_SVC) bbslink_from_modem(ctx, oct, n);
     else if (kind == SRV_LINK_MENU) termsvc_from_modem(ctx, oct, n);
+    else if (kind == SRV_LINK_ACTS) actsvc_from_modem(ctx, oct, n);
     else satlink_from_modem(ctx, oct, n);
 }
 
@@ -679,6 +681,7 @@ int main(int argc, char **argv)
             satlink_poll(now_ms);
             bbslink_poll(now_ms);
             termsvc_poll(now_ms);
+            actsvc_poll();
             update_poll(now_ms);
             netsvc_poll(now_ms);
             if (fw_pid > 0 && blocks == 50 && waitpid(fw_pid, NULL, WNOHANG) == fw_pid) fw_pid = 0;   /* once a second (blocks counts to 100 and starts again) */

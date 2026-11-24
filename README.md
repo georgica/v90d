@@ -127,6 +127,23 @@ goes to the archive gateway (Protoweb's web as it was), as on a port set to
 Archive. The port's own number stays the internet as it is. Netstalgia
 answers the same number the same way.
 
+## 1 303 494 4774: the time
+
+**303 494 4774** (with or without the 1), the number of NIST's Automated
+Computer Time Service, gives the time on any port in ACTS's own format, so
+the time-setting programs of the day and the NTP ACTS driver, which come set
+to that number, work unchanged against the box. The box answers it while
+its clock is set (NTP), at up to 9600 bit/s and on (V.32bis and below, as
+ACTS) with no error control or compression: the banner, then a line a
+second (each two seconds at 300 bit/s) with the Modified Julian Date, the
+date and time in UTC, the US daylight time code and the on-time marker,
+sent 45 ms ahead of its second. A program that echoes the marker has the
+advance measured for its line, and the marker turns from `*` to `#` once
+three measurements agree; `?` gives a short help. The call ends after 55
+seconds. The number is fixed. Netstalgia answers the same number the same
+way. The marker is within about 5 ms of its time: the box works in 10 ms
+blocks.
+
 ## Numbers to services
 
 A number can also connect a caller straight to one service on the internet,

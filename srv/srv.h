@@ -40,6 +40,12 @@ typedef void (*srv_raw_fn)(void *ctx, const uint8_t *oct, size_t n);
 /* PROTOWEB on the keypad with zeros behind (the rule of the board numbers):
  * the old web of Protoweb, as Netstalgia also has it */
 #define SRV_PROTOWEB "7768693200"
+/* srv_link(): a call to the time service (srv/acts.h, srv/actsvc.c) */
+#define SRV_LINK_ACTS 19
+/* the time service's number: NIST's ACTS number, which period time-setting
+ * programs and the NTP ACTS driver come set to. Fixed; on every port, with
+ * or without a 1 in front, while the box's clock is set (srv_set_clock). */
+#define SRV_ACTS "3034944774"
 /* dialed against Netstalgia's list of services (the daemon's): 2 = it is
  * one of its numbers, 1 = it begins one, 0 = neither (cfg_svc_number_begins) */
 typedef int (*srv_svc_fn)(const char *dialed);
