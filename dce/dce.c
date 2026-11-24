@@ -211,7 +211,24 @@ static void raw_in(dce_t *d, const uint8_t *b, size_t n)
 {
     size_t i;
     if (d->to_ppp) { ppp_input_bytes(&d->ppp, b, n); return; }   /* PPP is asked for: the caller's are its */
-    if (d->det_done) { d->cfg.raw_rx(d->cfg.ppp.ctx, b, n); return; }
+    if (d->det_done) {
+        for (i = 0; d->watch && i < n; i++) {
+            if (b[i] == 0x7e) d->wn = 0;
+            else if (!d->wn) continue;
+            d->wb[d->wn++] = b[i];
+            switch (det_match(d->wb, d->wn)) {
+            case 0: d->wn = 0; break;
+            case 2:                         /* a PPP program after all: from its frame on */
+                d->cfg.raw_rx(d->cfg.ppp.ctx, b, i + 1);
+                go_ppp(d);
+                ppp_input_bytes(&d->ppp, d->wb, (size_t)d->wn);
+                if (i + 1 < n) ppp_input_bytes(&d->ppp, b + i + 1, n - i - 1);
+                return;
+            }
+        }
+        d->cfg.raw_rx(d->cfg.ppp.ctx, b, n);
+        return;
+    }
     for (i = 0; i < n; i++) {
         int m;
         d->det[d->det_n++] = b[i];
@@ -224,7 +241,7 @@ static void raw_in(dce_t *d, const uint8_t *b, size_t n)
             if (i + 1 < n) ppp_input_bytes(&d->ppp, b + i + 1, n - i - 1);
         } else {                            /* someone at a terminal: all of it, as it came */
             d->cfg.raw_rx(d->cfg.ppp.ctx, d->det, (size_t)d->det_n);
-            if (i + 1 < n) d->cfg.raw_rx(d->cfg.ppp.ctx, b + i + 1, n - i - 1);
+            if (i + 1 < n) raw_in(d, b + i + 1, n - i - 1);     /* watched (d->watch) */
         }
         return;
     }
@@ -467,6 +484,7 @@ static void ms_step(dce_t *d, int retraining)
             d->raw_head = 0; d->raw_n = 0;
             d->raw = 1;
             d->det_n = 0; d->det_ms = 0; d->det_done = !d->cfg.ppp_detect;
+            d->watch = d->cfg.ppp_detect; d->wn = 0;
             d->state = DCE_ONLINE;
         } else if (vs == V90M_EC_CONNECTED || vs == V90M_EC_ASYNC) {
             ppp_begin(d);
@@ -624,6 +642,8 @@ int dce_start_ppp(dce_t *d)
 }
 
 void dce_hangup(dce_t *d) { if (!d->hangup_req) d->hangup_req = 1; }
+
+void dce_ppp_watch(dce_t *d, int on) { d->watch = on && d->cfg.ppp_detect; d->wn = 0; }
 
 void dce_get_status(const dce_t *d, dce_status_t *st)
 {

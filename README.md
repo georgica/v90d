@@ -157,7 +157,8 @@ over names, places, software and descriptions and a page for each board
 description), and **C** there connects to the board on the same call;
 logging off the board comes back to the directory. **G** says goodbye.
 Dial-Up Networking callers never see it: their first PPP frame takes them
-straight to PPP. The board details come from the Telnet BBS Guide, by way
+straight to PPP, also when the program sends something else first (a chat
+script's CR after CONNECT); a frame does not while the caller is on a board. The board details come from the Telnet BBS Guide, by way
 of a second signed list from Netstalgia; until the box has it, the
 directory shows names and numbers. Off by default: a PPP program that waits
 for the box to speak first needs it off. The menu is shared with

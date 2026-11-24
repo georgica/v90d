@@ -258,6 +258,7 @@ void termsvc_poll(uint32_t now)
         if (t->dialing) {
             if (bbslink_menu_busy(k)) continue;
             t->dialing = 0;
+            srv_ppp_watch(&S[k], 1);       /* the menu's again: a PPP frame may take the call */
             tmenu_back(&t->m, now);
             t->key_at = now;
         }
@@ -280,7 +281,8 @@ void termsvc_poll(uint32_t now)
             srv_hangup(&S[k]);
         } else if (act == TM_ACT_DIAL) {
             const char *login = tdir_get(&dir, board, TD_LOGIN);
-            if (bbslink_menu_dial(k, login) == 0) { t->dialing = 1; logf_(CFG_LOG_INFO, "port %d: menu: to the board %s", k + 1, login); }
+            /* a board's data (a file sent to it) may hold a PPP frame's start */
+            if (bbslink_menu_dial(k, login) == 0) { t->dialing = 1; srv_ppp_watch(&S[k], 0); logf_(CFG_LOG_INFO, "port %d: menu: to the board %s", k + 1, login); }
             else tmenu_back(&t->m, now);
         }
     }

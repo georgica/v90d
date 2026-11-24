@@ -115,6 +115,11 @@ size_t srv_send_raw(srv_t *s, const uint8_t *oct, size_t n)
     return r;
 }
 
+void srv_ppp_watch(srv_t *s, int on)
+{
+    if (s->in_call && s->link == SRV_LINK_MENU) dce_ppp_watch(&s->dce, on);
+}
+
 int srv_start_ppp(srv_t *s)
 {
     if (!s->in_call || s->link != SRV_LINK_MENU || dce_start_ppp(&s->dce) < 0) return -1;

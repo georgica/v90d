@@ -407,6 +407,55 @@ static void test_detect_terminal(void)
     CHECK(run_until(p_ended, 10000) >= 0);
 }
 
+/* ------------------------------------------------------------------ (w) */
+/* ppp_detect, the watch: a PPP program that sends something else first (a
+ * chat script's CR after CONNECT) is taken for a terminal, then its first
+ * frame takes the call to PPP; with the watch off (dce_ppp_watch) it does
+ * not, and its frames are the owner's like any octets. */
+static int p_cr_seen(void) { return raw_up_n >= 1; }
+static int p_many_seen(void) { return raw_up_n >= 40; }
+static void test_detect_watch(void)
+{
+    static const uint8_t cr[] = "\r";
+    dce_cfg_t sc; caller_cfg_t cc; int t;
+
+    printf("(w) a PPP program that sends a CR first (ppp_detect, the watch)\n");
+    server_cfg(&sc); client_cfg(&cc);
+    sc.raw_rx = raw_srv_rx; sc.raw_ec = 1; sc.ppp_detect = 1;
+    cc.raw_rx = raw_cli_rx; cc.raw_tx = seq_cli_tx;
+    raw_up_n = raw_dn_n = 0; seq_tx = cr; seq_n = 1; seq_at = 0;
+    call_begin(&sc, &cc, &line_clean);
+    CHECK(run_until(p_cr_seen, 40000) > 0);
+    CHECK_EQ_I(raw_up[0], '\r');                     /* a terminal's start: the owner's */
+    CHECK_EQ_I(status()->raw, 1);
+    caller_to_ppp(&C);
+    t = run_until(p_ip_up, 60000);
+    printf("    CR, then PPP: IP up %.2f s later; %d octets reached raw_rx\n", t / 1000.0, (int)raw_up_n);
+    CHECK(t > 0);
+    CHECK_EQ_I(status()->raw, 0);
+    CHECK_EQ_I(status()->authenticated, 1);
+    CHECK(raw_up_n <= 5);                           /* the CR and at most the frame's start */
+    dce_hangup(&D);
+    CHECK(run_until(p_ended, 10000) >= 0);
+
+    /* the watch off: the same caller's frames stay octets */
+    raw_up_n = raw_dn_n = 0; seq_at = 0;
+    call_begin(&sc, &cc, &line_clean);
+    CHECK(run_until(p_cr_seen, 40000) > 0);
+    dce_ppp_watch(&D, 0);
+    caller_to_ppp(&C);
+    CHECK(run_until(p_many_seen, 20000) > 0);
+    CHECK_EQ_I(status()->raw, 1);
+    CHECK_EQ_I(status()->ppp_phase, PPP_PHASE_DEAD);
+    /* on again: its next frame (a retry) takes it to PPP */
+    dce_ppp_watch(&D, 1);
+    t = run_until(p_ip_up, 60000);
+    CHECK(t > 0);
+    CHECK_EQ_I(status()->raw, 0);
+    dce_hangup(&D);
+    CHECK(run_until(p_ended, 10000) >= 0);
+}
+
 /* ------------------------------------------------------------------ (d) */
 static void test_wrong_password(void)
 {
@@ -1628,6 +1677,7 @@ int main(int argc, char **argv)
     RUN('t', test_text_then_ppp);
     RUN('u', test_detect_dun);
     RUN('v', test_detect_terminal);
+    RUN('w', test_detect_watch);
     RUN('d', test_wrong_password);
     RUN('e', test_caller_hangs_up);
     RUN('f', test_v21);
