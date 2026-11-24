@@ -192,7 +192,8 @@ static void ip_to_kernel(void *ctx, const uint8_t *pkt, size_t len)
 /* the callers' name server ([network] dns_relay): on the PPP address */
 static void relay_want(const cfg_t *c)
 {
-    dnsrelay_set(c->dns_relay, &c->ppp_local, 1, c->dns);
+    const uint32_t peers[2] = { c->ppp_peer, c->port2.ppp_peer };
+    dnsrelay_set(c->dns_relay, &c->ppp_local, 1, peers, 2, c->dns);
 }
 
 static int menu_wanted(const cfg_t *c)

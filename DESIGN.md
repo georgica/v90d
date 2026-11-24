@@ -468,7 +468,9 @@ address as its only name server, and `srv/dnsrelay.c` answers there.
 
 - **UDP on the PPP address, port 53**, bound with `IP_FREEBIND` (the
   address is on no interface until the first call). Non-blocking, a slice
-  per block.
+  per block. Only the ports' peer addresses (`ppp_peer`, `ppp_peer2`) are
+  answered: the box answers for its addresses on any interface, and it is
+  no name server for the LAN.
 - **AAAA is answered by the box**: NOERROR with no answers, the header and
   question of the query (an EDNS record left out). The link is IPv4 only;
   this is what keeps an IPv6-capable caller (XP with IPv6 installed) from
