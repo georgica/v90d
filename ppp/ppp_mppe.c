@@ -11,6 +11,7 @@ static void dir_begin(ppp_mppe_dir_t *d, const uint8_t *start, size_t keylen, in
     d->coherency = PPP_MPPE_COUNT;      /* so that the first packet is number 0 */
     d->stateful = 0;
     d->discard = 0;
+    d->credit = PPP_MPPE_CREDIT_MAX;
 }
 
 static int is_flag(unsigned count)
@@ -162,6 +163,11 @@ int ppp_mppe_decrypt(ppp_mppe_t *m, const uint8_t *in, size_t len, uint8_t *out,
     steps = (unsigned)((count - m->rx.coherency) & PPP_MPPE_COUNT);
     if (steps == 0 || steps > PPP_MPPE_WINDOW)
         return -1;
+    m->rx.credit = (uint16_t)(m->rx.credit + PPP_MPPE_CREDIT_STEP > PPP_MPPE_CREDIT_MAX ? PPP_MPPE_CREDIT_MAX
+                                                                                       : m->rx.credit + PPP_MPPE_CREDIT_STEP);
+    if (steps - 1 > m->rx.credit)
+        return -1;                      /* more catching up than this peer has earned */
+    m->rx.credit = (uint16_t)(m->rx.credit - (steps - 1));
     for (i = 0; i < steps; i++)
         ppp_mppe_change_key(m->rx.start, m->rx.session, m->rx.keylen, m->rx.force);
     m->rx.coherency = count;

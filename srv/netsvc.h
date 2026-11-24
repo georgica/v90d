@@ -28,6 +28,8 @@ int  netsvc_vpn_remote(char *out, size_t cap);
 
 /* program and file overrides from the command line */
 void netsvc_set_arch(const char *path);     /* -A: the archive gateway ("" = none) */
+/* the archive gateway is there to start: the PROTOWEB number may answer (srv.h) */
+int  netsvc_has_arch(void);
 void netsvc_set_dclist(const char *cmd);    /* -D: fetch the console address list ("" = none) */
 void netsvc_set_dcnow(const char *prog);    /* -G: run instead of wget for Dreamcast Now */
 void netsvc_set_lease(const char *cmd);     /* -E: print the console's lease (instead of udhcpc) */

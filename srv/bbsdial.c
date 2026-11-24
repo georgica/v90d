@@ -64,6 +64,22 @@ int bbsdial_is_self(uint32_t addr)
     return own;
 }
 
+int bbsdial_is_public(uint32_t a)
+{
+    unsigned t = a >> 24;
+    if (t == 0 || t == 10 || t == 127 || t >= 224) return 0;
+    if ((a & 0xffc00000u) == 0x64400000u) return 0;     /* 100.64/10 */
+    if ((a & 0xffff0000u) == 0xa9fe0000u) return 0;     /* 169.254/16 */
+    if ((a & 0xfff00000u) == 0xac100000u) return 0;     /* 172.16/12 */
+    if ((a & 0xffffff00u) == 0xc0000000u) return 0;     /* 192.0.0/24 */
+    if ((a & 0xffffff00u) == 0xc0000200u) return 0;     /* 192.0.2/24 */
+    if ((a & 0xffff0000u) == 0xc0a80000u) return 0;     /* 192.168/16 */
+    if ((a & 0xfffe0000u) == 0xc6120000u) return 0;     /* 198.18/15 */
+    if ((a & 0xffffff00u) == 0xc6336400u) return 0;     /* 198.51.100/24 */
+    if ((a & 0xffffff00u) == 0xcb007100u) return 0;     /* 203.0.113/24 */
+    return 1;
+}
+
 int bbsdial_run(const char *host, const char *port, int fd, unsigned connect_s, int self_ok)
 {
     struct addrinfo hint, *res = NULL, *ai; int s = -1; char buf[2048];
@@ -78,7 +94,8 @@ int bbsdial_run(const char *host, const char *port, int fd, unsigned connect_s, 
     (void)alarm(0);
     for (ai = res; ai && s < 0; ai = ai->ai_next) {
         uint32_t addr = ntohl(((const struct sockaddr_in *)(const void *)ai->ai_addr)->sin_addr.s_addr);
-        if (!self_ok && bbsdial_is_self(addr)) continue;        /* the box itself, by whatever name */
+        if (self_ok != 1 && bbsdial_is_self(addr)) continue;   /* the box itself, by whatever name */
+        if (self_ok == BBSDIAL_PUBLIC && !bbsdial_is_public(addr)) continue;  /* a list entry: the internet only */
         s = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
         if (s >= 0 && connect_within(s, ai->ai_addr, ai->ai_addrlen, (int)connect_s * 1000) < 0) { close(s); s = -1; }
     }

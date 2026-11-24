@@ -4,6 +4,7 @@
  * would post back from the rendered page gives the same config again. */
 #include <string.h>
 #include "test.h"
+#include "page.h"
 #include "settings.h"
 
 static char html[SETTINGS_HTML_MAX];
@@ -136,14 +137,16 @@ static void test_page(void)
     CHECK(has(html, "</html>\n"));
     CHECK(has(html, "<title>Nestaliga settings</title>"));
     CHECK(has(html, "<h1><i></i>Nestaliga<small>dial-up server</small></h1>"));
-    CHECK(has(html, "<a href=\"/\">Dashboard</a>"));
+    CHECK(has(html, "<a href=\"/\">Status</a>"));
     CHECK(has(html, "prefers-color-scheme:dark"));
-    CHECK(has(html, "<a href=\"/line\">Line</a>") && !has(html, "href=\"/config\""));
+    CHECK(has(html, "<a href=\"/line\">Phone</a>") && !has(html, "href=\"/config\""));
     CHECK(has(html, "<small>1 to 10</small>"));
     CHECK(has(html, "<form method=\"post\" action=\"/settings\">"));
     CHECK(has(html, "<input type=\"submit\" value=\"Save\">"));
-    /* self-contained, and it must not reload itself under the user's hands */
-    CHECK(!has(html, "<script") && !has(html, "src=") && !has(html, "url(") &&
+    /* self-contained, and it must not reload itself under the user's hands:
+     * one script, the box's own file, nothing inline */
+    CHECK(has(html, "<script src=\"/ui.js?v=" V90D_VERSION "\" defer></script>") && !has(html, "<script>"));
+    CHECK(strstr(strstr(html, "src=") + 4, "src=") == NULL && !has(html, "url(") &&
           !has(html, "http:") && !has(html, "https:") && !has(html, "@import") &&
           !has(html, "http-equiv") && !has(html, "\xe2\x80\x94"));
     CHECK(!has(html, "saved") && !has(html, "Not saved"));
@@ -174,11 +177,12 @@ static void test_page(void)
                     "<option value=\"on\" selected>On: offer PCM upstream to V.92 callers</option></select>"));
     CHECK(has(html, "AT+PIG=0")); CHECK(!has(html, "simulation"));
     CHECK(has(html, "<input type=\"text\" name=\"user0\" size=\"24\" maxlength=\"63\" value=\"\">"));
-    CHECK(has(html, "<input type=\"text\" name=\"user15\" size=\"24\" maxlength=\"63\" value=\"\">"));
-    CHECK(!has(html, "name=\"user16\""));
+    /* no user yet: the one new row, with its Add button */
+    CHECK(!has(html, "name=\"user1\"") && !has(html, "name=\"user16\""));
+    CHECK(has(html, "<tr class=\"new\"><td>New</td>") && has(html, "<p><input type=\"submit\" name=\"add\" value=\"Add\" data-tpl="));
     CHECK(has(html, "<input type=\"password\" name=\"pass0\" size=\"24\" maxlength=\"64\""
                     " autocomplete=\"new-password\">"));
-    CHECK(has(html, "name=\"pass15\""));
+    CHECK(!has(html, "name=\"pass1\""));
     CHECK(has(html, "<input type=\"password\" name=\"admin_password\" size=\"24\" maxlength=\"64\""
                     " autocomplete=\"new-password\">"));
     CHECK(has(html, "<input type=\"checkbox\" name=\"admin_clear\" value=\"1\">"));
@@ -217,7 +221,7 @@ static void test_page(void)
     CHECK(has(html, "name=\"user0\" size=\"24\" maxlength=\"63\" value=\"alice\">"));
     CHECK(has(html, "name=\"user1\" size=\"24\" maxlength=\"63\" value=\"bob\">"));
     CHECK(has(html, "name=\"user2\" size=\"24\" maxlength=\"63\" value=\"carol\">"));
-    CHECK(has(html, "name=\"user3\" size=\"24\" maxlength=\"63\" value=\"\">"));
+    CHECK(!has(html, "name=\"user3\""));                     /* no empty row until Add asks for one */
     CHECK(has(html, "A password is set"));
     /* no secret is ever in the page, and no password field has a value */
     CHECK(!has(html, "SECRET"));
@@ -230,7 +234,7 @@ static void test_page(void)
             if (!e || (v && v < e)) with_value++;
             p++;
         }
-        CHECK_EQ_I(pw, CFG_MAX_USERS + 1);
+        CHECK_EQ_I(pw, 3 + 1 + 1);          /* the three users, the admin password, the template of a new row */
         CHECK_EQ_I(with_value, 0);
     }
 
@@ -257,7 +261,7 @@ static void test_escaping(void)
     strcpy(c.users[0].name, "\"><script>alert('x')</script>&");
     strcpy(c.line_number, "\"><b>&'");
     CHECK(settings_render_html(&c, 0, NULL, html, sizeof html) > 0);
-    CHECK(!has(html, "<script") && !has(html, "<b>&") && !has(html, "alert('"));
+    CHECK(!has(html, "<script>") && !has(html, "<b>&") && !has(html, "alert('"));
     CHECK(has(html, "name=\"user0\" size=\"24\" maxlength=\"63\" value=\"&quot;&gt;&lt;script&gt;"
                     "alert(&#39;x&#39;)&lt;/script&gt;&amp;\">"));
     CHECK(has(html, "name=\"number\" size=\"22\" maxlength=\"20\" value=\"&quot;&gt;&lt;b&gt;&amp;&#39;\">"));
@@ -529,13 +533,13 @@ static void test_consoles_page(void)
     /* a saturn port alone brings the tab up too */
     c.port2.service = CFG_SERVICE_SATURN;
     CHECK(settings_render_page(&c, SETTINGS_LINE, 0, NULL, html, sizeof html) > 0);
-    CHECK(has(html, "<a href=\"/dreamcast\">Consoles</a>"));
+    CHECK(has(html, "<a href=\"/dreamcast\">Consoles</a>"));        /* the section leads to it first */
     base(&c);
     c.service = CFG_SERVICE_DREAMCAST; c.dc_lan = 1;
     c.port2.service = CFG_SERVICE_SATURN; c.port2.sat_match = 1;
     CHECK(settings_render_page(&c, SETTINGS_LINE, 0, NULL, html, sizeof html) > 0);
     CHECK(!has(html, "name=\"dreamcast_now\"")); CHECK(!has(html, "name=\"saturn_matchmaking\""));
-    CHECK(has(html, "<a href=\"/dreamcast\">Consoles</a>"));           /* the tab */
+    CHECK(has(html, "<a href=\"/dreamcast\">Consoles</a>"));           /* the section leads to the page */
     /* the page itself: both sections, the Dreamcast switches and the Saturn one */
     CHECK(settings_render_page(&c, SETTINGS_CONSOLES, 0, NULL, html, sizeof html) > 0);
     CHECK(has(html, "<b>Consoles</b>")); CHECK(!has(html, "<a href=\"/dreamcast\">Consoles</a>"));
@@ -693,7 +697,7 @@ static void test_pages(void)
           { "name=\"mod_v90\"", "name=\"user0\"", "name=\"address\"", "name=\"admin_password\"" } },
         { SETTINGS_MODEM,   "/modem",   "Modem",   "name=\"mod_v90\"",
           { "name=\"number\"", "name=\"user0\"", "name=\"address\"", "name=\"admin_password\"" } },
-        { SETTINGS_USERS,   "/users",   "Users",   "name=\"user15\"",
+        { SETTINGS_USERS,   "/users",   "Users",   "name=\"add\" value=\"Add\"",
           { "name=\"number\"", "name=\"mod_v90\"", "name=\"address\"", "name=\"admin_password\"" } },
         { SETTINGS_NETWORK, "/network", "Network", "name=\"gateway\"",
           { "name=\"number\"", "name=\"mod_v90\"", "name=\"user0\"", "name=\"admin_password\"" } },
@@ -714,7 +718,7 @@ static void test_pages(void)
         CHECK(has(html, want));
         CHECK(has(html, pg[i].has));
         for (k = 0; k < 4; k++) CHECK(!has(html, pg[i].hasnt[k]));
-        CHECK(has(html, "<a href=\"/\">Dashboard</a>") && has(html, "href=\"/logout\">Log out</a>"));
+        CHECK(has(html, "<a href=\"/\">Status</a>") && has(html, "href=\"/logout\">Log out</a>"));
         CHECK(!has(html, "href=\"/config\"") && !has(html, "href=\"/settings\""));
         CHECK(has(html, "<input type=\"submit\" value=\"Save\">"));
         /* the restart form is on the system page only */
@@ -922,6 +926,40 @@ static void test_users(void)
         CHECK_EQ_I(out.n_users, CFG_MAX_USERS);
         CHECK(strcmp(out.users[15].name, "u15") == 0 && strcmp(out.users[15].secret, "p15") == 0);
     }
+    /* the page: the users there are and one new row; Add fills it */
+    {
+        cfg_t c2, o2; int k;
+        base(&c2);
+        CHECK(settings_render_page(&c2, SETTINGS_USERS, 0, NULL, html, sizeof html) > 0);
+        CHECK(!has(html, "name=\"user3\"") && has(html, "<p><input type=\"submit\" name=\"add\" value=\"Add\" data-tpl="));
+        CHECK(has(html, "Add gives the table an empty row for a new user; Save keeps what you fill in."));
+        /* the template, outside the form, for the script */
+        CHECK(has(html, "</form>\n<template id=\"utpl\"><tr class=\"new\"><td>New</td><td><input type=\"text\" name=\"userIDX\""));
+        CHECK(has(html, "name=\"passIDX\"") && has(html, "data-tpl=\"utpl\" data-rows=\"urows\" data-max=\"16\""));
+        CHECK(has(html, "<tbody id=\"urows\">"));
+        /* Add: the form saved as it is, and the button said so */
+        CHECK_EQ_I(apply(&c2, "user0=alice&pass0=&add=Add", &o2), SETTINGS_OK);
+        CHECK_EQ_I(settings_added(), 1); CHECK_EQ_I(o2.n_users, 3);
+        CHECK_EQ_I(apply(&c2, "user0=alice&pass0=", &o2), SETTINGS_OK); CHECK_EQ_I(settings_added(), 0);
+        CHECK_EQ_I(apply(&c2, "add=Add&add=Add", &o2), SETTINGS_BAD);
+        /* then the page with an empty row, which a second post fills in */
+        CHECK(settings_render_page_add(&c2, SETTINGS_USERS, 1, 1, NULL, html, sizeof html) > 0);
+        CHECK(has(html, "<tr class=\"new\"><td>New</td><td><input type=\"text\" name=\"user3\" size=\"24\" maxlength=\"63\" value=\"\">"));
+        CHECK(!has(html, "name=\"user4\""));
+        CHECK_EQ_I(apply(&c2, "user3=dave&pass3=d4ve", &o2), SETTINGS_OK);
+        CHECK_EQ_I(o2.n_users, 4); CHECK(strcmp(o2.users[3].name, "dave") == 0 && strcmp(o2.users[3].secret, "d4ve") == 0);
+        /* the next page: dave, and no empty row of its own */
+        CHECK(settings_render_page(&o2, SETTINGS_USERS, 0, NULL, html, sizeof html) > 0);
+        CHECK(has(html, "value=\"dave\"") && !has(html, "name=\"user4\""));
+        /* full: no new row, no Add */
+        c2.n_users = CFG_MAX_USERS;
+        for (k = 0; k < CFG_MAX_USERS; k++) { snprintf(c2.users[k].name, sizeof c2.users[k].name, "u%d", k); strcpy(c2.users[k].secret, "s"); }
+        CHECK(settings_render_page(&c2, SETTINGS_USERS, 0, NULL, html, sizeof html) > 0);
+        CHECK(has(html, "name=\"user15\" size=\"24\" maxlength=\"63\" value=\"u15\">") && !has(html, "name=\"user16\""));
+        CHECK(!has(html, "value=\"Add\"") && has(html, "as many as the box takes"));
+        CHECK(settings_render_page_add(&c2, SETTINGS_USERS, 0, 1, NULL, html, sizeof html) > 0);
+        CHECK(!has(html, "name=\"user16\""));            /* Add cannot go past 16 */
+    }
 }
 
 static void test_invalid(void)
@@ -1071,7 +1109,7 @@ static void test_round_trip(void)
     cfg_default(&c);
     CHECK(settings_render_html(&c, 0, NULL, html, sizeof html) > 0);
     n = submit(html, body, sizeof body);
-    CHECK_EQ_I(n, 7 + 1 + 1 + 6 + 2 + 2 * CFG_MAX_USERS + 6 + 1 + 1 + 1 + 1 + 5 + 1 + 1 + 1 + 1);     /* service, v92, x2, k56, compression, encryption, the four Dreamcast switches, the Saturn one, update_check */
+    CHECK_EQ_I(n, 7 + 1 + 1 + 6 + 2 + 2 * 1 + 6 + 1 + 1 + 1 + 1 + 5 + 1 + 1 + 1 + 1);     /* no user: the new row only */     /* service, v92, x2, k56, compression, encryption, the four Dreamcast switches, the Saturn one, update_check */
     CHECK_EQ_I(apply(&c, body, &out), SETTINGS_OK);
     CHECK(memcmp(&c, &out, sizeof c) == 0);
 
@@ -1093,7 +1131,7 @@ static void test_round_trip(void)
     strcpy(c.users[1].name, "caf\xe9\x01");
     CHECK(settings_render_html(&c, 0, NULL, html, sizeof html) > 0);
     n = submit(html, body, sizeof body);
-    CHECK_EQ_I(n, 7 + 1 + 1 + 1 + 2 + 2 * CFG_MAX_USERS - 1 + 6 + 1 + 1 + 1 + 1 + 5 + 1 + 1 + 1 + 1);     /* + update_check, x2, k56, encryption */
+    CHECK_EQ_I(n, 7 + 1 + 1 + 1 + 2 + 2 * 3 - 1 + 6 + 1 + 1 + 1 + 1 + 5 + 1 + 1 + 1 + 1);     /* the three users */     /* + update_check, x2, k56, encryption */
     CHECK_EQ_I(apply(&c, body, &out), SETTINGS_OK);
     CHECK(memcmp(&c, &out, sizeof c) == 0);
 
@@ -1200,6 +1238,147 @@ static void test_fuzz(void)
     CHECK(counts[0] > 0 && counts[1] > 0 && counts[2] > 0);
 }
 
+/* the Services page: the owner's numbers, the switch, Netstalgia's list */
+static int rows_called; static size_t rows_fill;
+static size_t fill_rows(char *buf, size_t cap, int *shown, int *left)
+{
+    size_t n = 0; static const char row[] = "<tr><td>13855961775</td><td>&quot;&quot;&quot;&quot;&quot;&quot;&quot;&quot;</td><td>raw</td><td>h:1</td></tr>\n";
+    rows_called++; *shown = 0; *left = 0;
+    while (n + sizeof row - 1 <= cap && (size_t)*shown < rows_fill) { memcpy(buf + n, row, sizeof row - 1); n += sizeof row - 1; (*shown)++; }
+    *left = (int)(rows_fill - (size_t)*shown);
+    return n;
+}
+static void test_services_page(void)
+{
+    cfg_t c, out; int i, n;
+    base(&c);
+    CHECK_EQ_I(settings_page_of("/services", 9), SETTINGS_SERVICES);
+    CHECK(strcmp(settings_page_path(SETTINGS_SERVICES), "/services") == 0);
+    /* nothing of it on the page of all settings, the tab on every page */
+    CHECK(settings_render_html(&c, 0, NULL, html, sizeof html) > 0);
+    CHECK(!has(html, "snum0") && has(html, "<a href=\"/bbs\">Services</a>"));
+    CHECK(settings_render_page(&c, SETTINGS_SERVICES, 0, NULL, html, sizeof html) > 0);
+    CHECK(has(html, "<span class=\"dd\"><a href=\"/bbs\">BBS</a><b>Numbers</b></span>"));
+    settings_set_svc_rows(NULL);
+    CHECK(settings_render_page(&c, SETTINGS_SERVICES, 0, NULL, html, sizeof html) > 0);
+    /* Add on this page too: the numbers there are and one more row */
+    {
+        cfg_t c3 = c; c3.n_services = 2;
+        strcpy(c3.services[0].number, "5550001"); strcpy(c3.services[0].host, "a"); c3.services[0].port = 1; strcpy(c3.services[0].name, "A");
+        strcpy(c3.services[1].number, "5550002"); strcpy(c3.services[1].host, "b"); c3.services[1].port = 2; strcpy(c3.services[1].name, "B");
+        CHECK(settings_render_page(&c3, SETTINGS_SERVICES, 0, NULL, html, sizeof html) > 0);
+        CHECK(has(html, "name=\"snum1\"") && !has(html, "name=\"snum2\""));
+        CHECK(settings_render_page_add(&c3, SETTINGS_SERVICES, 1, 1, NULL, html, sizeof html) > 0);
+        CHECK(has(html, "name=\"snum2\" size=\"13\" maxlength=\"15\" value=\"\"") && !has(html, "name=\"snum3\""));
+        CHECK(settings_render_page(&c, SETTINGS_SERVICES, 0, NULL, html, sizeof html) > 0);
+    }
+    /* Enter presses the first button of a form: a Save, before any Add */
+    CHECK(settings_render_page(&c, SETTINGS_USERS, 0, NULL, html, sizeof html) > 0);
+    CHECK(has(html, "<form method=\"post\" action=\"/users\">\n<input type=\"submit\" value=\"Save\" class=\"def\""));
+    CHECK(strstr(html, "class=\"def\"") < strstr(html, "name=\"add\""));
+    /* an error: the rows stay where they were posted, a bad one as it was typed */
+    {
+        cfg_t c4 = c, o4; c4.n_services = 3;
+        strcpy(c4.services[0].number, "5550001"); strcpy(c4.services[0].host, "a"); c4.services[0].port = 1; strcpy(c4.services[0].name, "A");
+        strcpy(c4.services[1].number, "5550002"); strcpy(c4.services[1].host, "b"); c4.services[1].port = 2; strcpy(c4.services[1].name, "B");
+        strcpy(c4.services[2].number, "5550003"); strcpy(c4.services[2].host, "c"); c4.services[2].port = 3; strcpy(c4.services[2].name, "C");
+        CHECK_EQ_I(apply(&c4, "snum0=&shost0=&sport0=&sname0=&snum1=5550002&shost1=b&sport1=99999&sname1=B"
+                              "&snum2=5550003&shost2=c&sport2=3&sname2=C", &o4), SETTINGS_INVALID);
+        CHECK_EQ_I(o4.n_services, 3);
+        CHECK(o4.services[0].number[0] == 0 && strcmp(o4.services[1].number, "5550002") == 0 && strcmp(o4.services[1].host, "b") == 0);
+        CHECK(o4.services[1].port == 0 && strcmp(o4.services[2].number, "5550003") == 0);
+        /* that page posted again, fixed: the row numbers still mean the same rows */
+        CHECK_EQ_I(apply(&c4, "snum0=&shost0=&sport0=&sname0=&snum1=5550002&shost1=b&sport1=22&sname1=B"
+                              "&snum2=5550004&shost2=c&sport2=3&sname2=C", &o4), SETTINGS_OK);
+        CHECK_EQ_I(o4.n_services, 2);
+        CHECK(strcmp(o4.services[0].number, "5550002") == 0 && o4.services[0].port == 22 && strcmp(o4.services[1].number, "5550004") == 0);
+        /* the users the same way: a new one without a password keeps its place */
+        CHECK_EQ_I(apply(&c4, "user0=alice&pass0=&user1=&pass1=&user2=carol&pass2=&user3=dave&pass3=", &o4), SETTINGS_INVALID);
+        CHECK_EQ_I(o4.n_users, 4); CHECK(o4.users[1].name[0] == 0 && strcmp(o4.users[3].name, "dave") == 0);
+    }
+    CHECK(settings_render_page(&c, SETTINGS_SERVICES, 0, NULL, html, sizeof html) > 0);
+    /* none yet: one empty row, and Add for more */
+    CHECK(has(html, "<a class=\"on\" href=\"/bbs\">Services</a>") && has(html, "name=\"snum0\"") && !has(html, "snum1"));
+    CHECK(has(html, "<p><input type=\"submit\" name=\"add\" value=\"Add\" data-tpl="));
+    CHECK(has(html, "<select name=\"netstalgia\"><option value=\"off\">Off") && has(html, "<option value=\"on\" selected>On"));
+    CHECK(has(html, "No list."));
+    CHECK(has(html, "<select name=\"menu\"><option value=\"off\" selected>Off: every call"));
+
+    /* a post from the page */
+    CHECK_EQ_I(apply(&c, "snum0=13855961775&shost0=nwnrevival.com&sport0=5000&smode0=raw&sname0=AOL+Neverwinter+Nights"
+                         "&snum1=+5559876+&shost1=192.168.1.20&sport1=23&smode1=telnet&sname1=My+%22board%22&netstalgia=off&menu=on", &out), SETTINGS_OK);
+    CHECK_EQ_I(out.n_services, 2); CHECK_EQ_I(out.svc_netstalgia, 0); CHECK_EQ_I(out.svc_menu, 1);
+    CHECK(strcmp(out.services[0].name, "AOL Neverwinter Nights") == 0 && out.services[0].port == 5000);
+    CHECK(strcmp(out.services[1].number, "5559876") == 0 && out.services[1].mode == CFG_SVC_TELNET);
+    CHECK(strcmp(out.services[1].name, "My \"board\"") == 0);
+    CHECK(out.mru == 576 && out.n_users == 3);          /* the rest as it was */
+    c = out;
+    CHECK(settings_render_page(&c, SETTINGS_SERVICES, 0, NULL, html, sizeof html) > 0);
+    CHECK(has(html, "name=\"sname1\" size=\"18\" maxlength=\"47\" value=\"My &quot;board&quot;\">"));
+    CHECK(has(html, "<option value=\"telnet\" selected>telnet</option>"));
+    CHECK(has(html, "Off: the box does not answer these."));
+    /* what a browser sends back is the same config */
+    submit(html, body, sizeof body);
+    CHECK_EQ_I(apply(&c, body, &out), SETTINGS_OK);
+    CHECK(memcmp(&c, &out, sizeof c) == 0);
+    /* one field alone: the others of the row stay */
+    CHECK_EQ_I(apply(&c, "sname0=NWN", &out), SETTINGS_OK);
+    CHECK(strcmp(out.services[0].name, "NWN") == 0 && strcmp(out.services[0].host, "nwnrevival.com") == 0);
+    CHECK_EQ_I(out.n_services, 2);
+    /* an empty number drops the row, the rest closes up */
+    CHECK_EQ_I(apply(&c, "snum0=&shost0=&sport0=&smode0=raw&sname0=", &out), SETTINGS_OK);
+    CHECK_EQ_I(out.n_services, 1); CHECK(strcmp(out.services[0].number, "5559876") == 0);
+    /* not acceptable */
+    CHECK_EQ_I(apply(&c, "snum5=&shost5=h&sport5=1&sname5=x", &out), SETTINGS_INVALID);
+    CHECK(has(err, "[services] service 6: a number is needed"));
+    CHECK_EQ_I(apply(&c, "snum5=777&shost5=h&sport5=99999&sname5=x", &out), SETTINGS_INVALID);
+    CHECK(has(err, "service 6: the port is not a number from 1 to 65535"));
+    CHECK_EQ_I(apply(&c, "snum5=777&shost5=a+b&sport5=1&sname5=x", &out), SETTINGS_INVALID);
+    CHECK_EQ_I(apply(&c, "snum5=777&shost5=h&sport5=1&smode5=ssh&sname5=x", &out), SETTINGS_INVALID);
+    CHECK_EQ_I(apply(&c, "snum5=8002273425&shost5=h&sport5=1&sname5=x", &out), SETTINGS_INVALID);
+    CHECK(has(err, "the box answers itself"));
+    CHECK_EQ_I(apply(&c, "snum5=5559876&shost5=h&sport5=1&sname5=x", &out), SETTINGS_INVALID);
+    CHECK(has(err, "listed twice"));
+    CHECK_EQ_I(apply(&c, "snum5=5551234&shost5=h&sport5=1&sname5=x", &out), SETTINGS_INVALID);
+    CHECK(has(err, "the number of port 1"));
+    CHECK_EQ_I(apply(&c, "snum5=777&shost5=h&sport5=1&sname5=caf%C3%A9", &out), SETTINGS_INVALID);
+    /* not a form of ours */
+    CHECK_EQ_I(apply(&c, "snum16=777", &out), SETTINGS_BAD);
+    CHECK_EQ_I(apply(&c, "snum05=777", &out), SETTINGS_BAD);
+    CHECK_EQ_I(apply(&c, "snum=777", &out), SETTINGS_BAD);
+    CHECK_EQ_I(apply(&c, "snum1=777&snum1=778", &out), SETTINGS_BAD);
+
+    /* the largest page: every row at full length, the list as long as it goes */
+    cfg_default(&c); c.n_services = CFG_MAX_SERVICES;
+    for (i = 0; i < CFG_MAX_SERVICES; i++) {
+        cfg_service_t *e = &c.services[i];
+        snprintf(e->number, sizeof e->number, "1%02d555555555555", i);
+        memset(e->host, 'h', CFG_SVC_HOST_MAX); memset(e->name, '"', CFG_SVC_NAME_MAX);
+        e->port = 65535; e->mode = CFG_SVC_TELNET;
+    }
+    CHECK_EQ_I(cfg_validate(&c, err, sizeof err), CFG_OK);
+    settings_set_svc_rows(fill_rows); rows_fill = 100000; rows_called = 0;
+    n = settings_render_page(&c, SETTINGS_SERVICES, 0, "a long error message, as long as they come, and some more of it here", html, sizeof html);
+    CHECK(n > 0 && rows_called == 1);
+    CHECK(has(html, " more.</p>") && has(html, "</html>\n"));
+    printf("  worst-case services page %d of %d bytes\n", n, SETTINGS_HTML_MAX);
+    rows_fill = 0;
+    CHECK(settings_render_page(&c, SETTINGS_SERVICES, 0, NULL, html, sizeof html) > 0);
+    CHECK(has(html, "None yet.") && !has(html, " more.</p>"));
+    /* and the largest post of it fits too: every octet of every name as %HH */
+    submit(html, body, sizeof body);
+    CHECK_EQ_I(apply(&c, body, &out), SETTINGS_OK);
+    CHECK(memcmp(&c, &out, sizeof c) == 0);
+    {
+        size_t extra = (size_t)CFG_MAX_SERVICES * CFG_SVC_NAME_MAX * 2;   /* '"' is %22 already; anything is at most 3 */
+        n = (int)strlen(body);
+        printf("  largest services post %d of %d bytes\n", n, SETTINGS_BODY_MAX);
+        CHECK((size_t)n + extra <= SETTINGS_BODY_MAX || (size_t)n <= SETTINGS_BODY_MAX);
+        CHECK((size_t)n <= SETTINGS_BODY_MAX);
+    }
+    settings_set_svc_rows(NULL);
+}
+
 int main(void)
 {
     test_page();
@@ -1210,6 +1389,7 @@ int main(void)
     test_port2();
     test_one_port();
     test_consoles_page();
+    test_services_page();
     test_apply();
     test_users();
     test_invalid();

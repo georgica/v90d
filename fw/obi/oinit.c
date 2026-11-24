@@ -1,7 +1,7 @@
 /* oinit: the whole initramfs of v90d's own kernel on the OBi200. It mounts
- * the box's own root file system (the stock squashfs, mtd3: its BusyBox,
- * its libraries) and v90d's (/obi, mtd5) on it, moves /dev there, makes it
- * the root and runs /obi/kinit with the stock system's shell. On any
+ * the root file system (v90d's own since 0.11, mkrootfs.py: mtd3, its
+ * BusyBox) and /obi (mtd5) on it, moves /dev there, makes it the root and
+ * runs /obi/kinit with that system's shell. On any
  * failure the box restarts: the launcher under the stock kernel then sees
  * the RAM boot counter (bootcount.c) and stays on the stock kernel. */
 #include <errno.h>

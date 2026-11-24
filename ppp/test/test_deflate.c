@@ -295,9 +295,38 @@ static void test_garbage(int quick)
     CHECK_EQ_I(ppp_deflate_decompress(&D, c, cn, out, PPP_DEFLATE_MAX_PKT), 601);
 }
 
+/* a packet of nothing but empty fixed blocks (10 bits each, every one a
+ * code table to build): a few are taken, a long run is refused */
+static void blocks_packet(uint8_t *p, size_t *n, int blocks)
+{
+    unsigned long acc = 0; int bits = 0, b; size_t o = 0;
+    for (b = 0; b < blocks; b++) {
+        acc |= 2ul << bits; bits += 3;              /* not final, type 1 (fixed) */
+        bits += 7;                                  /* end of block: code 0000000 */
+        while (bits >= 8) { p[o++] = (uint8_t)acc; acc >>= 8; bits -= 8; }
+    }
+    /* the empty stored block that ends a packet (RFC 1979): to the octet,
+     * then 00 00 ff ff, of which the sender leaves the last four off */
+    bits += 3;
+    if (bits > 0) { p[o++] = (uint8_t)acc; }
+    *n = o;
+}
+static void test_blocks_cap(void)
+{
+    uint8_t pkt[256], out[64]; size_t n;
+    ppp_deflate_dec_init(&D);
+    blocks_packet(pkt, &n, 4);
+    CHECK_EQ_I(ppp_deflate_decompress(&D, pkt, n, out, sizeof out), 0);
+    ppp_deflate_dec_init(&D);
+    blocks_packet(pkt, &n, 100);
+    CHECK_EQ_I(ppp_deflate_decompress(&D, pkt, n, out, sizeof out), -1);
+}
+
 int main(int argc, char **argv)
 {
     int quick = argc > 1 && strcmp(argv[1], "quick") == 0;
+
+    test_blocks_cap();
 
     test_zlib_vectors();
     test_round_trips(quick);

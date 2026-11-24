@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Tests of obinv (the OBi200's flash tool) and mkobifw.py on the host.
+(V90D.fw is the whole image: our /obi and our root file system.)
 
     test_obinv.py OBINV BASE.fw V90D.fw
 
@@ -65,11 +66,12 @@ with tempfile.TemporaryDirectory() as tmp:
     check(r == 0 and "scheme=obi" in out and "image_name=" in out, "where: %r" % out)
 
     r, out = run(tmp, flash, ["check", V90D])
-    check(r == 0 and "would write: /obi\n" in out, "check v90d: %r" % out)
+    # the v90d file carries our /obi and our root file system
+    check(r == 0 and "would write: /obi, root file system\n" in out, "check v90d: %r" % out)
     r, out = run(tmp, flash, ["check", BASE])
     check(r == 0 and "nothing differs" in out, "check base on its own flash: %r" % out)
 
-    # install v90d: /obi and the header only
+    # install v90d: the root file system, /obi and the header only
     r, out = upload(tmp, flash, v90d)
     check(r == 0 and out.startswith("HTTP/1.0 200"), "upload v90d: %d %r" % (r, out[:60]))
     check(os.path.exists(os.path.join(tmp, "restart")), "restart note left")
@@ -77,7 +79,10 @@ with tempfile.TemporaryDirectory() as tmp:
     for t, at, seg in mk.segments(v90d):
         check(now[at:at + len(seg) - 0x40] == seg[0x40:], "part type %d in the flash" % t)
     changed = [a for a in range(0, len(now), 0x10000) if now[a:a + 0x10000] != fresh[a:a + 0x10000]]
-    check(all(a == 0x470000 or 0xC00000 <= a < 0xE40000 for a in changed), "only /obi and the header changed: %s" % [hex(a) for a in changed])
+    check(all(a == 0x470000 or 0x480000 <= a < 0xE40000 for a in changed),
+          "only the root file system, /obi and the header changed: %s" % [hex(a) for a in changed if not 0x480000 <= a < 0xE40000])
+    check(any(0x480000 <= a < 0xB40000 for a in changed), "the root file system was written")
+    check(not any(0xB40000 <= a < 0xC00000 for a in changed), "/scratch (the settings) untouched")
     hdr = bytearray(now[0x470000:0x470400]); want = bytearray(v90d[:0x400])
     for i in range(struct.unpack_from("<I", v90d, 0x80)[0]):
         hdr[0xC0 + i * 0x40 + 2] = want[0xC0 + i * 0x40 + 2] = 0
@@ -89,7 +94,8 @@ with tempfile.TemporaryDirectory() as tmp:
     back = bytearray(open(flash, "rb").read())
     for i in range(struct.unpack_from("<I", base, 0x80)[0]):
         back[0x470000 + 0xC0 + i * 0x40 + 2] = fresh[0x470000 + 0xC0 + i * 0x40 + 2]
-    check(r == 0 and back == fresh, "back to BASE restores the flash")
+    check(r == 0 and back == fresh, "back to BASE restores the flash: %d %r, differs at %s" %
+          (r, out[:120], [hex(a) for a in range(0, len(back), 0x10000) if back[a:a + 0x10000] != fresh[a:a + 0x10000]][:8]))
 
     # refused, and nothing written
     def refused(data, what):
@@ -119,6 +125,33 @@ with tempfile.TemporaryDirectory() as tmp:
         refused(mk.pack(key, base, dup, "x"), "two /obi parts")
     except AssertionError:
         check(True, "the builder refuses an eighth part")
+
+# v90d with its own root file system (mkrootfs.py), when given: the root
+# file system, /obi and the header are written, nothing else; BASE takes the
+# box back, octet for octet
+if len(sys.argv) > 4:
+    own = open(sys.argv[4], "rb").read()
+    with tempfile.TemporaryDirectory() as tmp:
+        flash = os.path.join(tmp, "flash")
+        fresh = flash_after(base)
+        open(flash, "wb").write(fresh)
+        r, out = run(tmp, flash, ["check", sys.argv[4]])
+        check(r == 0 and "root file system" in out and "/obi" in out, "check own root file system: %r" % out)
+        r, out = upload(tmp, flash, own)
+        check(r == 0 and out.startswith("HTTP/1.0 200"), "upload own root file system: %d %r" % (r, out[:60]))
+        now = open(flash, "rb").read()
+        for t, at, seg in mk.segments(own):
+            check(now[at:at + len(seg) - 0x40] == seg[0x40:], "part type %d in the flash (own root file system)" % t)
+        changed = [a for a in range(0, len(now), 0x10000) if now[a:a + 0x10000] != fresh[a:a + 0x10000]]
+        check(all(a == 0x470000 or 0x480000 <= a < 0xE40000 for a in changed),
+              "only the root file system, /obi and the header changed: %s" % [hex(a) for a in changed if not 0x480000 <= a < 0xE40000])
+        check(any(0x480000 <= a < 0xB40000 for a in changed), "the root file system was written")
+        check(not any(0xB40000 <= a < 0xC00000 for a in changed), "/scratch (the settings) untouched")
+        r, out = upload(tmp, flash, base)
+        back = bytearray(open(flash, "rb").read())
+        for i in range(struct.unpack_from("<I", base, 0x80)[0]):
+            back[0x470000 + 0xC0 + i * 0x40 + 2] = fresh[0x470000 + 0xC0 + i * 0x40 + 2]
+        check(r == 0 and back == fresh, "back to BASE from the own root file system restores the flash")
 
 print("obinv: %d checks, %d failures" % (checks, failures))
 sys.exit(1 if failures else 0)

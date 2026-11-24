@@ -297,6 +297,116 @@ static void test_raw_ec(void)
     CHECK_EQ_I(status()->end_reason, DCE_END_LOCAL);
 }
 
+/* ------------------------------------------------------------------ (t) */
+/* Text first, then PPP on the same call (dce_start_ppp): a menu goes out,
+ * the caller answers "1", the owner switches; the caller's PPP client then
+ * brings IP up over the same V.42 link. */
+static const uint8_t *seq_tx; static size_t seq_n, seq_at;
+static size_t seq_cli_tx(void *ctx, uint8_t *b, size_t max)
+{
+    size_t n = 0; (void)ctx;
+    while (n < max && seq_at < seq_n) b[n++] = seq_tx[seq_at++];
+    return n;
+}
+static int p_menu_seen(void) { return raw_dn_n >= 10; }
+static int p_one_seen(void) { return raw_up_n >= 1; }
+
+static void test_text_then_ppp(void)
+{
+    static const uint8_t menu[] = "1) Start PPP\r\n", one[] = "1";
+    dce_cfg_t sc; caller_cfg_t cc; size_t sent = 0; int t;
+
+    printf("(t) text first, then PPP on the same call (dce_start_ppp)\n");
+    server_cfg(&sc); client_cfg(&cc);
+    sc.raw_rx = raw_srv_rx; sc.raw_ec = 1;
+    cc.raw_rx = raw_cli_rx; cc.raw_tx = seq_cli_tx;
+    raw_up_n = raw_dn_n = 0; seq_tx = one; seq_n = 0; seq_at = 0;
+    call_begin(&sc, &cc, &line_clean);
+    CHECK(run_until(p_raw_online, 40000) > 0);
+    CHECK_EQ_I(status()->raw, 1);
+    CHECK_EQ_I(dce_start_ppp(&D), 0);               /* with nothing queued it switches at once */
+    CHECK_EQ_I(status()->raw, 0);
+    /* again from the start, this time with the menu */
+    call_begin(&sc, &cc, &line_clean);
+    raw_up_n = raw_dn_n = 0; seq_at = 0; seq_n = 0;
+    CHECK(run_until(p_raw_online, 40000) > 0);
+    while (sent < sizeof menu - 1) sent += dce_raw_write(&D, menu + sent, sizeof menu - 1 - sent);
+    CHECK(run_until(p_menu_seen, 10000) >= 0);
+    CHECK(memcmp(raw_dn, menu, sizeof menu - 1) == 0);
+    seq_n = 1;                                      /* the caller types 1 */
+    CHECK(run_until(p_one_seen, 10000) >= 0);
+    CHECK_EQ_I(raw_up_n, 1); CHECK_EQ_I(raw_up[0], '1');
+    CHECK_EQ_I(status()->ppp_phase, PPP_PHASE_DEAD);
+    CHECK_EQ_I(dce_start_ppp(&D), 0);
+    CHECK_EQ_I(dce_raw_write(&D, menu, 4), 0);      /* no more text once PPP is asked for */
+    caller_to_ppp(&C);
+    t = run_until(p_ip_up, 60000);
+    CHECK(t > 0);
+    CHECK_EQ_I(status()->raw, 0);
+    CHECK_EQ_I(status()->authenticated, 1);
+    CHECK_EQ_I(status()->error_control, 1);         /* the same V.42 link */
+    CHECK_EQ_I(raw_up_n, 1);                        /* nothing of PPP's reached raw_rx */
+    CHECK_EQ_I(dce_start_ppp(&D), -1);              /* PPP already */
+    dce_hangup(&D);
+    CHECK(run_until(p_ended, 10000) >= 0);
+    CHECK_EQ_I(status()->end_reason, DCE_END_LOCAL);
+}
+
+/* ------------------------------------------------------------------ (u) */
+/* ppp_detect: a Dial-Up Networking caller on a number that offers a menu
+ * goes straight to PPP; the owner's raw_rx sees nothing of it. */
+static void test_detect_dun(void)
+{
+    dce_cfg_t sc; caller_cfg_t cc; int t;
+
+    printf("(u) PPP detected on an octet-mode call (ppp_detect)\n");
+    server_cfg(&sc); client_cfg(&cc);
+    sc.raw_rx = raw_srv_rx; sc.raw_ec = 1; sc.ppp_detect = 1;
+    raw_up_n = raw_dn_n = 0;
+    call_begin(&sc, &cc, &line_clean);
+    t = run_until(p_ip_up, 60000);
+    CHECK(t > 0);
+    CHECK_EQ_I(raw_up_n, 0);
+    CHECK_EQ_I(status()->raw, 0);
+    CHECK_EQ_I(status()->authenticated, 1);
+    dce_hangup(&D);
+    CHECK(run_until(p_ended, 10000) >= 0);
+}
+
+/* ------------------------------------------------------------------ (v) */
+/* ppp_detect with someone at a terminal: every octet reaches raw_rx as it
+ * was sent, a "~" first included, and a lone "~" within DCE_DETECT_MS. */
+static int p_two_seen(void) { return raw_up_n >= 2; }
+static void test_detect_terminal(void)
+{
+    static const uint8_t tilde_x[] = "~x", tilde[] = "~";
+    dce_cfg_t sc; caller_cfg_t cc; int t;
+
+    printf("(v) a terminal user on an octet-mode call with ppp_detect\n");
+    server_cfg(&sc); client_cfg(&cc);
+    sc.raw_rx = raw_srv_rx; sc.raw_ec = 1; sc.ppp_detect = 1;
+    cc.raw_rx = raw_cli_rx; cc.raw_tx = seq_cli_tx;
+    raw_up_n = raw_dn_n = 0; seq_tx = tilde_x; seq_n = 2; seq_at = 0;
+    call_begin(&sc, &cc, &line_clean);
+    CHECK(run_until(p_two_seen, 40000) > 0);
+    CHECK_EQ_I(raw_up_n, 2);
+    CHECK(memcmp(raw_up, "~x", 2) == 0);
+    CHECK_EQ_I(status()->raw, 1);
+    CHECK_EQ_I(status()->ppp_phase, PPP_PHASE_DEAD);
+    dce_hangup(&D);
+    CHECK(run_until(p_ended, 10000) >= 0);
+
+    raw_up_n = raw_dn_n = 0; seq_tx = tilde; seq_n = 1; seq_at = 0;
+    call_begin(&sc, &cc, &line_clean);
+    CHECK(run_until(p_raw_online, 40000) > 0);
+    CHECK(run_until(p_one_seen, 1500) < 0);         /* held while it may be PPP... */
+    t = run_until(p_one_seen, 2000);                /* ...but not for long */
+    CHECK(t >= 0);
+    CHECK_EQ_I(raw_up_n, 1); CHECK_EQ_I(raw_up[0], '~');
+    dce_hangup(&D);
+    CHECK(run_until(p_ended, 10000) >= 0);
+}
+
 /* ------------------------------------------------------------------ (d) */
 static void test_wrong_password(void)
 {
@@ -1515,6 +1625,9 @@ int main(int argc, char **argv)
     RUN('c', test_no_error_control);
     RUN('r', test_raw);
     RUN('s', test_raw_ec);
+    RUN('t', test_text_then_ppp);
+    RUN('u', test_detect_dun);
+    RUN('v', test_detect_terminal);
     RUN('d', test_wrong_password);
     RUN('e', test_caller_hangs_up);
     RUN('f', test_v21);

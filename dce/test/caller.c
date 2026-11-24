@@ -85,6 +85,14 @@ static void v90_phase3(caller_t *c)
     c->stage = CALLER_ST_P34;
 }
 
+void caller_to_ppp(caller_t *c)
+{
+    c->cfg.raw_rx = NULL;
+    c->cfg.raw_tx = NULL;
+    c->stash_n = 0;
+    if (c->ppp_on) pppc_start(&c->ppp);
+}
+
 void caller_retrain(caller_t *c)
 {
     if (c->stage == CALLER_ST_V92) { v92call_retrain(&c->vc); c->retrains = c->vc.retrains; c->retraining = c->vc.retraining; return; }

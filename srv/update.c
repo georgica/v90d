@@ -57,16 +57,6 @@ static int ver_ok(const char *s)
 
 /* ---- the child and its result ------------------------------------------- */
 
-static void child_setup(int out)
-{
-    struct sched_param sp; int fd;
-    memset(&sp, 0, sizeof sp);
-    (void)sched_setscheduler(0, SCHED_OTHER, &sp);
-    (void)munlockall();
-    if (out >= 0 && dup2(out, 1) < 0) _exit(126);
-    for (fd = 3; fd < 1024; fd++) (void)close(fd);
-}
-
 /* pull "version=X.Y.Z" out of the child's output into out[0..cap) */
 static int read_version(const char *path, char *out, size_t cap)
 {
@@ -148,7 +138,7 @@ void update_poll(uint32_t now_ms)
         (void)unlink(ud.tmp);              /* a file of our own, never through a link */
         fd = open(ud.tmp, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
         if (fd < 0) _exit(126);
-        child_setup(fd);
+        child_plain(-1, fd, 1);
         execl("/bin/sh", "sh", "-c", check_cmd, (char *)NULL);
         _exit(127);
     }
@@ -157,14 +147,15 @@ void update_poll(uint32_t now_ms)
 
 void update_config(int on, const char *running_version)
 {
+    int was = enabled;
     enabled = on != 0;
     running[0] = '\0';
     if (running_version) { strncpy(running, running_version, sizeof running - 1); running[sizeof running - 1] = '\0'; }
     if (!enabled) {
         (void)unlink(state_path);          /* turned off: stop offering, stop phoning home */
         ud.started = 0;
-    } else {
-        ud.started = 0;                    /* check soon after being turned on */
+    } else if (!was) {
+        ud.started = 0;                    /* check soon after being turned on (not on every save) */
     }
 }
 

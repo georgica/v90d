@@ -15,27 +15,29 @@ LIBV90M_DEFS ?= $(filter-out -D_POSIX_C_SOURCE%,$(filter -D%,$(CFLAGS)))
 include ../libv90m.mk
 
 # the daemon sees the library's public header only; the tests see its internals
-DAEMON_INC := -I. -I../tel -I../dce -I../cfg -I../ppp $(LIBV90M_INC)
+DAEMON_INC := -I. -I../tel -I../dce -I../cfg -I../ppp -I../term $(LIBV90M_INC)
 INC := -I. -I../tel -I../dce -I../dce/test -I../cfg -I../test -I../ppp -I../ppp/test $(LIBV90M_DEV_INC)
 PPP_SRC := $(addprefix ../ppp/,ppp_md5.c ppp_crypto.c ppp_hdlc.c ppp_fsm.c ppp_deflate.c ppp_mppc.c ppp_mppe.c ppp.c)
 CFG_SRC := ../cfg/config.c ../cfg/status.c
 # everything portable that goes into the daemon
 # (the modem and V.42: libv90modem)
-CORE_SRC := srv.c console.c dclist.c dcnow.c upnp.c saturn.c stun.c bbs.c telnet.c bbsdial.c line.c ../tel/tel.c ../dce/dce.c $(PPP_SRC) $(CFG_SRC)
+CORE_SRC := srv.c console.c dclist.c dcnow.c upnp.c saturn.c stun.c bbs.c svc.c bbssig.c ed25519.c telnet.c bbsdial.c line.c ../tel/tel.c ../dce/dce.c $(PPP_SRC) $(CFG_SRC)
 # test side: the calling DCE and PPP client; the simulated line and caller
 # are in the library's dev archive (linked last, after the sources)
 SIM_SRC := ../dce/test/caller.c ../ppp/test/pppc.c $(LIBV90M_DEV)
 SIM_SRC_ARM := ../dce/test/caller.c ../ppp/test/pppc.c $(LIBV90M_DEV_ARM)
-HDRS := $(wildcard *.h ../tel/*.h ../dce/*.h ../dce/test/*.h ../cfg/*.h ../ppp/*.h) $(LIBV90M)/include/v90modem.h
+HDRS := $(wildcard *.h ../tel/*.h ../dce/*.h ../dce/test/*.h ../cfg/*.h ../ppp/*.h ../term/*.h) $(LIBV90M)/include/v90modem.h
+# the terminal menu (shared with Netstalgia's nsdiald)
+TERM_SRC := $(addprefix ../term/,tscr.c tart.c guide.c tdir.c tmenu.c)
 
-DAEMON_SRC := main.c satlink.c bbslink.c update.c netsvc.c tun.c nat.c ../cfg/httpd.c ../cfg/settings.c ../cfg/firmware.c ../cfg/vpn.c $(CORE_SRC)
+DAEMON_SRC := main.c satlink.c bbslink.c termsvc.c update.c netsvc.c tun.c nat.c ../cfg/httpd.c ../cfg/settings.c ../cfg/firmware.c ../cfg/vpn.c $(CORE_SRC) $(TERM_SRC)
 # the firmware's version, shown on the pages: one place, fw/VERSION
 VERSION := $(shell cat ../fw/VERSION 2>/dev/null || echo dev)
 DAEMON_DEF := -DV90D_VERSION='"$(VERSION)"'
 NS_SRC := test/ns_call.c tun.c $(filter-out srv.c ../tel/tel.c ../dce/dce.c,$(CORE_SRC)) $(SIM_SRC)
 
-RIG_SRC := ../rig/pppcall.c $(filter-out srv.c ../tel/tel.c $(CFG_SRC),$(CORE_SRC)) $(SIM_SRC)
-RIG_SRC_ARM := ../rig/pppcall.c $(filter-out srv.c ../tel/tel.c $(CFG_SRC),$(CORE_SRC)) $(SIM_SRC_ARM)
+RIG_SRC := ../rig/pppcall.c $(filter-out srv.c svc.c ../tel/tel.c $(CFG_SRC),$(CORE_SRC)) $(SIM_SRC)
+RIG_SRC_ARM := ../rig/pppcall.c $(filter-out srv.c svc.c ../tel/tel.c $(CFG_SRC),$(CORE_SRC)) $(SIM_SRC_ARM)
 $(BUILD)/test_rig: test/test_rig.c $(RIG_SRC) $(HDRS) ../rig/pppcall.h
 	@mkdir -p $(BUILD)
 	$(CC) $(CFLAGS) $(INC) -I../rig -o $@ test/test_rig.c $(RIG_SRC) $(LDLIBS)
@@ -49,6 +51,10 @@ v90d-arm: $(BUILD)/v90d-arm
 $(BUILD)/v90d: $(DAEMON_SRC) $(HDRS) ../fw/VERSION $(LIBV90M_A)
 	@mkdir -p $(BUILD)
 	$(CC) $(CFLAGS) $(DAEMON_DEF) $(DAEMON_INC) -o $@ $(DAEMON_SRC) $(LIBV90M_A) $(LDLIBS)
+# the same daemon taking lists signed with the test key (test/bbskeys_test.h), for test/ns_call.c
+$(BUILD)/v90d-nstest: $(DAEMON_SRC) $(HDRS) test/bbskeys_test.h ../fw/VERSION $(LIBV90M_A)
+	@mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) $(DAEMON_DEF) $(DAEMON_INC) -DBBS_SIG_TEST_KEY -o $@ $(DAEMON_SRC) $(LIBV90M_A) $(LDLIBS)
 $(BUILD)/v90d-arm: $(DAEMON_SRC) $(HDRS) ../fw/VERSION $(LIBV90M_A_ARM)
 	@mkdir -p $(BUILD)
 	$(ARM_CC) $(CFLAGS) $(DAEMON_DEF) $(DAEMON_INC) -static -Os -o $@ $(DAEMON_SRC) $(LIBV90M_A_ARM) $(LDLIBS)
@@ -95,10 +101,10 @@ $(BUILD)/ns_upnp: test/ns_upnp.c upnp.c upnp.h
 test-ns-upnp: $(BUILD)/ns_upnp
 	unshare -Urn ./$(BUILD)/ns_upnp $(BUILD)
 
-test-ns: $(BUILD)/v90d $(BUILD)/ns_call test-ns-nat test-ns-upnp
+test-ns: $(BUILD)/v90d-nstest $(BUILD)/ns_call test-ns-nat test-ns-upnp
 	@$(MAKE) -s -C ../fw tools/v90nv.host && python3 ../fw/tools/test_v90nv_boot.py --make-flash $(BUILD)/ns_flash.bin $(BUILD)/ns_new.uimage \
 	  || echo "  (no flash tool or no python3: the Firmware page is not tried)"
-	unshare -Urn ./$(BUILD)/ns_call ./$(BUILD)/v90d $(BUILD) $$(test -f $(BUILD)/ns_flash.bin && test -x $(FW_NV) && echo $(FW_NV) $(BUILD)/ns_flash.bin $(BUILD)/ns_new.uimage)
+	unshare -Urn ./$(BUILD)/ns_call ./$(BUILD)/v90d-nstest $(BUILD) $$(test -f $(BUILD)/ns_flash.bin && test -x $(FW_NV) && echo $(FW_NV) $(BUILD)/ns_flash.bin $(BUILD)/ns_new.uimage)
 	@rm -f $(BUILD)/ns_flash.bin
 	@$(MAKE) -s test-ns-pppd
 

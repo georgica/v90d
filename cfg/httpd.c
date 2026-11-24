@@ -42,6 +42,7 @@ typedef char httpd_pages_fit[HTTPD_BODY_MAX >= STATUS_HTML_MAX && HTTPD_BODY_MAX
 
 static const char CT_TEXT[] = "text/plain; charset=us-ascii";
 static const char CT_HTML[] = "text/html; charset=utf-8";
+static const char CT_JS[]   = "text/javascript; charset=us-ascii";
 /* extra header lines of some answers */
 static const char ALLOW_READ[] = "Allow: GET, HEAD\r\n";
 static const char ALLOW_FORM[] = "Allow: GET, HEAD, POST\r\n";
@@ -91,10 +92,13 @@ static void put_head(sbuf_t *s, int code, const char *ctype, size_t clen, const 
     sb_puts(s, reason(code));
     sb_puts(s, "\r\nServer: v90d\r\nContent-Type: "); sb_puts(s, ctype);
     sb_puts(s, "\r\nContent-Length: "); sb_u64(s, clen);
-    sb_puts(s, "\r\nConnection: close\r\n"
-               "Cache-Control: no-store\r\n"
+    sb_puts(s, "\r\nConnection: close\r\n");
+    /* the script is the same for everyone and named with the firmware's
+     * version (page.h): kept by the browser; everything else never */
+    sb_puts(s, ctype == CT_JS ? "Cache-Control: max-age=86400\r\n" : "Cache-Control: no-store\r\n");
+    sb_puts(s, ""
                "X-Content-Type-Options: nosniff\r\n"
-               "Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline';"
+               "Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; script-src 'self';"
                " form-action 'self'; frame-ancestors 'none'\r\n");
     if (extra) sb_puts(s, extra);
     sb_puts(s, "\r\n");
@@ -345,6 +349,50 @@ static int same_origin(const hdr_t *origin, const hdr_t *host)
     return origin->len - i == host->len && ieq(origin->v + i, host->v, host->len);
 }
 
+/* a post with an Origin of another site (a form there, posting through the
+ * user's browser): answered 403 here, and 1 returned */
+static int cross_site(httpd_t *h, httpd_conn_t *c, const char *p, size_t n, uint32_t now)
+{
+    hdr_t og, host;
+    hdr_find(p, n, "origin", &og);
+    if (!og.count) return 0;
+    hdr_find(p, n, "host", &host);
+    if (same_origin(&og, &host)) return 0;
+    respond_text(h, c, 403, NULL, "This request comes from another site.", 0, now);
+    return 1;
+}
+
+#define FORM_TYPE "application/x-www-form-urlencoded"
+
+/* /ui.js is served from one answer buffer: it must fit (C99, no static assert) */
+typedef char page_js_fits[sizeof PAGE_JS - 1 <= HTTPD_BODY_MAX ? 1 : -1];
+
+/* the Content-Type value is the media type t (any case), alone or with parameters */
+static int media_is(const hdr_t *hd, const char *t)
+{
+    size_t l = strlen(t);
+    return hd->len >= l && ieq(hd->v, t, l) && (hd->len == l || hd->v[l] == ';' || is_blank(hd->v[l]));
+}
+
+/* the Content-Length of a post, at most max, into *cl: 1. Otherwise it
+ * answers (411 none, 400 not a plain number or twice, 413 too large) and
+ * returns 0. */
+static int body_length(httpd_t *h, httpd_conn_t *c, const char *p, size_t n, size_t max, size_t *cl, uint32_t now)
+{
+    hdr_t hd;
+    size_t i, v = 0;
+    hdr_find(p, n, "content-length", &hd);
+    if (hd.count == 0) { respond_text(h, c, 411, NULL, NULL, 0, now); return 0; }
+    for (i = 0; i < hd.len; i++) {
+        if (hd.v[i] < '0' || hd.v[i] > '9') break;
+        if (i < 9) v = v * 10u + (size_t)(hd.v[i] - '0');
+    }
+    if (hd.count > 1 || hd.len == 0 || i < hd.len) { respond_text(h, c, 400, NULL, NULL, 0, now); return 0; }
+    if (hd.len > 9 || v > max) { respond_text(h, c, 413, NULL, NULL, 0, now); return 0; }
+    *cl = v;
+    return 1;
+}
+
 /* ---- who may see the pages -------------------------------------------------- */
 
 #define SESSION_MS    (15u * 60u * 1000u)   /* a session ends this long after its last use */
@@ -412,7 +460,16 @@ static int authorised(httpd_t *h, const char *p, size_t n, uint32_t now)
 
     if (!h->cfg->admin_password[0]) return 1;
     hdr_find(p, n, "authorization", &hd);
-    if (hd.count) return hd.count == 1 && auth_ok(hd.v, hd.len, h->cfg->admin_password) ? 1 : -1;
+    if (hd.count) {
+        /* the same hold as for a wrong login: while it lasts no password is
+         * even looked at, so guessing goes no faster this way than by /login */
+        if (h->hold_on && (int32_t)(h->hold_until - now) > 0) return -1;
+        h->hold_on = 0;
+        if (hd.count == 1 && auth_ok(hd.v, hd.len, h->cfg->admin_password)) { h->bad_auth = 0; return 1; }
+        /* a mistyped password is no attack: the hold comes with the third in a row */
+        if (++h->bad_auth >= 3) { h->bad_auth = 0; h->hold_on = 1; h->hold_until = now + LOGIN_HOLD_MS; }
+        return -1;
+    }
     return session_ok(h, p, n, now);
 }
 
@@ -550,7 +607,19 @@ static void post_done(httpd_t *h, httpd_conn_t *c, uint32_t now)
 
     if (c->post_login == 1) { login_done(h, c, now); return; }
     if (c->post_login == 2) { vpn_done(h, c, now); return; }
-    r = settings_apply(h->cfg, c->tx, c->body_want, &cand, err, sizeof err);
+    {
+        /* the port is the page's: a post to a port-2 page says port=2, any
+         * other page's does not (settings_apply reads it from the body) */
+        size_t pos = 0, len = c->body_want; int two = 0;
+        while (pos < len) {
+            size_t pl = 0;
+            while (pos + pl < len && c->tx[pos + pl] != '&') pl++;
+            if (pl == 6 && memcmp(c->tx + pos, "port=2", 6) == 0) two = 1;
+            pos += pl + 1;
+        }
+        r = two != settings_page_port2(c->post_page) ? SETTINGS_BAD
+          : settings_apply(h->cfg, c->tx, c->body_want, &cand, err, sizeof err);
+    }
 
     /* from here on the posted octets are no longer needed and the answer
      * may be written over them */
@@ -571,7 +640,8 @@ static void post_done(httpd_t *h, httpd_conn_t *c, uint32_t now)
         sb_puts(&s, "<!DOCTYPE html>\n<html lang=\"en\"><head><title>" PAGE_NAME " settings</title></head><body>\n"
                     "<p>Settings saved. <a href=\"");
         sb_puts(&s, settings_page_path(c->post_page));
-        sb_puts(&s, "?saved=1\">Continue</a></p>\n</body></html>\n");
+        sb_puts(&s, settings_added() ? "?saved=1&amp;add=1\">Continue</a></p>\n</body></html>\n"
+                                     : "?saved=1\">Continue</a></p>\n</body></html>\n");
         {
             /* back to the page the form was on */
             char at[64];
@@ -579,7 +649,7 @@ static void post_done(httpd_t *h, httpd_conn_t *c, uint32_t now)
             int blen = sb_end(&s);
             sb_init(&l, at, sizeof at);
             sb_puts(&l, "Location: "); sb_puts(&l, settings_page_path(c->post_page));
-            sb_puts(&l, "?saved=1\r\n");
+            sb_puts(&l, settings_added() ? "?saved=1&add=1\r\n" : "?saved=1\r\n");
             sb_end(&l);
             finish(h, c, 303, CT_HTML, at, blen, 0, now);
         }
@@ -638,8 +708,11 @@ static void settings_request(httpd_t *h, httpd_conn_t *c, size_t n, int method, 
     }
 
     if (method != M_POST) {
-        int saved = query && qlen == 7 && memcmp(query, "saved=1", 7) == 0;
-        finish(h, c, 200, CT_HTML, NULL, settings_render_page(h->cfg, page, saved, NULL, body, HTTPD_BODY_MAX),
+        /* ?saved=1 after a save, &add=1 after the Add button (or ?add=1 alone) */
+        int both = query && qlen == 13 && memcmp(query, "saved=1&add=1", 13) == 0;
+        int saved = both || (query && qlen == 7 && memcmp(query, "saved=1", 7) == 0);
+        int add = both || (query && qlen == 5 && memcmp(query, "add=1", 5) == 0);
+        finish(h, c, 200, CT_HTML, NULL, settings_render_page_add(h->cfg, page, saved, add, NULL, body, HTTPD_BODY_MAX),
                head_only, now);
         return;
     }
@@ -657,43 +730,22 @@ static void settings_request(httpd_t *h, httpd_conn_t *c, size_t n, int method, 
 static void take_body(httpd_t *h, httpd_conn_t *c, size_t n, size_t max, int login, uint32_t now)
 {
     const char *p = c->rx;
-    hdr_t hd, host;
-    size_t cl = 0, have, i;
+    hdr_t hd;
+    size_t cl = 0, have;
 
     c->post_login = login;
     /* a form on some other site must not be able to post here through the
      * user's browser */
-    hdr_find(p, n, "origin", &hd);
-    if (hd.count) {
-        hdr_find(p, n, "host", &host);
-        if (!same_origin(&hd, &host)) {
-            respond_text(h, c, 403, NULL, "This request comes from another site.", 0, now);
-            return;
-        }
-    }
+    if (cross_site(h, c, p, n, now)) return;
     hdr_find(p, n, "transfer-encoding", &hd);
     if (hd.count) goto bad;
     hdr_find(p, n, "content-type", &hd);
     if (hd.count > 1) goto bad;
-    if (login == 2) {
-        if (hd.count == 0 || hd.len < 10 || !ieq(hd.v, "text/plain", 10) || (hd.len > 10 && hd.v[10] != ';' && !is_blank(hd.v[10]))) {
-            respond_text(h, c, 415, NULL, NULL, 0, now);
-            return;
-        }
-    } else
-    if (hd.count == 0 || hd.len < 33 || !ieq(hd.v, "application/x-www-form-urlencoded", 33) ||
-        (hd.len > 33 && hd.v[33] != ';' && !is_blank(hd.v[33]))) {
+    if (hd.count == 0 || !media_is(&hd, login == 2 ? "text/plain" : FORM_TYPE)) {
         respond_text(h, c, 415, NULL, NULL, 0, now);
         return;
     }
-    hdr_find(p, n, "content-length", &hd);
-    if (hd.count == 0) { respond_text(h, c, 411, NULL, NULL, 0, now); return; }
-    if (hd.count > 1 || hd.len == 0) goto bad;
-    for (i = 0; i < hd.len; i++) {
-        if (hd.v[i] < '0' || hd.v[i] > '9') goto bad;
-        if (i < 9) cl = cl * 10u + (size_t)(hd.v[i] - '0');
-    }
-    if (hd.len > 9 || cl > max) { respond_text(h, c, 413, NULL, NULL, 0, now); return; }
+    if (!body_length(h, c, p, n, max, &cl, now)) return;
 
     /* the part of the body that came with the head, then the rest */
     have = c->rx_len - n;
@@ -719,8 +771,8 @@ static void firmware_request(httpd_t *h, httpd_conn_t *c, size_t n, int method, 
     char *body = c->tx + HTTPD_HDR_RESERVE;
     char where[FIRMWARE_TEXT_MAX], state[FIRMWARE_TEXT_MAX], ctype[HTTPD_CTYPE_MAX + 1];
     int head_only = method == M_HEAD, a;
-    hdr_t hd, host;
-    size_t cl = 0, max, have, i;
+    hdr_t hd;
+    size_t cl = 0, max, have;
 
     if (method == M_OTHER || (sub == 0 && method == M_POST) || ((sub == 1 || sub == 3) && method != M_POST)) {
         respond_text(h, c, 405, (sub == 1 || sub == 3) ? "Allow: POST\r\n" : sub == 2 ? ALLOW_FORM : ALLOW_READ, NULL, head_only, now);
@@ -747,14 +799,7 @@ static void firmware_request(httpd_t *h, httpd_conn_t *c, size_t n, int method, 
     }
 
     /* a post: everything about it is checked here, its body is not ours */
-    hdr_find(p, n, "origin", &hd);
-    if (hd.count) {
-        hdr_find(p, n, "host", &host);
-        if (!same_origin(&hd, &host)) {
-            respond_text(h, c, 403, NULL, "This request comes from another site.", 0, now);
-            return;
-        }
-    }
+    if (cross_site(h, c, p, n, now)) return;
     if (sub == 3) {
         const char *why;
         if (!h->fw.install) { respond_text(h, c, 501, NULL, "This firmware cannot update itself.", 0, now); return; }
@@ -769,21 +814,13 @@ static void firmware_request(httpd_t *h, httpd_conn_t *c, size_t n, int method, 
     if (hd.count) goto bad;
     hdr_find(p, n, "content-type", &hd);
     if (hd.count > 1 || hd.len > HTTPD_CTYPE_MAX) goto bad;
-    if (sub == 2 && (hd.count == 0 || hd.len < 33 || !ieq(hd.v, "application/x-www-form-urlencoded", 33) ||
-                     (hd.len > 33 && hd.v[33] != ';' && !is_blank(hd.v[33])))) {
+    if (sub == 2 && (hd.count == 0 || !media_is(&hd, FORM_TYPE))) {
         respond_text(h, c, 415, NULL, NULL, 0, now);
         return;
     }
     memcpy(ctype, hd.v, hd.len); ctype[hd.len] = '\0';
-    hdr_find(p, n, "content-length", &hd);
-    if (hd.count == 0) { respond_text(h, c, 411, NULL, NULL, 0, now); return; }
-    if (hd.count > 1 || hd.len == 0) goto bad;
-    for (i = 0; i < hd.len; i++) {
-        if (hd.v[i] < '0' || hd.v[i] > '9') goto bad;
-        if (i < 9) cl = cl * 10u + (size_t)(hd.v[i] - '0');
-    }
     max = sub == 1 ? HTTPD_FW_UPLOAD_MAX : HTTPD_FW_STOCK_MAX;
-    if (hd.len > 9 || cl > max) { respond_text(h, c, 413, NULL, NULL, 0, now); return; }
+    if (!body_length(h, c, p, n, max, &cl, now)) return;
 
     have = c->rx_len - n;
     if (have > cl) have = cl;
@@ -801,7 +838,7 @@ bad:
 /* Parse the request head p[0..n) and decide the answer. Nothing in it is
  * trusted: the head must be free of control bytes, the request line must
  * be exactly "METHOD SP path SP HTTP/1.digits", and the path is only ever
- * compared with the four we serve. It is never decoded, never used as a
+ * compared with the paths we serve. It is never decoded, never used as a
  * file name. */
 static void handle(httpd_t *h, httpd_conn_t *c, size_t n, uint32_t now)
 {
@@ -866,7 +903,6 @@ static void handle(httpd_t *h, httpd_conn_t *c, size_t n, uint32_t now)
     }
     if (plen == 8 && memcmp(uri, "/restart", 8) == 0) {
         char *body = c->tx + HTTPD_HDR_RESERVE;
-        hdr_t og, host;
         sbuf_t s;
         int a;
 
@@ -877,14 +913,7 @@ static void handle(httpd_t *h, httpd_conn_t *c, size_t n, uint32_t now)
             respond_text(h, c, 403, NULL, BY_ADDRESS, 0, now);
             return;
         }
-        hdr_find(c->rx, n, "origin", &og);
-        if (og.count) {
-            hdr_find(c->rx, n, "host", &host);
-            if (!same_origin(&og, &host)) {
-                respond_text(h, c, 403, NULL, "This request comes from another site.", 0, now);
-                return;
-            }
-        }
+        if (cross_site(h, c, c->rx, n, now)) return;
         /* the owner of the server looks at restart_asked and does it, once
          * this answer is out; whatever body came with the post is not read */
         h->restart_asked = 1;
@@ -929,6 +958,13 @@ static void handle(httpd_t *h, httpd_conn_t *c, size_t n, uint32_t now)
     else if (plen == 7 && memcmp(uri, "/logout", 7) == 0) {
         { int j = session_find(h, c->rx, n, now); if (j >= 0) h->sess[j].on = 0; }
         respond_text(h, c, 303, "Location: /\r\nSet-Cookie: sid=; Path=/; Max-Age=0\r\n", NULL, head_only, now);
+        return;
+    }
+    else if (plen == 6 && memcmp(uri, "/ui.js", 6) == 0) {
+        /* the pages' script (page.h): the same for everyone, nothing of the box in it */
+        char *body = c->tx + HTTPD_HDR_RESERVE;
+        memcpy(body, PAGE_JS, sizeof PAGE_JS - 1);
+        finish(h, c, 200, CT_JS, NULL, (int)(sizeof PAGE_JS - 1), head_only, now);
         return;
     }
     else if (plen == 14 && memcmp(uri, "/cgi-bin/login", 14) == 0) {

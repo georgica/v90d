@@ -97,6 +97,9 @@ void    caller_cfg_default(caller_cfg_t *cfg);
 void    caller_init(caller_t *c, const caller_cfg_t *cfg);
 /* V.90, in data mode: start a retrain (9.5.2.1) */
 void    caller_retrain(caller_t *c);
+/* A caller in octet mode (raw_rx, raw_tx) starts its PPP client on the same
+ * connection, as a user does who leaves the terminal for Dial-Up Networking */
+void    caller_to_ppp(caller_t *c);
 /* One 8 kHz sample: rx is the line signal received, ds_octet the PCM octet
  * the answerer transmitted in this sample (only a V.90 caller looks at it).
  * Returns the sample to transmit. */

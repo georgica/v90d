@@ -1,5 +1,6 @@
-/* PPP server session: phases (RFC 1661 3.2), LCP, PAP/CHAP authenticator,
- * IPCP with address assignment and DNS, CCP with PPP Deflate and MPPC.
+/* PPP server session: phases (RFC 1661 3.2), LCP, PAP / CHAP / MS-CHAPv2
+ * authenticator, IPCP with address assignment and DNS, CCP with PPP Deflate,
+ * MPPC and MPPE.
  * See ppp.h for the API. */
 #include <string.h>
 #include "ppp.h"
@@ -1055,6 +1056,16 @@ static void chap_input(ppp_t *p, const uint8_t *pkt, size_t n)
 
     sl = lookup_secret(p, user, ul, secret, sizeof secret);
     if (p->auth_proto == PPP_AUTH_MSCHAPV2) {
+        /* RFC 2759 8.2: the challenge hash takes the user name without a
+         * domain in front ("WORKGROUP\alice": alice), which is what Windows
+         * sends when told to include its logon domain; the user is looked up
+         * by that name too when the whole one is not a user of ours. */
+        size_t k = ul;
+        while (k > 0 && user[k - 1] != '\\') k--;
+        if (k > 0) {
+            if (sl < 0) sl = lookup_secret(p, user + k, ul - k, secret, sizeof secret);
+            user += k; ul -= k;
+        }
         /* RFC 2759: the 49-octet value is PeerChallenge[16], Reserved[8],
          * NT-Response[24], Flags[1]. Our challenge is the authenticator
          * challenge. Match the NT-Response, then build the authenticator
@@ -2097,6 +2108,7 @@ void ppp_init(ppp_t *p, const ppp_config_t *cfg)
 
     put32(seed, cfg->seed);
     ppp_add_entropy(p, seed, 4);
+    if (cfg->entropy && cfg->entropy_n) ppp_add_entropy(p, cfg->entropy, cfg->entropy_n);
 }
 
 void ppp_lower_up(ppp_t *p)

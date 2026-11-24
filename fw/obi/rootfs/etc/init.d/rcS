@@ -1,0 +1,53 @@
+#!/bin/sh
+# The start of v90d's root file system on the OBi200 under the maker's kernel
+# (2.6.30), which U-Boot boots from the flash. It does what v90d needs of
+# the maker's /etc/rc and nothing else (no udev, USB, Bluetooth, telnet or
+# ssh), then starts /obi/obi, which starts v90d's own kernel from RAM unless
+# that did not come up (see fw/obi/obi). Under v90d's own kernel this file
+# is not run: its oinit mounts this file system and runs /obi/kinit.
+# Ours; written for this image.
+
+PATH=/sbin:/usr/sbin:/bin:/usr/bin
+export PATH
+
+mount -t proc proc /proc
+mount -t sysfs sys /sys
+mount -t ramfs none /var
+mkdir -p /var/lib /var/run /var/log /var/tmp /var/lock /var/ppp /var/run/ppp
+touch /var/tmp/resolv.conf
+
+# /dev: the fixed nodes the maker's system has (kept in /lib/dev), one for
+# each device the kernel lists in /sys, and mdev for those that come later.
+# (mdev -s names a node after its numbers on this kernel, which gives no
+# names in uevent: the nodes are made here from the names in /sys.)
+mount -t tmpfs -o mode=0755 dev /dev
+cp -a /lib/dev/. /dev/
+for d in /sys/class/*/* /sys/block/*; do
+    [ -f "$d/dev" ] || continue
+    n=${d##*/}; [ -e "/dev/$n" ] && continue
+    IFS=: read ma mi < "$d/dev"
+    case "$d" in /sys/block/*) mknod "/dev/$n" b "$ma" "$mi" ;; *) mknod "/dev/$n" c "$ma" "$mi" ;; esac
+done
+echo /sbin/mdev > /proc/sys/kernel/hotplug
+mkdir -p /dev/pts /dev/shm
+mount -t devpts none /dev/pts
+mount -t tmpfs -o size=512K none /dev/shm
+
+hostname v90d
+touch /var/log/messages
+syslogd
+klogd 2>/dev/null
+
+mount -t squashfs /dev/mtdblock7 /obi
+# the settings partition. If it does not mount, it is made anew, as the
+# maker's system does (/scratch/not_mounted is a file of this image, seen
+# only while nothing is mounted there).
+mount -t jffs2 /dev/mtdblock4 /scratch -o rw,sync
+if [ -e /scratch/not_mounted ]; then
+    echo "rcS: /scratch does not mount: made anew" > /dev/kmsg
+    flash_eraseall -j /dev/mtd4
+    mount -t jffs2 /dev/mtdblock4 /scratch -o rw,sync
+fi
+
+ifconfig lo 127.0.0.1 up
+cd /obi && ./obi &

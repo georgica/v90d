@@ -351,6 +351,19 @@ def run(proc, proxy, dns_port, http_port, ftp_port, pasv):
     check_eq(dns_query(dns_port, "www.inode.com")[3], www, "still answering after garbage")
 
     # ---- HTTP
+    # a chunked body (its end unknown to us) is refused, not passed on half
+    r = http_fetch(www, http_port, b"POST /cgi HTTP/1.1\r\nHost: www.inode.com\r\nTransfer-Encoding: chunked\r\n\r\n2\r\nab\r\n0\r\n\r\n")
+    check(r.startswith(b"HTTP/1.0 411 "), "chunked request body: 411: %r" % r[:30])
+    # one caller cannot take every session: the ninth from one address is refused
+    held = [socket.create_connection((www, http_port), timeout=10) for _ in range(8)]
+    time.sleep(0.2)
+    try:
+        r = http_fetch(www, http_port, b"GET / HTTP/1.0\r\n\r\n")
+    except ConnectionResetError:
+        r = b"(reset)"
+    check(r.startswith(b"HTTP/1.0 503 ") or r == b"(reset)", "ninth session of one caller refused: %r" % r[:30])
+    for h in held: h.close()
+    time.sleep(0.2)
     # no Host header: the name comes from the address the client connected to
     r = http_fetch(www, http_port, b"GET / HTTP/1.0\r\nUser-Agent: Mozilla/1.0N (Windows)\r\n\r\n")
     check_eq(r, FakeProxy.crlf(b"200 OK", HOME), "HTTP/1.0 fetch without Host")
@@ -444,6 +457,16 @@ def run(proc, proxy, dns_port, http_port, ftp_port, pasv):
     first, data, last = f.get_port("RETR welcome.msg")
     check_eq(data, WELCOME, "RETR over PORT")
     check(last.startswith("226 "), "RETR over PORT final reply: " + last)
+    # a RETR that fails before its 150 leaves the PORT for the next one
+    ls = f.port()
+    check(f.cmd("RETR nofile.bin").startswith("550 "), "RETR of a missing file over PORT")
+    first = f.cmd("RETR welcome.msg")
+    check(first.startswith("150 "), "PORT still there after a 550: " + first)
+    if first.startswith("150 "):
+        d, _ = ls.accept()
+        check(f.drain(d).startswith(b"Welcome"), "RETR over the kept PORT")
+        check(f.line().startswith("226 "), "RETR over the kept PORT final reply")
+    ls.close()
     first, data, last = f.get_port("RETR pub/big.bin")
     check(data == BIG_FTP and last.startswith("226 "), "RETR of 300 kB over PORT: %d bytes" % len(data))
     check(f.cmd("PORT 10,1,2,3,4,5").startswith("5"), "PORT to another address refused")
@@ -468,6 +491,16 @@ def run(proc, proxy, dns_port, http_port, ftp_port, pasv):
     check(f.line().startswith("226 "), "ABOR: 226")
     d.close()
     check(f.cmd("NOOP").startswith("200 "), "alive after ABOR")
+    # an ABOR behind another command waiting for the transfer is taken at once
+    ip, p = f.pasv()
+    d = socket.create_connection((ip, p), timeout=10)
+    check(f.cmd("RETR pub/big.bin").startswith("150 "), "RETR to be aborted from behind")
+    d.recv(1000)
+    f.s.sendall(b"PWD\r\nABOR\r\n")
+    check(f.line().startswith("426 "), "queued ABOR: 426 before the PWD")
+    check(f.line().startswith("226 "), "queued ABOR: 226")
+    check(f.line().startswith('257 '), "then the PWD")
+    d.close()
     check(f.cmd("QUIT").startswith("221 "), "QUIT")
     check_eq(f.s.recv(10), b"", "closed after QUIT")
     f.s.close()
@@ -524,6 +557,18 @@ def timeouts(proc, proxy, dns_port, http_port, ftp_port):
             time.sleep(0.05)
     www = dns_query(dns_port, "www.inode.com")[3]
     silent = dns_query(dns_port, "silent.example")[3]
+    # a request head sent a byte at a time is not given more time for it
+    t0 = time.time()
+    s = socket.create_connection((www, http_port), timeout=10)
+    try:
+        for c in b"GET / HTTP/1.0\r\nX-Slow: " + b"a" * 60:
+            s.sendall(bytes([c]))
+            time.sleep(0.05)
+        r = s.recv(100)
+    except OSError:
+        r = b""
+    s.close()
+    check(r == b"" and time.time() - t0 < 4, "trickled head dropped at the deadline (%.1f s)" % (time.time() - t0))
     # a client that connects and says nothing is dropped
     t0 = time.time()
     r = http_fetch(www, http_port, b"")

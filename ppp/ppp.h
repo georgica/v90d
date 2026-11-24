@@ -191,6 +191,9 @@ typedef struct {
      * entropy source of its own: give it something unpredictable (for
      * example from /dev/urandom) and/or call ppp_add_entropy(). */
     uint32_t seed;
+    /* and more of it, mixed in with the seed at ppp_init (NULL = none):
+     * the 32 bits of seed alone can be searched through */
+    const uint8_t *entropy; size_t entropy_n;
 
     /* --- callbacks --- */
     void *ctx;

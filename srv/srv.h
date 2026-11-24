@@ -25,8 +25,24 @@
 
 typedef void (*srv_ip_fn)(void *ctx, const uint8_t *pkt, size_t len);
 typedef void (*srv_raw_fn)(void *ctx, const uint8_t *oct, size_t n);
+/* a PPP caller is hung up when its network is not up this long after the
+ * answer (the modem's training, LCP, the login and IPCP all fit well) */
+#define SRV_LOGIN_MAX_S 90
 /* srv_link(): a call to the bulletin board number (bbs.h), beside the SATURN_* kinds */
 #define SRV_LINK_BBS 16
+/* srv_link(): a call to a number of a service ([services], srv/svc.h) */
+#define SRV_LINK_SVC 17
+/* srv_link(): a call on the Internet number with [services] menu on, still
+ * in its terminal menu (term/tmenu.h, srv/termsvc.c); once it goes over to
+ * PPP (srv_start_ppp, or Dial-Up Networking found by its first frame) it
+ * is an ordinary call (SATURN_NONE) */
+#define SRV_LINK_MENU 18
+/* PROTOWEB on the keypad with zeros behind (the rule of the board numbers):
+ * the old web of Protoweb, as Netstalgia also has it */
+#define SRV_PROTOWEB "7768693200"
+/* dialed against Netstalgia's list of services (the daemon's): 2 = it is
+ * one of its numbers, 1 = it begins one, 0 = neither (cfg_svc_number_begins) */
+typedef int (*srv_svc_fn)(const char *dialed);
 
 typedef struct {
     cfg_t      cfg;             /* in force for the current / next call */
@@ -51,11 +67,17 @@ typedef struct {
     uint32_t   clock;           /* UTC seconds, 0 = not set */
     uint32_t   call_start;      /* clock when the line was answered */
     uint32_t   call_s;          /* seconds since the answer */
+    int        ppp_up_once;     /* this call's PPP has had its network up (the login deadline is over) */
+    uint32_t   ppp_from_s;      /* call_s when its PPP began (after the terminal menu: later than 0) */
     dce_status_t ds;            /* scratch */
     srv_raw_fn raw_out;         /* service = saturn: octets from the caller's modem */
     int        link; uint32_t link_addr;   /* the call in progress there: SATURN_*, whom to call */
     char       link_game[3];                /* matchmaking: the two-character game id */
     console_t  console;         /* service = dreamcast: the packets on their way out */
+    srv_svc_fn svc_known;       /* Netstalgia's numbers of services, NULL = none */
+    int        protoweb_ok;     /* the box has the archive gateway: SRV_PROTOWEB answers */
+    uint8_t    entropy[32]; size_t entropy_n;   /* srv_set_entropy: for the next call's PPP */
+    int        protoweb;        /* the call in progress came in on SRV_PROTOWEB */
     uint8_t    pkt[1500];
 } srv_t;
 
@@ -111,6 +133,10 @@ int     srv_link(const srv_t *s, uint32_t *addr, int *online);
 /* matchmaking kinds: the two-character game id (NUL-terminated), or "". */
 const char *srv_link_game(const srv_t *s);
 size_t  srv_send_raw(srv_t *s, const uint8_t *oct, size_t n);
+/* A call in its terminal menu (SRV_LINK_MENU) goes over to PPP on the same
+ * connection (dce_start_ppp): from now on it is a PPP call, and its login
+ * deadline counts from here. -1 when it is not in the menu. */
+int     srv_start_ppp(srv_t *s);
 void    srv_hangup(srv_t *s);
 /* The bulletin board number (bbs.h) answers on a port of any service. That
  * call carries octets like a saturn call (srv_set_raw, srv_send_raw,
@@ -118,6 +144,28 @@ void    srv_hangup(srv_t *s);
  * SRV_LINK_BBS for it; srv_dialed() is what was dialled in the call in
  * progress (which of the numbers). */
 const char *srv_dialed(const srv_t *s);
+/* The numbers of services ([services] in config.h) answer like the bulletin
+ * board numbers, on a port of any service, unless the number is the port's
+ * own: the call carries octets (srv_set_raw, srv_send_raw, srv_hangup) and
+ * srv_link() reports SRV_LINK_SVC. The owner's numbers are in the
+ * configuration; Netstalgia's come from the daemon through known (NULL:
+ * none), asked only while [services] netstalgia = on. srv_svc_number()
+ * says whose a number is: SRV_SVC_OWN, SRV_SVC_LIST, or 0 for none. */
+enum { SRV_SVC_OWN = 1, SRV_SVC_LIST = 2 };
+void    srv_set_svc_lookup(srv_t *s, srv_svc_fn known);
+int     srv_svc_number(const srv_t *s, const char *dialed);
+/* SRV_PROTOWEB, with or without a 1 in front, on a port whose service is
+ * internet or archive, unless it is the port's own number: the dial-up
+ * connection as on the port's own number (its PPP login), with the web,
+ * FTP and names of the archive (the daemon's archive mode, for that call
+ * alone). Only when the daemon says it has the archive gateway (on = 1).
+ * srv_protoweb() is 1 while such a call is in progress. */
+void    srv_set_protoweb(srv_t *s, int on);
+/* Unpredictable octets (the daemon reads them from /dev/urandom) for the
+ * next call's PPP: its magic numbers and challenges. Give fresh ones after
+ * each call; the server keeps at most 32. */
+void    srv_set_entropy(srv_t *s, const uint8_t *b, size_t n);
+int     srv_protoweb(const srv_t *s);
 /* 1 while a caller has IP up (packets can be sent to it) */
 int     srv_ip_up(const srv_t *s);
 

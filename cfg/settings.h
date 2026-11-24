@@ -6,9 +6,10 @@
  *
  * THE FORM
  *
- * Plain HTML: a few tables of text inputs, selects and checkboxes, one
- * submit button, no script, no external resource, a link back to the
- * status page. It posts application/x-www-form-urlencoded with these
+ * Plain HTML: a few tables of text inputs, selects and checkboxes, a Save
+ * button in the last card (and one out of sight first, for Enter), the Add
+ * buttons of the Users and Numbers tables (/ui.js adds a row at once; without
+ * it Add posts), nothing from elsewhere. It posts application/x-www-form-urlencoded with these
  * fields:
  *
  *   number            phone number; empty or `any` = every number connects
@@ -21,7 +22,7 @@
  *   auth              none | pap | chap
  *   user0 .. user15   user names, empty = row not used
  *   pass0 .. pass15   their passwords, see below
- *   mods              1: the four mod_ fields below are a complete set of
+ *   mods              1: the six mod_ fields below are a complete set of
  *                     checkboxes, one that is missing means off
  *   mod_v90, mod_v34, mod_v32bis, mod_v22bis, mod_v22, mod_v21
  *                     1 = on, 0 = off
@@ -31,6 +32,18 @@
  *   compression       on | off (PPP compression, [ppp])
  *   admin_password    new password of this page, empty = keep
  *   admin_clear       1 = remove the password of this page
+ *   add               the Add button of the Users and Numbers pages (any
+ *                     value): saved as ever, then the page with an empty row
+ *   netstalgia        on | off: answer the numbers of Netstalgia's list of
+ *                     services too ([services])
+ *   snum0 .. snum15   the owner's service numbers, empty = row not used
+ *   shost0 .. shost15, sport0 .. sport15, smode0 .. smode15 (raw | telnet),
+ *   sname0 .. sname15 the rest of each: see [services] in config.h
+ *
+ * The service rows: when any s field is posted, the table is made anew
+ * from the rows, a row that is not posted keeping what it had and a row
+ * with an empty number dropped (the others closed up); a row with a host
+ * or a name but no number is an error.
  *
  * A field that is absent keeps the current value, so a client may post
  * just `busy_chance=50`. (The browser always sends them all, except
@@ -62,7 +75,7 @@
 #include <stddef.h>
 #include "config.h"
 
-#define SETTINGS_HTML_MAX  26624  /* settings_render_html never needs more */
+#define SETTINGS_HTML_MAX  28672  /* settings_render_html never needs more */
 #define SETTINGS_BODY_MAX  8192   /* a browser's post of the whole form with
                                      every field at its longest fits */
 #define SETTINGS_MSG_MAX   160    /* messages of settings_apply fit */
@@ -78,8 +91,8 @@
  * the length without the NUL, or -1 if cap is too small. */
 int settings_render_html(const cfg_t *c, int saved, const char *error, char *buf, size_t cap);
 
-/* The settings are spread over five pages, each with its own form, path
- * and tab; SETTINGS_ALL is all of them on one page at /settings (kept for
+/* The settings are spread over pages, each with its own form, path and
+ * place in the menu; SETTINGS_ALL is all of them on one page at /settings (kept for
  * scripts, no tab leads there). settings_render_page() is the renderer of
  * one of them; settings_apply() takes the post of any. */
 enum { SETTINGS_ALL, SETTINGS_LINE, SETTINGS_MODEM, SETTINGS_USERS, SETTINGS_NETWORK,
@@ -88,12 +101,19 @@ enum { SETTINGS_ALL, SETTINGS_LINE, SETTINGS_MODEM, SETTINGS_USERS, SETTINGS_NET
         * fields with a hidden port=2, which makes settings_apply() put them
         * into cfg_t.port2. They sit under the Line and Modem tabs. */
        SETTINGS_LINE2, SETTINGS_MODEM2,
-       /* the Dreamcast tab (/dreamcast, /dreamcast2): the switches of the
-        * dreamcast service, per port */
-       /* the Consoles tab (/dreamcast, /dreamcast2): the dreamcast switches
+       /* the Consoles page (/dreamcast, /dreamcast2): the dreamcast switches
         * and the saturn matchmaking switch, per port */
-       SETTINGS_CONSOLES, SETTINGS_CONSOLES2, SETTINGS_PAGES };
+       SETTINGS_CONSOLES, SETTINGS_CONSOLES2,
+       /* the Numbers page (/services, under Services): the owner's numbers that connect
+        * straight to a service, the switch for Netstalgia's, and
+        * Netstalgia's list as it is (settings_set_svc_rows). Not on the
+        * page of all settings. */
+       SETTINGS_SERVICES, SETTINGS_PAGES };
 int settings_render_page(const cfg_t *c, int page, int saved, const char *error, char *buf, size_t cap);
+/* The same with add: one more empty row on the Users and Numbers pages (the
+ * Add button: the page saved, then shown again with a row to fill in). Those
+ * pages show their entries, and one empty row while there is none. */
+int settings_render_page_add(const cfg_t *c, int page, int saved, int add, const char *error, char *buf, size_t cap);
 /* What the Dreamcast page says about the VPN profile (vpn.h) that the
  * owner keeps: "host port" of its server, or NULL when none is stored. The
  * profile itself is never shown. */
@@ -103,9 +123,18 @@ void settings_set_vpn(const char *remote);
  * no Port 2 switch, the port-2 paths (/line2, /modem2, /dreamcast2) do not
  * resolve, and a port=2 post is refused. The default is two. */
 void settings_set_two_ports(int two);
+/* Netstalgia's numbers for the Numbers page: fn writes them as <tr> rows
+ * of four cells (number, name, mode, host:port) into buf[0..cap) and
+ * returns how many octets, *left the number of entries that did not fit
+ * or were not shown. NULL (the default): no list. */
+typedef size_t (*settings_svc_rows_fn)(char *buf, size_t cap, int *shown, int *left);
+void settings_set_svc_rows(settings_svc_rows_fn fn);
 const char *settings_page_path(int page);
 /* the page whose path is path[0..len), -1 if it is none */
 int settings_page_of(const char *path, size_t len);
+/* 1 for the pages of port 2 (/line2, /modem2, /dreamcast2): their post
+ * carries port=2, and no other page's may */
+int settings_page_port2(int page);
 
 /* Decode a posted form body and build the candidate config *out from the
  * current one *cur (which must be valid). Returns
@@ -121,6 +150,9 @@ int settings_page_of(const char *path, size_t len);
  * err may be NULL if errsz is 0. */
 int settings_apply(const cfg_t *cur, const char *body, size_t len, cfg_t *out,
                    char *err, size_t errsz);
+/* 1 if the form that settings_apply() took last was posted with its Add
+ * button (field add, any value): show the page with an empty row next */
+int settings_added(void);
 
 /* The login page: user name and password, posted to /login. failed adds
  * the line that the last try was wrong. At most LOGIN_HTML_MAX octets;

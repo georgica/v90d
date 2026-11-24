@@ -11,9 +11,13 @@
 /* host: a name or address; port: decimal; fd: a stream socket to the
  * daemon; connect_s: seconds for the name and the connect together;
  * self_ok: 0 = an address that bbsdial_is_self() names, whatever name led
- * to it, is not connected to, 1 = the tests' listener.
+ * to it, is not connected to, 1 = the tests' listener, BBSDIAL_PUBLIC =
+ * only an address on the internet at large (bbsdial_is_public), for an
+ * entry of Netstalgia's list of services. Whatever the name, it is looked
+ * up once and the address it gave is the one connected to.
  * Returns 0 when the board or the daemon ended the connection, 1 when the
  * board was not reached. */
+#define BBSDIAL_PUBLIC 2
 int bbsdial_run(const char *host, const char *port, int fd, unsigned connect_s, int self_ok);
 
 /* Is this IPv4 address (host byte order) no board? 1 for the box itself:
@@ -21,8 +25,15 @@ int bbsdial_run(const char *host, const char *port, int fd, unsigned connect_s, 
  * interface listens there; a list entry or a name that leads to it would
  * put the caller's keystrokes on it); and for what is no single host
  * elsewhere: link-local 169.254/16, multicast and broadcast. The rest of
- * the local network is not refused: a board may well stand beside the box.
+ * the local network is left to self_ok: the owner's numbers of services may
+ * lead there, the lists' entries (BBSDIAL_PUBLIC) may not.
  * Sends nothing. */
 int bbsdial_is_self(uint32_t addr);
+
+/* 1 if a (IPv4, host byte order) is an address on the internet at large:
+ * not 0/8, 10/8, 100.64/10, 127/8, 169.254/16, 172.16/12, 192.0.0/24,
+ * 192.0.2/24, 192.168/16, 198.18/15, 198.51.100/24, 203.0.113/24, nor
+ * multicast, 240/4 or broadcast. */
+int bbsdial_is_public(uint32_t a);
 
 #endif

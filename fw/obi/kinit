@@ -47,8 +47,18 @@ cd /obi && ./obi
 # password; under this kernel nothing does.
 
 # the own kernel came up: the next start may use it again (kjump --count: bootcount.c).
-# Counted as up once the daemon has run for a minute.
-( sleep 60; pidof v90d >/dev/null && /obi/kjump --count ok && say "up: v90d runs" ) &
+# Counted as up once the daemon has run for a minute without a break. If it
+# never does within five, this kernel is no good for the box: restart, and
+# the count (two starts that never came up) leaves the box on the maker's
+# kernel, where the same v90d runs, until the power goes.
+( up=0; t=0
+  while [ $t -lt 300 ]; do
+      sleep 5; t=$((t + 5))
+      if pidof v90d >/dev/null; then up=$((up + 5)); else up=0; fi
+      if [ $up -ge 60 ]; then /obi/kjump --count ok && say "up: v90d runs"; exit 0; fi
+  done
+  say "v90d did not stay up for a minute in five: restarting, for the maker's kernel"
+  sync; reboot -f ) &
 
 # process 1: never ends; takes the processes left without a parent
 while :; do wait; sleep 1; done

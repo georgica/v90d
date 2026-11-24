@@ -241,11 +241,12 @@ void ppp_des_key_from_7(const uint8_t in7[7], uint8_t out8[8])
 
 void ppp_rc4_init(ppp_rc4_t *r, const uint8_t *key, size_t len)
 {
-    unsigned i, j = 0;
+    unsigned i, j = 0; size_t k = 0;
     for (i = 0; i < 256; i++) r->s[i] = (uint8_t)i;
     for (i = 0; i < 256; i++) {
         uint8_t t;
-        j = (j + r->s[i] + key[i % len]) & 0xff;
+        j = (j + r->s[i] + key[k]) & 0xff;
+        if (++k == len) k = 0;              /* key[i % len], without a division for each octet */
         t = r->s[i]; r->s[i] = r->s[j]; r->s[j] = t;
     }
     r->i = r->j = 0;

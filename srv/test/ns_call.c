@@ -1212,15 +1212,17 @@ int main(int argc, char **argv)
         }
         f = fopen(builtin, "w");
         if (f) {
-            fprintf(f, "# the list in the image\nv90d-bbs 2\n"
+            fprintf(f, "# the list in the image\n# serial 6\nv90d-bbs 2\n"
                        "bbs telehack 2278353422 tele.example Telehack\nbbs 20forbeers 2272036723 b.example:1337 20 For Beers <BBS>\n"
                        "bbs dead 2273323000 dead.example Dead Board\n");
             fclose(f);
         }
         f = fopen(fetched, "w");
         if (f) {
-            fprintf(f, "v90d-bbs 2\nbbs telehack 2278353422 tele.example Telehack\nbbs 20forbeers 2272036723 b.example:1337 20 For Beers <BBS>\n"
-                       "bbs newboard 2276392627 n.example New Board\n");
+            /* signed with the test key (test/bbskeys_test.h); newer than the image's */
+            fprintf(f, "# serial 7\nv90d-bbs 2\nbbs telehack 2278353422 tele.example Telehack\nbbs 20forbeers 2272036723 b.example:1337 20 For Beers <BBS>\n"
+                       "bbs newboard 2276392627 n.example New Board\n"
+                       "# sig ed25519 2f3f4aac9de5966c376f248f8dd45019d2ea0be983490812bc517dd59ab0a53a766777895ce008c04233a84c7202e380c506eb5cb715345a6ed19ca22e6fdc0d\n");
             fclose(f);
         }
         unlink(live);
@@ -1336,6 +1338,354 @@ int main(int argc, char **argv)
         CHECK(wait_ip(60000));
         hang_up();
         CHECK_EQ_I(bt_call("8002273426"), 0);
+        hang_up();
+        /* this daemon has no archive gateway (-A ""): PROTOWEB is nobody's number */
+        CHECK_EQ_I(bt_call("7768693200"), 0);
+        hang_up();
+        quiet_exit = 1;
+        kill(pid, SIGTERM);
+        for (i = 0; i < 400 && !dead; i++) step(0);
+        close(line_fd);
+        CHECK_EQ_I(waitpid(pid, &st, 0), pid);
+        CHECK(WIFEXITED(st) && WEXITSTATUS(st) == 0);
+    }
+    /* 13b. the terminal menu on the Internet number ([services] menu): Dial-Up
+     * Networking is not touched (its first frame goes straight to PPP); a
+     * terminal program gets the menu: colour, the BBS directory with the
+     * board details (Netstalgia's list, signed with the test key), a board
+     * on the same call and back, then Start PPP and IP on the same call. */
+    {
+        static char lanlog[300], board[300], builtin[300], info[300], infolive[300], live[300], icmd[700]; FILE *f;
+        snprintf(board, sizeof board, "%s/ns_menu.sh", argv[2]);
+        snprintf(builtin, sizeof builtin, "%s/ns_menu.builtin", argv[2]);
+        snprintf(info, sizeof info, "%s/ns_menu.info", argv[2]);
+        snprintf(infolive, sizeof infolive, "%s/ns_menu.infolive", argv[2]);
+        snprintf(live, sizeof live, "%s/ns_menu.live", argv[2]);
+        snprintf(icmd, sizeof icmd, "cat %s", info);
+        f = fopen(board, "w");
+        if (f) {
+            fprintf(f, "#!/bin/sh\nprintf 'Welcome to %%s port %%s\\r\\n'  \"$1\" \"$2\"\n"
+                       "x=$(dd bs=1 count=2 2>/dev/null)\nprintf 'bye %%s\\r\\n' \"$x\"\n");
+            fclose(f); chmod(board, 0755);
+        }
+        f = fopen(builtin, "w");
+        if (f) {
+            fprintf(f, "# serial 6\nv90d-bbs 2\nbbs telehack 2278353422 tele.example Telehack\n"
+                       "bbs 20forbeers 2272036723 b.example:1337 20 For Beers <BBS>\n");
+            fclose(f);
+        }
+        f = fopen(info, "w");
+        if (f) {
+            fprintf(f, "# serial 3\nv90d-bbsinfo 1\nboard telehack\nloc Berkeley, CA, USA\nsw Telehack\nnew guest\n"
+                       "d The original telehack: a board of 1980s computing.\nboard 20forbeers\nloc Portland, OR, USA\nsw Mystic\nnodes 4\n"
+                       "# sig ed25519 3bc5ab08665d3c2d2a5ea6e4da35cfec4adb2c96381b04892a790dfff5d00d9ccfae9cb5a26c45e79091b14af0a82226516f0f4818516ba7bee4cb753946870b\n");
+            fclose(f);
+        }
+        unlink(live); unlink(infolive);
+        cfg_default(&c);
+        strcpy(c.line_number, "5551234"); c.rings = 1; c.status_port = 8080; c.svc_menu = 1;
+        c.auth = CFG_AUTH_CHAP; c.n_users = 1; strcpy(c.users[0].name, "alice"); strcpy(c.users[0].secret, "wonderland");
+        CHECK_EQ_I(cfg_save(&c, conf, err, sizeof err), CFG_OK);
+        CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
+        snprintf(lanlog, sizeof lanlog, "%s/ns_menu.log", argv[2]);
+        pid = fork();
+        if (pid == 0) {
+            int a = fcntl(sv[1], F_DUPFD, 20), lfd = open(lanlog, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            dup2(a, 3); if (lfd >= 0) dup2(lfd, 2);
+            for (i = 4; i < 64; i++) close(i);
+            execl(argv[1], "v90d", "-c", conf, "-l", "fd:3", "-i", "lo", "-t", "ppp0", "-A", "",
+                  "-B", builtin, "-b", "", "-J", live, "-T", board, "-z", icmd, "-Z", infolive, (char *)NULL);
+            _exit(127);
+        }
+        close(sv[1]);
+        line_fd = sv[0]; idle_fd = -1;
+        dead = quiet_exit = 0; hook = modem_on = 0; blk_n = 0; c_tx = 0; c_rx_pw = 0;
+        channel_init(&CH, &cc);
+        memset(prev_tx, 0xFF, sizeof prev_tx);
+        /* the menu wants the lists: the details are fetched, the directory made */
+        for (i = 0; i < 300 && !file_has(lanlog, "2 with the guide's details"); i++) { run_ms(100); usleep(5000); }
+        CHECK(file_has(lanlog, "menu: the BBS directory has 2 boards, 2 with the guide's details"));
+        /* (a) Dial-Up Networking: PPP, no menu */
+        hook = 1; run_ms(500);
+        dial("5551234");
+        run_ms(2000 + 300);
+        start_modem(0);
+        CHECK(wait_ip(60000) > 0);
+        CHECK(!file_has(lanlog, "menu: a terminal program called"));
+        hang_up();
+        /* (b) a terminal program: the menu */
+        CHECK_EQ_I(bt_call("5551234"), 1);
+        CHECK(bt_wait("ANSI colour?", 6000));
+        CHECK(bt_saw("\x1b[2J"));
+        bt_got_n = 0; bt_type("y");
+        CHECK(bt_wait("MAIN MENU", 6000));
+        CHECK(bt_saw("Tonight on the network"));
+        bt_got_n = 0; bt_type("3");
+        CHECK(bt_wait("BBS DIRECTORY", 6000));
+        CHECK(bt_wait("Telehack", 2000));
+        CHECK(bt_saw("227-835-3422") && bt_saw("Portland, OR, USA") && bt_saw("from the Telnet BBS Guide"));
+        bt_got_n = 0; bt_type("t\r");
+        CHECK(bt_wait("Berkeley, CA, USA", 6000));
+        CHECK(bt_wait("The original telehack", 2000));
+        CHECK(bt_saw("log in as guest"));
+        /* the board on the same call, and back to the directory */
+        bt_got_n = 0; bt_type("c");
+        CHECK(bt_wait("Putting you through to Telehack", 6000));
+        CHECK(bt_wait("Welcome to tele.example port 23", 6000));
+        CHECK(file_has(lanlog, "menu: to the board telehack"));
+        bt_got_n = 0; bt_type("ok");
+        CHECK(bt_wait("bye ok", 4000));
+        CHECK(bt_wait("BBS DIRECTORY", 8000));
+        /* the menu, Start PPP, and the same call is a PPP call */
+        bt_got_n = 0; bt_type("\x1b");
+        run_ms(500);
+        bt_type("1");
+        CHECK(bt_wait("Starting PPP", 6000));
+        caller_to_ppp(&C);
+        CHECK(wait_ip(60000) > 0);
+        CHECK(file_has(lanlog, "menu: Start PPP"));
+        hang_up();
+        quiet_exit = 1;
+        kill(pid, SIGTERM);
+        for (i = 0; i < 400 && !dead; i++) step(0);
+        close(line_fd);
+        CHECK_EQ_I(waitpid(pid, &st, 0), pid);
+        CHECK(WIFEXITED(st) && WEXITSTATUS(st) == 0);
+    }
+    /* 14. numbers that connect straight to a service ([services]): the
+     * owner's, raw and telnet, on a port whose service is the internet, and
+     * Netstalgia's list, the image's and then a fetched one (signed with the
+     * test key). Raw: nothing said, what the caller sent before the service
+     * answered goes first, the line drops when the service is done. Telnet:
+     * "Calling NAME ...". Netstalgia's numbers stop with the switch off. */
+    {
+        static char lanlog[300], board[300], builtin[300], fetched[300], live[300], fcmd[700], resp[32768], post[1024];
+        static const char body[] = "netstalgia=off";
+        FILE *f;
+        snprintf(board, sizeof board, "%s/ns_svc.sh", argv[2]);
+        snprintf(builtin, sizeof builtin, "%s/ns_svc.builtin", argv[2]);
+        snprintf(fetched, sizeof fetched, "%s/ns_svc.remote", argv[2]);
+        snprintf(live, sizeof live, "%s/ns_svc.live", argv[2]);
+        snprintf(fcmd, sizeof fcmd, "cat %s", fetched);
+        f = fopen(board, "w");
+        if (f) {
+            fprintf(f, "#!/bin/sh\ncase \"$1\" in\n"
+                       "lan.example|nwn.example) x=$(dd bs=1 count=5 2>/dev/null); printf 'RAW[%%s:%%s]' \"$2\" \"$x\"; exit 0;;\n"
+                       "esac\n"
+                       "printf '\\377\\373\\001Welcome to %%s port %%s\\r\\n' \"$1\" \"$2\"\n"
+                       "x=$(dd bs=1 count=5 2>/dev/null | tail -c 2)\nprintf 'you said %%s\\r\\n' \"$x\"\n");
+            fclose(f); chmod(board, 0755);
+        }
+        f = fopen(builtin, "w");
+        if (f) { fprintf(f, "# serial 1\nv90d-svc 1\nsvc 13855961775 nwn.example:5000 raw NWN\n"); fclose(f); }
+        f = fopen(fetched, "w");
+        if (f) {
+            fprintf(f, "# serial 2\nv90d-svc 1\nsvc 13855961775 nwn.example:5000 raw NWN\nsvc 15550003 echo.example:7 telnet Echo\n"
+                       "future 1 2 3\nsvc 2278353422 x.example:1 raw Taken\nsvc 15550004 192.168.1.9:23 raw Private\n"
+                       "# sig ed25519 2cf41924dda8ce78d2f6fd8ac33dc0867cc102c471d338083ee9ea2e212ab0971b9fc79d1b0979d41bfbc2aa102cc27e46f738c0a070da1825ae03e928cea20d\n");
+            fclose(f);
+        }
+        unlink(live);
+        cfg_default(&c);
+        strcpy(c.line_number, "5551234"); c.rings = 1; c.status_port = 8080;
+        c.n_services = 2;
+        strcpy(c.services[0].number, "5550001"); strcpy(c.services[0].host, "lan.example"); c.services[0].port = 4000;
+        c.services[0].mode = CFG_SVC_RAW; strcpy(c.services[0].name, "Game");
+        strcpy(c.services[1].number, "5550002"); strcpy(c.services[1].host, "t.example"); c.services[1].port = 23;
+        c.services[1].mode = CFG_SVC_TELNET; strcpy(c.services[1].name, "Talker");
+        CHECK_EQ_I(cfg_save(&c, conf, err, sizeof err), CFG_OK);
+        CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
+        snprintf(lanlog, sizeof lanlog, "%s/ns_svc.log", argv[2]);
+        unlink(lanlog);
+        pid = fork();
+        if (pid == 0) {
+            int a = fcntl(sv[1], F_DUPFD, 20), lfd = open(lanlog, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            dup2(a, 3); if (lfd >= 0) dup2(lfd, 2);
+            for (i = 4; i < 64; i++) close(i);
+            execl(argv[1], "v90d", "-c", conf, "-l", "fd:3", "-i", "lo", "-t", "ppp0", "-A", "",
+                  "-b", "", "-F", builtin, "-f", "exit 1", "-K", live, "-T", board, (char *)NULL);
+            _exit(127);
+        }
+        close(sv[1]);
+        line_fd = sv[0]; idle_fd = -1;
+        dead = quiet_exit = 0; hook = modem_on = 0; blk_n = 0; c_tx = 0; c_rx_pw = 0;
+        channel_init(&CH, &cc);
+        memset(prev_tx, 0xFF, sizeof prev_tx);
+        run_ms(2000);
+        /* (a) the owner's raw number: what the caller sends at once waits for the service */
+        CHECK_EQ_I(bt_call("5550001"), 1);
+        bt_type("hello");
+        CHECK(bt_wait("RAW[4000:hello]", 5000));
+        CHECK(!bt_saw("Calling") && !bt_saw("gateway"));
+        for (i = 0; i < 60 && !file_has(lanlog, "svc: the service hung up"); i++) { run_ms(100); usleep(20000); }
+        CHECK(file_has(lanlog, "port 1: svc: calling lan.example:4000 (raw)"));
+        CHECK(file_has(lanlog, "svc: the service hung up"));
+        {
+            int gone = 0;
+            for (i = 0; i < 100 && !gone; i++) {
+                run_ms(100);
+                gone = http("GET /status.json HTTP/1.0\r\n\r\n", resp, sizeof resp) > 0 && !strstr(resp, "\"line\":\"connected\"");
+            }
+            CHECK(gone);
+        }
+        hang_up();
+        /* (b) the owner's telnet number */
+        CHECK_EQ_I(bt_call("5550002"), 1);
+        CHECK(bt_wait("Calling Talker ...", 5000));
+        CHECK(bt_wait("Welcome to t.example port 23", 3000));
+        CHECK(!bt_saw("BBS: ") && memchr(bt_got, 0xFF, bt_got_n) == NULL);
+        bt_type("hi");
+        CHECK(bt_wait("you said hi", 3000));
+        hang_up();
+        /* (c) Netstalgia's, from the image's list, with and without the 1 */
+        CHECK_EQ_I(bt_call("3855961775"), 1);
+        bt_type("nwn01");
+        CHECK(bt_wait("RAW[5000:nwn01]", 5000));
+        hang_up();
+        /* (d) the fetch failed: the image's list stays; nobody's number does not answer */
+        for (i = 0; i < 100 && !file_has(lanlog, "svc: the list could not be fetched"); i++) { run_ms(100); usleep(10000); }
+        CHECK(file_has(lanlog, "svc: the list could not be fetched; trying again in 1 minute"));
+        CHECK_EQ_I(bt_call("15550003"), 0);
+        hang_up();
+        /* (e) the page: the owner's rows and Netstalgia's list */
+        CHECK(http("GET /services HTTP/1.0\r\n\r\n", resp, sizeof resp) > 0);
+        CHECK(strstr(resp, "name=\"snum1\" size=\"13\" maxlength=\"15\" value=\"5550002\"") != NULL);
+        CHECK(strstr(resp, "<tr><td>13855961775</td><td>NWN</td><td>raw</td><td>nwn.example:5000</td></tr>") != NULL);
+        /* (f) the switch off: Netstalgia's numbers no longer answer, the owner's do */
+        snprintf(post, sizeof post, "POST /services HTTP/1.0\r\nHost: 127.0.0.1:8080\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: %d\r\n\r\n%s",
+                 (int)strlen(body), body);
+        CHECK(http(post, resp, sizeof resp) > 0);
+        CHECK(strstr(resp, " 303 ") != NULL || strstr(resp, "Settings saved") != NULL);
+        run_ms(500);
+        CHECK_EQ_I(bt_call("13855961775"), 0);
+        hang_up();
+        CHECK_EQ_I(bt_call("5550002"), 1);
+        CHECK(bt_wait("Calling Talker ...", 5000));
+        hang_up();
+        quiet_exit = 1;
+        kill(pid, SIGTERM);
+        for (i = 0; i < 400 && !dead; i++) step(0);
+        close(line_fd);
+        CHECK_EQ_I(waitpid(pid, &st, 0), pid);
+        CHECK(WIFEXITED(st) && WEXITSTATUS(st) == 0);
+    }
+    /* 15. a fetched list of services, signed: taken, its lines that break
+     * the rules (a box's own number, a private address) and a kind of line
+     * this box does not know are left out */
+    {
+        static char lanlog[300], builtin[300], fetched[300], live[300], fcmd[700], board[300];
+        snprintf(board, sizeof board, "%s/ns_svc.sh", argv[2]);
+        snprintf(builtin, sizeof builtin, "%s/ns_svc.builtin", argv[2]);
+        snprintf(fetched, sizeof fetched, "%s/ns_svc.remote", argv[2]);
+        snprintf(live, sizeof live, "%s/ns_svc.live", argv[2]);
+        snprintf(fcmd, sizeof fcmd, "cat %s", fetched);
+        unlink(live);
+        cfg_default(&c);
+        strcpy(c.line_number, "5551234"); c.rings = 1; c.status_port = 8080;
+        CHECK_EQ_I(cfg_save(&c, conf, err, sizeof err), CFG_OK);
+        CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
+        snprintf(lanlog, sizeof lanlog, "%s/ns_svc2.log", argv[2]);
+        unlink(lanlog);                                 /* not a word of an earlier run */
+        pid = fork();
+        if (pid == 0) {
+            int a = fcntl(sv[1], F_DUPFD, 20), lfd = open(lanlog, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            dup2(a, 3); if (lfd >= 0) dup2(lfd, 2);
+            for (i = 4; i < 64; i++) close(i);
+            execl(argv[1], "v90d", "-c", conf, "-l", "fd:3", "-i", "lo", "-t", "ppp0", "-A", "",
+                  "-b", "", "-F", builtin, "-f", fcmd, "-K", live, "-T", board, (char *)NULL);
+            _exit(127);
+        }
+        close(sv[1]);
+        line_fd = sv[0]; idle_fd = -1;
+        dead = quiet_exit = 0; hook = modem_on = 0; blk_n = 0; c_tx = 0; c_rx_pw = 0;
+        channel_init(&CH, &cc);
+        memset(prev_tx, 0xFF, sizeof prev_tx);
+        for (i = 0; i < 100 && !file_has(lanlog, "svc: fetched list"); i++) { run_ms(100); usleep(10000); }
+        CHECK(file_has(lanlog, "svc: fetched list with 2 numbers (some lines not understood)"));
+        CHECK(file_has(live, "echo.example"));
+        CHECK_EQ_I(bt_call("15550003"), 1);
+        CHECK(bt_wait("Calling Echo ...", 5000));
+        CHECK(bt_wait("Welcome to echo.example port 7", 3000));
+        hang_up();
+        CHECK_EQ_I(bt_call("15550004"), 0);                     /* the private one was left out */
+        hang_up();
+        CHECK_EQ_I(bt_call("2278353422"), 1);                   /* a board's number stays the board's */
+        CHECK(bt_wait("bulletin board gateway", 5000));
+        hang_up();
+        quiet_exit = 1;
+        kill(pid, SIGTERM);
+        for (i = 0; i < 400 && !dead; i++) step(0);
+        close(line_fd);
+        CHECK_EQ_I(waitpid(pid, &st, 0), pid);
+        CHECK(WIFEXITED(st) && WEXITSTATUS(st) == 0);
+    }
+    /* 16. PROTOWEB (776 869 3200, with or without the 1): the port's own
+     * dial-up connection, on a port whose service is the internet, with the
+     * archive's redirection for that call alone. The gateway is a stand-in
+     * that only runs; the NAT plan is read back from the kernel. */
+    {
+        static char lanlog[300], arch[300], ruleset[300], cmd[700]; FILE *f;
+        snprintf(arch, sizeof arch, "%s/ns_arch.sh", argv[2]);
+        snprintf(ruleset, sizeof ruleset, "%s/ns_pw.rules", argv[2]);
+        f = fopen(arch, "w");
+        if (f) { fprintf(f, "#!/bin/sh\nexec sleep 3600\n"); fclose(f); chmod(arch, 0755); }
+        cfg_default(&c);
+        strcpy(c.line_number, "5551234"); c.rings = 1; c.status_port = 8080;
+        CHECK_EQ_I(cfg_save(&c, conf, err, sizeof err), CFG_OK);
+        CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
+        snprintf(lanlog, sizeof lanlog, "%s/ns_pw.log", argv[2]);
+        unlink(lanlog);
+        pid = fork();
+        if (pid == 0) {
+            int a = fcntl(sv[1], F_DUPFD, 20), lfd = open(lanlog, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            dup2(a, 3); if (lfd >= 0) dup2(lfd, 2);
+            for (i = 4; i < 64; i++) close(i);
+            /* the loop's clock starts 3 s before it wraps: the call is made after the wrap */
+            setenv("V90D_CLOCK0", "4294964296", 1);
+            execl(argv[1], "v90d", "-c", conf, "-l", "fd:3", "-i", "lo", "-t", "ppp0", "-A", arch,
+                  "-b", "", "-f", "", (char *)NULL);
+            _exit(127);
+        }
+        close(sv[1]);
+        line_fd = sv[0]; idle_fd = -1;
+        dead = quiet_exit = 0; hook = modem_on = 0; blk_n = 0; c_tx = 0; c_rx_pw = 0;
+        channel_init(&CH, &cc);
+        memset(prev_tx, 0xFF, sizeof prev_tx);
+        run_ms(2000);
+        CHECK(!file_has(lanlog, "PROTOWEB"));
+        /* (a) the number: PPP as on the port's own number, the archive for this call */
+        hook = 1; run_ms(500);
+        dial("7768693200");
+        run_ms(2000 + 300);
+        start_modem(0);
+        CHECK(wait_ip(60000));
+        for (i = 0; i < 50 && !file_has(lanlog, "a call to PROTOWEB"); i++) { run_ms(100); usleep(10000); }
+        CHECK(file_has(lanlog, "port 1: a call to PROTOWEB: its web, FTP and names go to the archive gateway"));
+        for (i = 0; i < 50 && !file_has(lanlog, "archive mode:"); i++) { run_ms(100); usleep(10000); }
+        CHECK(file_has(lanlog, "archive mode: ") && file_has(lanlog, "ns_arch.sh started"));
+        snprintf(cmd, sizeof cmd, "nft list ruleset > %s 2>&1 || iptables-save -t nat > %s 2>&1", ruleset, ruleset);
+        for (i = 0; i < 30; i++) { if (system(cmd)) { } if (file_has(ruleset, "8380")) break; run_ms(100); usleep(20000); }
+        CHECK(file_has(ruleset, "8380"));                       /* the web to the gateway */
+        hang_up();
+        /* (b) the call over: the port's web goes out as ever */
+        for (i = 0; i < 30; i++) { if (system(cmd)) { } if (!file_has(ruleset, "8380")) break; run_ms(100); usleep(20000); }
+        CHECK(!file_has(ruleset, "8380"));
+        /* (c) with the 1 in front, the same */
+        hook = 1; run_ms(500);
+        dial("17768693200");
+        run_ms(2000 + 300);
+        start_modem(0);
+        CHECK(wait_ip(60000));
+        hang_up();
+        /* (d) the port's own number: no archive */
+        hook = 1; run_ms(500);
+        dial("5551234");
+        run_ms(2000 + 300);
+        start_modem(0);
+        CHECK(wait_ip(60000));
+        run_ms(500); usleep(200000);
+        if (system(cmd)) { }
+        CHECK(!file_has(ruleset, "8380"));
         hang_up();
         quiet_exit = 1;
         kill(pid, SIGTERM);

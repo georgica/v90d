@@ -70,6 +70,7 @@
 #include "daemon.h"
 #include "satlink.h"
 #include "bbslink.h"
+#include "termsvc.h"
 #include "update.h"
 #include "netsvc.h"
 #include "vpn.h"
@@ -185,46 +186,13 @@ static void ip_to_kernel(void *ctx, const uint8_t *pkt, size_t len)
     if (tun_fd[i] >= 0 && tun_write(tun_fd[i], pkt, len) < 0) S[i].status.rx_errors++;
 }
 
-/* a port has the archive for its service */
-
-/* a port has the game console service */
-
-/* The address list of the game revival projects (dclist.h): fetched by a
- * child process while a port has the console service. The child writes the
- * list to its standard output, a pipe we read as it comes (no file, so
- * nothing in /tmp to be put in its way); it is parsed when the child is
- * done and in force from the next time the line is idle. A fetch that fails
- * leaves the list as it was. */
-
-/* "Dreamcast Now" (dcnow.h): while the caller of a console port that asks
- * for it has its network up, a report every 15 s, sent by a child process
- * (the image's wget; dn_prog, when set, is run instead as "prog URL BODY"). */
-
-/* A console as a host on the network (dreamcast_lan): the caller of that
- * port gets an address of the network itself. The address comes from a
- * command that prints it (on the box, udhcpc asking the network's DHCP
- * server for a second lease under a client name of its own; the script it
- * is given prints the address and changes nothing). It is asked again every
- * half hour, which also keeps the lease. Without an answer the port stays
- * as the settings have it, behind this box's address. */
-/* Game ports from the router (dreamcast_upnp): a child process asks the
- * network's router to pass the ports of dclist.h on, to the console itself
- * when it is a host on the network and to this box otherwise (which passes
- * them on). Asked again whenever the addresses change and every half hour;
- * taken back when the switch goes off and when the daemon stops. */
-
-
-/* ---- the VPN for the IWANGO games (dreamcast_iwango). The games' servers
- * of today stand in a private network behind an OpenVPN server; the owner
- * of the box has a client profile for it and gives it to the Dreamcast
- * page (cfg/vpn.h checks it). OpenVPN itself is not ours: the image carries
- * the program as it is (DESIGN.md, the owner's decision), and this code
- * only keeps it running while a dreamcast port wants it. ---- */
-
-/* the server a stored profile names, for the page and the log; 0 = no profile */
-/* the Dreamcast page was given a profile (len 0: take the stored one away) */
-
-/* the network side answers ARP for the console's address, or not */
+/* the terminal menu ([services] menu) is for the PPP services' numbers */
+static int menu_wanted(const cfg_t *c)
+{
+    int ppp1 = c->service == CFG_SERVICE_INTERNET || c->service == CFG_SERVICE_ARCHIVE;
+    int ppp2 = n_ports > 1 && (c->port2.service == CFG_SERVICE_INTERNET || c->port2.service == CFG_SERVICE_ARCHIVE);
+    return c->svc_menu && (ppp1 || ppp2);
+}
 
 static int all_onhook(void)
 {
@@ -232,9 +200,6 @@ static int all_onhook(void)
     for (i = 0; i < n_ports; i++) if (S[i].tel.state != TEL_ONHOOK) return 0;
     return 1;
 }
-
-
-/* start, stop or restart the gateway as wanted; called on a change and every few seconds */
 
 static int fw_text(void *ctx, int which, char *buf, size_t cap)
 {
@@ -280,10 +245,7 @@ static const char *fw_take(void *ctx, int what, int fd, const char *early, size_
     snprintf(len, sizeof len, "%lu", (unsigned long)content_length);
     fw_pid = fork();
     if (fw_pid == 0) {
-        struct sched_param sp;
-        memset(&sp, 0, sizeof sp);
-        (void)sched_setscheduler(0, SCHED_OTHER, &sp);
-        (void)munlockall();
+        child_plain(-1, -1, 0);
         if (dup2(fd, 0) < 0 || dup2(fd, 1) < 0 || dup2(pfd[0], 3) < 0) _exit(127);
         for (i = 4; i < 256; i++) close(i);     /* the lines, the listener: none of its business */
         (void)setenv("V90NV_EARLY_FD", "3", 1);
@@ -316,12 +278,9 @@ static const char *fw_install(void *ctx)
     fw_pid = fork();
     if (fw_pid == 0) {
         const char *st = getenv("V90NV_STATE"); int fd;
-        struct sched_param sp;
-        memset(&sp, 0, sizeof sp);
-        (void)sched_setscheduler(0, SCHED_OTHER, &sp);
-        (void)munlockall();
+        child_plain(-1, -1, 0);
         if (!st) st = "/tmp/v90d.fwstate";
-        fd = open(st, O_WRONLY | O_CREAT | O_TRUNC, 0600);   /* the script's words land where the page reads them */
+        fd = open(st, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0600);   /* the script's words land where the page reads them */
         if (fd >= 0) { (void)dup2(fd, 1); (void)dup2(fd, 2); }
         for (i = 3; i < 256; i++) close(i);
         execl("/bin/sh", "sh", "-c", cmd, (char *)NULL);
@@ -351,6 +310,8 @@ static void adopt(const cfg_t *n)
         srv_reconfigure(&S[i], &view);
     }
     update_config(n->update_check, V90D_VERSION);
+    bbslink_svc_want(n->svc_netstalgia);
+    termsvc_want(menu_wanted(n));
 }
 
 static int store(const cfg_t *n)
@@ -467,11 +428,24 @@ static void log_last_call(int port)
     }
 }
 
+/* fresh randomness for port p's next call (its PPP challenges and magic
+ * numbers): /dev/urandom does not block once the system has started */
+static void feed_entropy(int p)
+{
+    static int fd = -2; uint8_t b[32]; ssize_t r;
+    if (fd == -2) fd = open("/dev/urandom", O_RDONLY | O_CLOEXEC | O_NONBLOCK);
+    if (fd < 0) return;
+    r = read(fd, b, sizeof b);
+    if (r > 0) srv_set_entropy(&S[p], b, (size_t)r);
+}
+
 /* the octets of a call without PPP: a bulletin board call, or the port's saturn service */
 static void raw_from_modem(void *ctx, const uint8_t *oct, size_t n)
 {
     uint32_t addr; int on;
-    if (srv_link((srv_t *)ctx, &addr, &on) == SRV_LINK_BBS) bbslink_from_modem(ctx, oct, n);
+    int kind = srv_link((srv_t *)ctx, &addr, &on);
+    if (kind == SRV_LINK_BBS || kind == SRV_LINK_SVC) bbslink_from_modem(ctx, oct, n);
+    else if (kind == SRV_LINK_MENU) termsvc_from_modem(ctx, oct, n);
     else satlink_from_modem(ctx, oct, n);
 }
 
@@ -501,7 +475,10 @@ int main(int argc, char **argv)
     /* the telephone lights: <prefix><port>/brightness, lit while the port is off hook */
     const char *led_prefix = "/sys/class/leds/ht802:phone"; int led_fd[PORTS] = { -1, -1 }, led_on[PORTS] = { -1, -1 };
 
-    while ((opt = getopt(argc, argv, "c:l:d:i:t:vpow:W:L:A:N:R:P:D:G:E:O:V:M:S:XB:b:J:T:u:U:Y:")) != -1) {
+    /* tests: the loop's millisecond clock may start anywhere, so that its
+     * wrap at 2^32 can be crossed in a test run */
+    { const char *c0 = getenv("V90D_CLOCK0"); if (c0) now_ms = (uint32_t)strtoul(c0, NULL, 0); }
+    while ((opt = getopt(argc, argv, "c:l:d:i:t:vpow:W:L:A:N:R:P:D:G:E:O:V:M:S:XB:b:J:T:u:U:Y:F:f:K:z:Z:")) != -1) {
         switch (opt) {
         case 'c': cfg_path = optarg; break;
         case 'l': if (n_ports >= PORTS) usage(); line_spec[n_ports++] = optarg; break;
@@ -533,6 +510,11 @@ int main(int argc, char **argv)
         case 'B': bbslink_set_builtin(optarg); break; /* the bbs list in the image */
         case 'b': bbslink_set_fetch(optarg); break;   /* the command that prints the bbs list; "" = never fetch */
         case 'J': bbslink_set_live(optarg); break;    /* where a fetched bbs list is kept */
+        case 'F': bbslink_svc_set_builtin(optarg); break; /* the list of services' numbers in the image */
+        case 'f': bbslink_svc_set_fetch(optarg); break;   /* the command that prints it; "" = never fetch */
+        case 'K': bbslink_svc_set_live(optarg); break;    /* where a fetched one is kept */
+        case 'z': bbslink_info_set_fetch(optarg); break;  /* the command that prints the board details; "" = never fetch */
+        case 'Z': bbslink_info_set_live(optarg); break;   /* where fetched ones are kept */
         case 'T': bbslink_set_prog(optarg); break;    /* run instead of nc to reach a board: PROG HOST PORT */
         case 'u': update_set_cmd(optarg); break;      /* the command that prints the latest release version; "" = never check */
         case 'U': fw_update_cmd = optarg; break;      /* run as CMD VERSION to install an update (instead of fwupdate.sh) */
@@ -579,6 +561,9 @@ int main(int argc, char **argv)
         if (line_set_law(&line[p], line_law[p]) < 0) logf_(CFG_LOG_WARN, "line %s: cannot set the law: %s", line_spec[p], strerror(errno));
         srv_init(&S[p], &view, seed + 0x9E3779B9u * (uint32_t)p, ip_to_kernel, &S[p]);
         srv_set_raw(&S[p], raw_from_modem);
+        srv_set_svc_lookup(&S[p], bbslink_svc_known);
+        srv_set_protoweb(&S[p], netsvc_has_arch());
+        feed_entropy(p);
         srv_set_echo_delay(&S[p], echo_delay);
         srv_set_max_tx_code(&S[p], max_tx_code);
         srv_set_originate(&S[p], originate);
@@ -606,6 +591,9 @@ int main(int argc, char **argv)
         httpd_on_firmware(&H, &fw);
     }
     update_config(live.update_check, V90D_VERSION);
+    bbslink_svc_want(live.svc_netstalgia);
+    termsvc_want(menu_wanted(&live));
+    settings_set_svc_rows(bbslink_svc_rows);
 
     /* The line gives us 10 ms blocks and wants each answered in time; a late
      * one costs the caller's modem its training. So: ahead of everything
@@ -620,7 +608,7 @@ int main(int argc, char **argv)
     for (p = 0; p < n_ports; p++) {
         char path[300];
         snprintf(path, sizeof path, "%s%d/brightness", led_prefix, p + 1);
-        led_fd[p] = open(path, O_WRONLY);       /* no such light: nothing is shown */
+        led_fd[p] = open(path, O_WRONLY | O_CLOEXEC);       /* no such light: nothing is shown */
     }
 
     while (!stop) {
@@ -647,7 +635,7 @@ int main(int argc, char **argv)
             if (p == cap_port && cap_path) {
                 /* 80 codewords heard, then the 80 sent in answer, per block; 8 MB at most */
                 if (offhook && cap_fd < 0 && cap_n == 0) {
-                    cap_fd = open(cap_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                    cap_fd = open(cap_path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
                     cap_lin = is_lin;                   /* a recording is of one kind */
                     if (cap_fd >= 0 && cap_lin && write(cap_fd, "V90DLIN1", 8) < 0) cap_n = 50000;
                 }
@@ -673,10 +661,12 @@ int main(int argc, char **argv)
                     pending_n[p] = 0;               /* sent, or nobody to send it to */
                 }
             }
-            if (S[p].status.calls_total != calls_seen[p]) { calls_seen[p] = S[p].status.calls_total; log_last_call(p); }
-            if (S[p].tel.state == TEL_ONHOOK) {
-                cfg_for_port(&live, p, &view);
-                if (line_law[p] != (view.law == CFG_LAW_ALAW)) { line_law[p] = view.law == CFG_LAW_ALAW; (void)line_set_law(&line[p], line_law[p]); }
+            if (S[p].status.calls_total != calls_seen[p]) { calls_seen[p] = S[p].status.calls_total; log_last_call(p); feed_entropy(p); }
+            /* the law of the settings in force (the port's own, taken on hook):
+             * no copy of the whole configuration every block */
+            if (S[p].tel.state == TEL_ONHOOK && line_law[p] != (S[p].cfg.law == CFG_LAW_ALAW)) {
+                line_law[p] = S[p].cfg.law == CFG_LAW_ALAW;
+                (void)line_set_law(&line[p], line_law[p]);
             }
             if (p != 0) continue;
 
@@ -688,9 +678,10 @@ int main(int argc, char **argv)
             }
             satlink_poll(now_ms);
             bbslink_poll(now_ms);
+            termsvc_poll(now_ms);
             update_poll(now_ms);
             netsvc_poll(now_ms);
-            if (fw_pid > 0 && now_ms % 1000 == 0 && waitpid(fw_pid, NULL, WNOHANG) == fw_pid) fw_pid = 0;
+            if (fw_pid > 0 && blocks == 50 && waitpid(fw_pid, NULL, WNOHANG) == fw_pid) fw_pid = 0;   /* once a second (blocks counts to 100 and starts again) */
             /* the Restart button, once its answer has gone out */
             if (H.restart_asked && httpd_active(&H) == 0) {
                 int fd;
@@ -699,7 +690,7 @@ int main(int argc, char **argv)
                 /* The daemon does not restart the machine it runs on: it leaves a
                  * note, and the image's boot script (fw/rcS) keeps what must be
                  * kept and restarts. */
-                fd = open(RESTART_NOTE, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+                fd = open(RESTART_NOTE, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0600);
                 if (fd >= 0) close(fd);
                 else logf_(CFG_LOG_WARN, "cannot write %s: %s", RESTART_NOTE, strerror(errno));
             }
@@ -711,16 +702,19 @@ int main(int argc, char **argv)
                     if (t > 1600000000 && S[i].tel.state == TEL_ONHOOK) srv_set_clock(&S[i], (uint32_t)t);
                 if (live.status_listen == CFG_LISTEN_LAN) {
                     uint32_t a = if_address(lan_if);
-                    if (a != listen_addr || (a && H.listen_fd < 0)) {
+                    if (a != listen_addr || H.listen_fd < 0) {
                         char b[16];
-                        httpd_close(&H); listen_addr = 0;
+                        httpd_close(&H); listen_addr = a;
                         /* on every address of the LAN interface where the system lets us
-                         * tie the socket to it (so also on the image's rescue address),
-                         * else on its address */
-                        if (a && (httpd_listen(&H, 0, (uint16_t)live.status_port, lan_if) == 0 ||
-                                  httpd_listen(&H, a, (uint16_t)live.status_port, lan_if) == 0)) {
-                            listen_addr = a; listen_warned = 0;
-                            logf_(CFG_LOG_INFO, "status and settings on http://%s:%d/", ip_str(a, b), live.status_port);
+                         * tie the socket to it, so also on the image's rescue address, and
+                         * so even while the interface has no address of its own (DHCP has
+                         * not answered, or cannot): the rescue address is the way in then.
+                         * Where the socket cannot be tied, on the interface's address. */
+                        if (httpd_listen(&H, 0, (uint16_t)live.status_port, lan_if) == 0 ||
+                            (a && httpd_listen(&H, a, (uint16_t)live.status_port, lan_if) == 0)) {
+                            listen_warned = 0;
+                            if (a) logf_(CFG_LOG_INFO, "status and settings on http://%s:%d/", ip_str(a, b), live.status_port);
+                            else logf_(CFG_LOG_INFO, "status and settings on %s (no address yet; the rescue address answers)", lan_if);
                         } else if (a && !listen_warned) {
                             listen_warned = 1;
                             logf_(CFG_LOG_WARN, "cannot listen on %s:%d: %s", ip_str(a, b), live.status_port, strerror(errno));

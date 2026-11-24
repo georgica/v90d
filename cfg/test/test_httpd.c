@@ -822,12 +822,12 @@ static void test_settings_page(void)
     CHECK(r.body && memcmp(r.body, want, (size_t)n) == 0);
     CHECK(strstr(resp, "value=\"alice\"") != NULL);
     CHECK(strstr(resp, "TOPSECRET") == NULL);
-    CHECK(strstr(resp, "<a href=\"/\">Dashboard</a>") != NULL);
+    CHECK(strstr(resp, "<a href=\"/\">Status</a>") != NULL);
     CHECK(strstr(resp, "Settings saved") == NULL);
     CHECK_EQ_I(got_eof, 1);
     /* and the status page leads here */
     len = exchange("GET / HTTP/1.0\r\n\r\n", resp, sizeof resp);
-    CHECK(strstr(resp, "<a href=\"/line\">Line</a>") != NULL);
+    CHECK(strstr(resp, "<a href=\"/line\">Phone</a>") != NULL);
 
     /* the note after a save, only for exactly that query */
     len = exchange("GET /settings?saved=1 HTTP/1.0\r\n\r\n", resp, sizeof resp);
@@ -1011,6 +1011,36 @@ static void test_settings_post(void)
                        "Content-Length: 0\r\n\r\nrings=6"), 303);
     CHECK_EQ_I(C.rings, 5);
     CHECK_EQ_I(httpd_active(&H), 0);
+    /* the pages' script: served to anyone, as it is, and the only script
+     * the policy lets a page run */
+    len = exchange("GET /ui.js HTTP/1.0\r\n\r\n", resp, sizeof resp);
+    CHECK(parse_resp(resp, len, &r) && r.code == 200 && strstr(resp, "Content-Type: text/javascript") != NULL);
+    CHECK(strstr(resp, "replace(/IDX/g") != NULL);
+    CHECK(strstr(resp, "script-src 'self';") != NULL && strstr(resp, "'unsafe-inline'; script") != NULL);
+    /* the port is the page's: a post to /line2 without port=2, or with it
+     * escaped, changes nothing */
+    {
+        static status_t st2; const status_t *had2 = H.status2; int rings = C.rings;
+        httpd_status2(&H, &st2);                    /* a two-port box: the port-2 pages are there */
+        CHECK_EQ_I(code_of("POST /line2 HTTP/1.0\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 7\r\n\r\nrings=9"), 400);
+        CHECK_EQ_I(code_of("POST /line HTTP/1.0\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 14\r\n\r\nrings=9&port=2"), 400);
+        CHECK_EQ_I(code_of("POST /line2 HTTP/1.0\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 16\r\n\r\nrings=9&port=%32"), 400);
+        CHECK_EQ_I(C.rings, rings);
+        httpd_status2(&H, had2);
+    }
+    /* the Add button: saved as ever, then back with an empty row */
+    CHECK_EQ_I(post("", "busy_chance=40&add=Add"), 303);
+    CHECK(strstr(resp, "\r\nLocation: /settings?saved=1&add=1\r\n") != NULL);
+    len = exchange("GET /users?saved=1&add=1 HTTP/1.0\r\n\r\n", resp, sizeof resp);
+    CHECK(strstr(resp, "<b>Settings saved.</b>") != NULL);
+    {
+        char want[64]; snprintf(want, sizeof want, "<tr class=\"new\"><td>New</td><td><input type=\"text\" name=\"user%d\"", C.n_users);
+        CHECK(strstr(resp, want) != NULL);
+        len = exchange("GET /users HTTP/1.0\r\n\r\n", resp, sizeof resp);
+        CHECK(strstr(resp, want) == NULL);                              /* only when asked (the template has IDX) */
+        len = exchange("GET /users?add=1 HTTP/1.0\r\n\r\n", resp, sizeof resp);
+        CHECK(strstr(resp, want) != NULL && strstr(resp, "Settings saved") == NULL);
+    }
 }
 
 static void test_settings_size(void)
@@ -1443,6 +1473,11 @@ static void test_settings_auth(void)
     CHECK(strstr(resp, "WWW-Authenticate") == NULL && strstr(resp, "down_bps") == NULL);
     CHECK_EQ_I(code_of("GET /config HTTP/1.0\r\n\r\n"), 303);
     CHECK(strstr(resp, "[line]") == NULL);
+    /* the wrong passwords above brought the hold on: none is looked at for a
+     * second, the right one included; then it is as before */
+    snprintf(hdr, sizeof hdr, "GET / HTTP/1.0\r\n%s\r\n", basic("admin", pw));
+    CHECK_EQ_I(code_of(hdr), 401);
+    now += 1100;
     snprintf(hdr, sizeof hdr, "GET / HTTP/1.0\r\n%s\r\n", basic("admin", pw));
     CHECK_EQ_I(code_of(hdr), 200);
     snprintf(hdr, sizeof hdr, "GET /status.json HTTP/1.0\r\n%s\r\n", basic("admin", pw));
@@ -1655,14 +1690,16 @@ static void test_two_ports(void)
      * carries both the dreamcast switches and the saturn one */
     C.port2.service = CFG_SERVICE_DREAMCAST;
     len = exchange("GET / HTTP/1.0\r\n\r\n", resp, sizeof resp);
-    CHECK(strstr(resp, "<a href=\"/dreamcast\">Consoles</a>") != NULL);
+    CHECK(strstr(resp, "<a href=\"/dreamcast\">Consoles</a>") != NULL);         /* in the Services menu */
     len = exchange("GET /dreamcast2 HTTP/1.0\r\n\r\n", resp, sizeof resp);
     CHECK(parse_resp(resp, len, &r) && r.code == 200 && strstr(resp, "<select name=\"dreamcast_lan\">") != NULL
           && strstr(resp, "<select name=\"saturn_matchmaking\">") != NULL);
     C.port2.service = CFG_SERVICE_INTERNET;
     C.service = CFG_SERVICE_SATURN;
     len = exchange("GET /firmware HTTP/1.0\r\n\r\n", resp, sizeof resp);
-    CHECK(strstr(resp, "<a href=\"/dreamcast\">Consoles</a>") != NULL);
+    CHECK(strstr(resp, "<a href=\"/dreamcast\">Consoles</a>") != NULL);         /* in the Services menu */
+    len = exchange("GET /bbs HTTP/1.0\r\n\r\n", resp, sizeof resp);
+    CHECK(strstr(resp, "<span class=\"dd\"><b>BBS</b><a href=\"/services\">Numbers</a><a href=\"/dreamcast\">Consoles</a></span>") != NULL);
     CHECK_EQ_I(code_of("GET /saturn HTTP/1.0\r\nHost: 192.168.1.2\r\n\r\n"), 404);   /* no separate Saturn tab */
     C.service = CFG_SERVICE_INTERNET;
     len = exchange("GET /firmware HTTP/1.0\r\n\r\n", resp, sizeof resp);
@@ -2293,21 +2330,31 @@ static void test_bbs_page(void)
     CHECK(strstr(resp, "<form method=\"get\" action=\"/bbs\">") != NULL);
     CHECK(strstr(resp, "<input type=\"text\" name=\"q\" size=\"24\" maxlength=\"32\" value=\"\">") != NULL);
     CHECK(strstr(resp, "Boards 1 to 1 of 3") != NULL);
-    CHECK(strstr(resp, "<a href=\"/bbs?p=2\">Next</a>") != NULL);
-    CHECK(strstr(resp, ">Previous</a>") == NULL);
-    bbs_total = 250;
+    CHECK(strstr(resp, "class=\"sw pg\"") == NULL);                 /* one page: no way through pages */
+    bbs_total = 250;                                                /* ten pages of 25 */
+    len = exchange("GET /bbs HTTP/1.0\r\n\r\n", resp, sizeof resp);
+    CHECK(strstr(resp, "<p class=\"sw pg\"><b>1</b> <a href=\"/bbs?p=2\">2</a> <a href=\"/bbs?p=3\">3</a> <span>&hellip;</span> "
+                       "<a href=\"/bbs?p=10\">10</a> <a href=\"/bbs?p=2\">Next &rsaquo;</a> <a href=\"/bbs?p=10\">Last &raquo;</a> </p>") != NULL);
+    CHECK(strstr(resp, "First") == NULL && strstr(resp, "Previous") == NULL);
     len = exchange("GET /bbs?p=2 HTTP/1.0\r\n\r\n", resp, sizeof resp);
     CHECK(parse_resp(resp, len, &r) && r.code == 200);
     CHECK_EQ_I(bbs_skip, STATUS_BBS_PAGE);
-    CHECK(strstr(resp, "Boards 101 to 101 of 250") != NULL);
-    CHECK(strstr(resp, "<a href=\"/bbs?p=1\">Previous</a>") != NULL);
-    CHECK(strstr(resp, "<a href=\"/bbs?p=3\">Next</a>") != NULL);
+    CHECK(strstr(resp, "Boards 26 to 26 of 250") != NULL);
+    CHECK(strstr(resp, "<a href=\"/bbs?p=1\">&laquo; First</a> <a href=\"/bbs?p=1\">&lsaquo; Previous</a> <a href=\"/bbs?p=1\">1</a> <b>2</b> ") != NULL);
+    CHECK(strstr(resp, "<a href=\"/bbs?p=3\">Next &rsaquo;</a>") != NULL);
+    /* in the middle: the first and the last, the pages around, the gaps shown */
+    len = exchange("GET /bbs?p=6 HTTP/1.0\r\n\r\n", resp, sizeof resp);
+    CHECK(strstr(resp, "<a href=\"/bbs?p=1\">1</a> <span>&hellip;</span> <a href=\"/bbs?p=4\">4</a> <a href=\"/bbs?p=5\">5</a> <b>6</b> "
+                       "<a href=\"/bbs?p=7\">7</a> <a href=\"/bbs?p=8\">8</a> <span>&hellip;</span> <a href=\"/bbs?p=10\">10</a> ") != NULL);
+    /* the last page: no Next, no Last */
+    len = exchange("GET /bbs?p=10 HTTP/1.0\r\n\r\n", resp, sizeof resp);
+    CHECK(strstr(resp, "<b>10</b> </p>") != NULL && strstr(resp, "Next") == NULL);
     /* a search is letters and digits, as at the prompt; the rest never reaches the page */
     len = exchange("GET /bbs?q=Tele+Hack%3Cb%3E&p=2 HTTP/1.0\r\n\r\n", resp, sizeof resp);
     CHECK(parse_resp(resp, len, &r) && r.code == 200);
     CHECK(strcmp(bbs_q, "telehackb") == 0); CHECK_EQ_I(bbs_skip, STATUS_BBS_PAGE);
     CHECK(strstr(resp, "name=\"q\" size=\"24\" maxlength=\"32\" value=\"telehackb\">") != NULL);
-    CHECK(strstr(resp, "<a href=\"/bbs?p=3&amp;q=telehackb\">Next</a>") != NULL);
+    CHECK(strstr(resp, "<a href=\"/bbs?p=3&amp;q=telehackb\">Next &rsaquo;</a>") != NULL);
     CHECK(strstr(resp, "<a href=\"/bbs\">All boards</a>") != NULL);
     CHECK(strstr(resp, "<b>") == NULL || strstr(resp, "Hack<b>") == NULL);
     /* a page past the end, nonsense for a page */
@@ -2315,14 +2362,16 @@ static void test_bbs_page(void)
     len = exchange("GET /bbs?p=9 HTTP/1.0\r\n\r\n", resp, sizeof resp);
     CHECK(parse_resp(resp, len, &r) && r.code == 200);
     CHECK(strstr(resp, "<td colspan=\"3\">none</td>") != NULL);
-    CHECK(strstr(resp, "<a href=\"/bbs?p=8\">Previous</a>") != NULL); CHECK(strstr(resp, ">Next</a>") == NULL);
+    CHECK(strstr(resp, "<a href=\"/bbs?p=8\">&lsaquo; Previous</a>") != NULL); CHECK(strstr(resp, "Next") == NULL);
     len = exchange("GET /bbs?p=-4&q= HTTP/1.0\r\n\r\n", resp, sizeof resp);
     CHECK(parse_resp(resp, len, &r) && r.code == 200); CHECK_EQ_I(bbs_skip, 0);
     len = exchange("GET /bbs?p=99999999999 HTTP/1.0\r\n\r\n", resp, sizeof resp);
     CHECK(parse_resp(resp, len, &r) && r.code == 200); CHECK(bbs_skip >= 0);
     CHECK_EQ_I(code_of("POST /bbs HTTP/1.0\r\nContent-Length: 0\r\n\r\n"), 405);
-    /* the tab is on the other pages */
+    /* the other pages lead to it (the Services section) */
     len = exchange("GET / HTTP/1.0\r\n\r\n", resp, sizeof resp);
+    CHECK(strstr(resp, "<a href=\"/bbs\">Services</a>") != NULL);
+    len = exchange("GET /services HTTP/1.0\r\n\r\n", resp, sizeof resp);
     CHECK(strstr(resp, "<a href=\"/bbs\">BBS</a>") != NULL);
     httpd_on_bbs(&H, NULL, NULL);
 }

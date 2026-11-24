@@ -1,0 +1,6 @@
+# v90d's root file system on the OBi200, under the maker's kernel (which
+# boots it from the flash; v90d's own kernel runs /obi/kinit instead: oinit).
+::sysinit:/etc/init.d/rcS
+# a shell on the serial console, for whoever opens the box
+::respawn:-/bin/sh
+::restart:/sbin/init

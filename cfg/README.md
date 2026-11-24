@@ -400,8 +400,8 @@ memory only, so a restart of the box empties it.
 ## Status views
 
 - `GET /` is a page of three tables (line, PPP, counters; the calls are on `/calls`) with
-  a link to the settings page. No script, no external resource, a
-  `meta refresh` every 5 seconds.
+  the menu of the settings pages. Nothing from elsewhere (the box's one
+  script, /ui.js, and inline style), a `meta refresh` every 5 seconds.
 - `GET /status.json` is one object: `uptime_s`, `service`, `v92`,
   `ppp_compression` and `ppp_encryption` (the settings `service` of the port,
   `v92`, `[ppp] compression` and `[ppp] encryption`,
@@ -549,13 +549,13 @@ Refusals of a `POST /settings`, in the order they are checked:
 
 - HTTP/1.0 answers with `Content-Length` and `Connection: close`; one
   request per connection, anything after the first request is discarded.
-- The path is compared byte for byte with the four served ones. It is
+- The path is compared byte for byte with the paths served. It is
   never decoded and never reaches the file system, so there is nothing for
   `..`, `%2e` or NUL tricks to traverse.
 - Fixed table of 4 connections, each with a 2048 byte request buffer and a
-  response buffer (16 KB) that holds the whole response, so a slow reader
+  response buffer (28 KiB) that holds the whole response, so a slow reader
   costs nothing but its slot, and only until the 10 s send deadline. The
-  whole `httpd_t` is about 76 KB.
+  whole `httpd_t` is about 125 KB.
 - The body of a post is collected in the connection's response buffer,
   which is idle until the answer is built; it is decoded into a config on
   the stack before the answer overwrites it. The largest form a browser

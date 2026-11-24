@@ -1,5 +1,5 @@
-/* See netsvc.h. The daemon's network layer, extracted from srv/main.c
- * unchanged (0.2.3): the per-port services' background work (the address
+/* See netsvc.h. The daemon's network layer (taken out of srv/main.c in
+ * 0.2.3, PROTOWEB's per-call NAT since): the per-port services' background work (the address
  * list, Dreamcast Now, the console's DHCP lease, UPnP, the IWANGO VPN, the
  * archive gateway) and net_apply(), which turns the current settings and
  * that work into the TUN devices, the nftables plan, proxy ARP and the
@@ -43,11 +43,20 @@ static const char *arch_path = "/usr/sbin/v90arch";
 static pid_t    arch_pid;
 static int      arch_want;
 static uint32_t arch_next_ms;       /* not before this: a gateway that dies is not restarted in a loop */
+/* PROTOWEB (srv.h, SRV_PROTOWEB): a call to that number has the archive
+ * for itself, on a port whose service is the plain internet. The NAT plan
+ * then sends that port's web, FTP and names to the gateway while the call
+ * lasts; a child process installs it (pw_poll), so the line's loop never
+ * waits on it. The gateway, once started for such a call, keeps running. */
+static int   pw_used;                   /* a PROTOWEB call has been: the gateway stays */
+static int   arch_on[PORTS];            /* what the NAT plan in force gives each port */
+static pid_t natr_pid; static int natr_again;
+static int port_archive(int i) { return S[i].cfg.service == CFG_SERVICE_ARCHIVE || srv_protoweb(&S[i]); }
 static int any_archive(void)
 {
     int i;
-    for (i = 0; i < n_ports; i++) if (S[i].cfg.service == CFG_SERVICE_ARCHIVE) return 1;
-    return 0;
+    for (i = 0; i < n_ports; i++) if (port_archive(i)) return 1;
+    return pw_used;
 }
 static int any_console(void)
 {
@@ -69,6 +78,12 @@ static void dc_drain(void)
         if (dc_len < sizeof dc_text) dc_len += (size_t)r;
     }
 }
+/* The address list of the game revival projects (dclist.h): fetched by a
+ * child process while a port has the console service. The child writes the
+ * list to its standard output, a pipe we read as it comes (no file, so
+ * nothing in /tmp to be put in its way); it is parsed when the child is
+ * done and in force from the next time the line is idle. A fetch that fails
+ * leaves the list as it was. */
 static void dc_poll(uint32_t now_ms)
 {
     int st;
@@ -101,12 +116,8 @@ static void dc_poll(uint32_t now_ms)
         dc_len = 0;
         dc_pid = fork();
         if (dc_pid == 0) {
-            struct sched_param sp;
-            memset(&sp, 0, sizeof sp);
-            (void)sched_setscheduler(0, SCHED_OTHER, &sp);
-            (void)munlockall();
             (void)fcntl(pp[1], F_SETFL, 0);                 /* the child writes without hurry */
-            if (dup2(pp[1], 1) < 0) _exit(126);
+            child_plain(-1, pp[1], 0);
             execl("/bin/sh", "sh", "-c", dc_cmd, (char *)NULL);
             _exit(127);
         }
@@ -117,6 +128,9 @@ static void dc_poll(uint32_t now_ms)
 }
 static const char *dn_prog;
 static struct { dcnow_t d; int on; uint32_t next_ms; pid_t pid; } dn[PORTS];
+/* "Dreamcast Now" (dcnow.h): while the caller of a console port that asks
+ * for it has its network up, a report every 15 s, sent by a child process
+ * (the image's wget; dn_prog, when set, is run instead as "prog URL BODY"). */
 static void dn_poll(uint32_t now_ms)
 {
     int i;
@@ -145,10 +159,7 @@ static void dn_poll(uint32_t now_ms)
             snprintf(url, sizeof url, "https://" DCNOW_HOST "%s", dcnow_path(&dn[i].d));
             dn[i].pid = fork();
             if (dn[i].pid == 0) {
-                struct sched_param sp;
-                memset(&sp, 0, sizeof sp);
-                (void)sched_setscheduler(0, SCHED_OTHER, &sp);
-                (void)munlockall();
+                child_plain(-1, -1, 0);
                 if (dn_prog) execl(dn_prog, dn_prog, url, body, (char *)NULL);
                 else execlp("wget", "wget", "-q", "-T", "15", "-O", "/dev/null", "-U", DCNOW_AGENT, "--post-data", body, url, (char *)NULL);
                 _exit(127);
@@ -168,6 +179,13 @@ static int any_lan(void)
     for (i = 0; i < n_ports; i++) if (lan_wanted(i) && la[i].ip) return 1;
     return 0;
 }
+/* A console as a host on the network (dreamcast_lan): the caller of that
+ * port gets an address of the network itself. The address comes from a
+ * command that prints it (on the box, udhcpc asking the network's DHCP
+ * server for a second lease under a client name of its own; the script it
+ * is given prints the address and changes nothing). It is asked again every
+ * half hour, which also keeps the lease. Without an answer the port stays
+ * as the settings have it, behind this box's address. */
 static void la_poll(uint32_t now_ms)
 {
     int i, st;
@@ -224,12 +242,8 @@ static void la_poll(uint32_t now_ms)
             la[i].len = 0;
             la[i].pid = fork();
             if (la[i].pid == 0) {
-                struct sched_param sp;
-                memset(&sp, 0, sizeof sp);
-                (void)sched_setscheduler(0, SCHED_OTHER, &sp);
-                (void)munlockall();
                 (void)fcntl(pp[1], F_SETFL, 0);
-                if (dup2(pp[1], 1) < 0) _exit(126);
+                child_plain(-1, pp[1], 0);
                 execl("/bin/sh", "sh", "-c", cmd, (char *)NULL);
                 _exit(127);
             }
@@ -243,13 +257,10 @@ static pid_t    up_pid; static uint32_t up_ip, up_next_ms; static int up_dirty =
 static void upnp_child(int add, uint32_t ip)
 {
     static uint8_t proto[NAT_OPEN_MAX]; static uint16_t lo[NAT_OPEN_MAX], hi[NAT_OPEN_MAX];
-    const nat_open *t; int n = dclist_ports(&t), i, r; struct sched_param sp; char a[16];
+    const nat_open *t; int n = dclist_ports(&t), i, r; char a[16];
     /* this child does not become another program: it must let go of the
      * daemon's lines, network devices and listening sockets itself */
-    for (i = 3; i < 1024; i++) (void)close(i);
-    memset(&sp, 0, sizeof sp);
-    (void)sched_setscheduler(0, SCHED_OTHER, &sp);
-    (void)munlockall();
+    child_plain(-1, -1, 1);
     for (i = 0; i < n; i++) { proto[i] = t[i].proto; lo[i] = t[i].lo; hi[i] = t[i].hi; }
     r = upnp_run(if_address(lan_if), add, ip, proto, lo, hi, n, "v90d: Dreamcast");
     if (r == -1) logf_(CFG_LOG_WARN, "game ports: no router answered the search (UPnP)");
@@ -258,6 +269,11 @@ static void upnp_child(int add, uint32_t ip)
     else logf_(CFG_LOG_INFO, "game ports: %d taken back from the router", r);
     _exit(0);
 }
+/* Game ports from the router (dreamcast_upnp): a child process asks the
+ * network's router to pass the ports of dclist.h on, to the console itself
+ * when it is a host on the network and to this box otherwise (which passes
+ * them on). Asked again whenever the addresses change and every half hour;
+ * taken back when the switch goes off and when the daemon stops. */
 static void up_poll(uint32_t now_ms)
 {
     uint32_t want = 0; int i;
@@ -276,6 +292,12 @@ static void up_poll(uint32_t now_ms)
     up_ip = want;
 }
 #define VPN_DEV "v90vpn"
+/* ---- the VPN for the IWANGO games (dreamcast_iwango). The games' servers
+ * of today stand in a private network behind an OpenVPN server; the owner
+ * of the box has a client profile for it and gives it to the Dreamcast
+ * page (cfg/vpn.h checks it). OpenVPN itself is not ours: the image carries
+ * the program as it is (DESIGN.md, the owner's decision), and this code
+ * only keeps it running while a dreamcast port wants it. ---- */
 static const char *vp_prog = "/usr/sbin/openvpn";      /* -O; "" = none */
 static const char *vp_path = "/tmp/v90d.vpn";          /* -V: the profile */
 static pid_t    vp_pid; static uint32_t vp_next; static int vp_dirty, vp_stopping, vp_said, vp_on;
@@ -306,7 +328,7 @@ static int on_vpn(void *ctx, const char *text, size_t len)
         logf_(CFG_LOG_INFO, "IWANGO games: the VPN profile was removed");
     } else {
         snprintf(tmp, sizeof tmp, "%s.new", vp_path);
-        fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+        fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0600);
         if (fd < 0) return -1;
         if (fchmod(fd, 0600) < 0 || write(fd, text, len) != (ssize_t)len) { close(fd); unlink(tmp); return -1; }
         close(fd);
@@ -345,10 +367,7 @@ static void vp_poll(uint32_t now_ms)
     (void)vp_remote(remote, sizeof remote);
     vp_pid = fork();
     if (vp_pid == 0) {
-        struct sched_param sp;
-        memset(&sp, 0, sizeof sp);
-        (void)sched_setscheduler(0, SCHED_OTHER, &sp);
-        (void)munlockall();
+        child_plain(-1, -1, 0);
         /* after the profile, so that it cannot say otherwise: our device,
          * no scripts, and the box's own traffic and name servers stay */
         /* Of what the server sends, no route is taken: a filter on their
@@ -382,31 +401,35 @@ static void proxy_arp(int on)
     if (write(fd, on ? "1\n" : "0\n", 2) != 2 && on) logf_(CFG_LOG_WARN, "cannot switch proxy ARP on %s: %s", lan_if, strerror(errno));
     close(fd);
 }
-static void arch_stop(void)
+/* Stop the gateway. wait: also wait for it (the daemon's own end); in the
+ * loop it is only told, and arch_poll reaps it without waiting. */
+static int arch_told;
+static void arch_stop(int wait)
 {
-    if (arch_pid > 0) { kill(arch_pid, SIGTERM); (void)waitpid(arch_pid, NULL, 0); arch_pid = 0; }
+    if (arch_pid <= 0) return;
+    if (!arch_told) { kill(arch_pid, SIGTERM); arch_told = 1; }
+    if (wait) { (void)waitpid(arch_pid, NULL, 0); arch_pid = 0; arch_told = 0; }
 }
 static void arch_poll(uint32_t now_ms)
 {
     if (arch_pid > 0 && waitpid(arch_pid, NULL, WNOHANG) == arch_pid) {
         arch_pid = 0;
-        if (arch_want) logf_(CFG_LOG_WARN, "archive mode: the gateway stopped; starting it again");
+        if (arch_want && !arch_told) logf_(CFG_LOG_WARN, "archive mode: the gateway stopped; starting it again");
+        arch_told = 0;
     }
-    if (!arch_want) { arch_stop(); return; }
+    if (!arch_want) { arch_stop(0); return; }
+    if (arch_told) return;                  /* the one told to stop is still going */
     if (arch_pid > 0 || !arch_path[0] || (int32_t)(now_ms - arch_next_ms) < 0) return;
     arch_next_ms = now_ms + 5000;
     arch_pid = fork();
     if (arch_pid == 0) {
         /* the child is an ordinary process: no real-time priority, no locked memory */
-        struct sched_param sp;
-        memset(&sp, 0, sizeof sp);
-        (void)sched_setscheduler(0, SCHED_OTHER, &sp);
-        (void)munlockall();
+        child_plain(-1, -1, 0);
         /* every name the gateway gives out is in this block: what is not
          * redirected to it (a secure site, mail) is refused at once instead
          * of waiting for an answer that cannot come */
         if (system("ip route replace unreachable 198.18.0.0/15 2>/dev/null") != 0) { /* the gateway works without it */ }
-        execl(arch_path, arch_path, "-w", STR(ARCH_HTTP), "-f", STR(ARCH_FTP), "-d", STR(ARCH_DNS),
+        execl(arch_path, arch_path, "-r", "-w", STR(ARCH_HTTP), "-f", STR(ARCH_FTP), "-d", STR(ARCH_DNS),
               "-p", STR(ARCH_PASV_LO) "-" STR(ARCH_PASV_HI), (char *)NULL);
         _exit(127);
     }
@@ -415,9 +438,65 @@ static void arch_poll(uint32_t now_ms)
 }
 static uint32_t arch_clock;
 static void arch_apply(int on) { arch_want = on; arch_next_ms = arch_clock; arch_poll(arch_clock); }
+/* the NAT plan for the settings and the calls now; 0 = no rules at all */
+static int build_plan(nat_plan *p)
+{
+    int i;
+    memset(p, 0, sizeof *p);
+    if (!(S[0].cfg.nat || any_archive() || any_console())) return 0;
+    p->peer[0] = S[0].cfg.ppp_peer; p->peer[1] = n_ports > 1 ? S[1].cfg.ppp_peer : 0;
+    p->masquerade = S[0].cfg.nat;
+    for (i = 0; i < n_ports; i++) p->archive[i] = port_archive(i);
+    for (i = 0; i < n_ports; i++) p->console[i] = S[i].cfg.service == CFG_SERVICE_DREAMCAST;
+    for (i = 0; i < n_ports; i++) p->lan[i] = lan_wanted(i) && la[i].ip;
+    p->rewrite = dc_rw; p->n_rewrite = dc_n;
+    p->n_open = dclist_ports(&p->open);
+    strncpy(p->wan, lan_if, sizeof p->wan - 1);
+    if (vp_on) strcpy(p->vpn, VPN_DEV);
+    p->http_port = ARCH_HTTP; p->ftp_port = ARCH_FTP; p->dns_port = ARCH_DNS; p->pasv_lo = ARCH_PASV_LO; p->pasv_hi = ARCH_PASV_HI;
+    return 1;
+}
+
+/* the plan again, by a child (a call began or ended: the loop must not wait) */
+static void nat_refresh(void)
+{
+    nat_plan p; int need;
+    if (natr_pid > 0) { natr_again = 1; return; }
+    natr_again = 0;
+    need = build_plan(&p);
+    natr_pid = fork();
+    if (natr_pid == 0) {
+        child_plain(-1, -1, 0);
+        if (need) _exit(nat_apply(&p) < 0);
+        _exit(nat_remove() < 0 && errno != ENOENT);
+    }
+    if (natr_pid < 0) { natr_pid = 0; logf_(CFG_LOG_ERROR, "cannot change the NAT rules: %s", strerror(errno)); }
+}
+
+static void pw_poll(void)
+{
+    int i, changed = 0, st;
+    if (natr_pid > 0 && waitpid(natr_pid, &st, WNOHANG) == natr_pid) {
+        natr_pid = 0;
+        if (!WIFEXITED(st) || WEXITSTATUS(st) != 0) logf_(CFG_LOG_ERROR, "cannot change the NAT rules for a PROTOWEB call");
+        if (natr_again) nat_refresh();
+    }
+    for (i = 0; i < n_ports; i++) {
+        int w = port_archive(i);
+        if (w == arch_on[i]) continue;
+        arch_on[i] = w; changed = 1;
+        if (srv_protoweb(&S[i])) {
+            pw_used = 1;
+            logf_(CFG_LOG_INFO, "port %d: a call to PROTOWEB: its web, FTP and names go to the archive gateway", i + 1);
+        }
+    }
+    if (changed) { nat_refresh(); arch_apply(any_archive()); }
+}
+
 static void net_apply(void)
 {
     char a[16], b[16];
+    nat_plan p;
     int i;
     net_dirty = 0;
     for (i = 0; i < n_ports; i++) {
@@ -443,20 +522,9 @@ static void net_apply(void)
         else logf_(CFG_LOG_INFO, "%s up: %s -> %s", tun_name[i], ip_str(c->ppp_local, a), ip_str(c->ppp_peer, b));
     }
     if (nat_ip_forward(1) < 0) logf_(CFG_LOG_WARN, "cannot enable IP forwarding: %s", strerror(errno));
-    if (S[0].cfg.nat || any_archive() || any_console()) {
-        nat_plan p;
-        uint32_t p2 = n_ports > 1 ? S[1].cfg.ppp_peer : 0;
-        memset(&p, 0, sizeof p);
-        p.peer[0] = S[0].cfg.ppp_peer; p.peer[1] = p2;
-        p.masquerade = S[0].cfg.nat;
-        for (i = 0; i < n_ports; i++) p.archive[i] = S[i].cfg.service == CFG_SERVICE_ARCHIVE;
-        for (i = 0; i < n_ports; i++) p.console[i] = S[i].cfg.service == CFG_SERVICE_DREAMCAST;
-        for (i = 0; i < n_ports; i++) p.lan[i] = lan_wanted(i) && la[i].ip;
-        p.rewrite = dc_rw; p.n_rewrite = dc_n;
-        p.n_open = dclist_ports(&p.open);
-        strncpy(p.wan, lan_if, sizeof p.wan - 1);
-        if (vp_on) strcpy(p.vpn, VPN_DEV);
-        p.http_port = ARCH_HTTP; p.ftp_port = ARCH_FTP; p.dns_port = ARCH_DNS; p.pasv_lo = ARCH_PASV_LO; p.pasv_hi = ARCH_PASV_HI;
+    if (natr_pid > 0) { (void)waitpid(natr_pid, NULL, 0); natr_pid = 0; natr_again = 0; }
+    for (i = 0; i < n_ports; i++) arch_on[i] = port_archive(i);
+    if (build_plan(&p)) {
         if (nat_apply(&p) < 0) logf_(CFG_LOG_ERROR, "cannot install the NAT rules: %s", strerror(errno));
         else {
             for (i = 0; i < n_ports; i++) {
@@ -481,8 +549,16 @@ void netsvc_apply(void) { net_apply(); }
 void netsvc_poll(uint32_t now_ms)
 {
     arch_clock = now_ms;
-    if (now_ms % 2000 == 0) arch_poll(now_ms);
-    if (now_ms % 1000 == 0) { dc_poll(now_ms); dn_poll(now_ms); la_poll(now_ms); up_poll(now_ms); vp_poll(now_ms); }
+    /* Deadlines, not "now_ms % N == 0": now_ms wraps after 49.7 days and
+     * 2^32 is no multiple of the 10 ms step, so after the wrap no value of
+     * it is a multiple of 100 again for months, and nothing here would run. */
+    static uint32_t at100, at1000, at2000;
+    if ((int32_t)(now_ms - at100) >= 0) { at100 = now_ms + 100; pw_poll(); }
+    if ((int32_t)(now_ms - at2000) >= 0) { at2000 = now_ms + 2000; arch_poll(now_ms); }
+    if ((int32_t)(now_ms - at1000) >= 0) {
+        at1000 = now_ms + 1000;
+        dc_poll(now_ms); dn_poll(now_ms); la_poll(now_ms); up_poll(now_ms); vp_poll(now_ms);
+    }
 }
 
 int  netsvc_on_vpn(void *ctx, const char *profile, size_t len) { return on_vpn(ctx, profile, len); }
@@ -490,7 +566,8 @@ int  netsvc_vpn_remote(char *out, size_t cap) { return vp_remote(out, cap); }
 
 void netsvc_stop(void)
 {
-    arch_stop();
+    arch_stop(1);
+    if (natr_pid > 0) { (void)waitpid(natr_pid, NULL, 0); natr_pid = 0; }
     if (vp_pid > 0) { (void)kill(vp_pid, SIGTERM); (void)waitpid(vp_pid, NULL, 0); }
     if (S[0].cfg.nat || any_archive() || any_console()) (void)nat_remove();
     if (any_lan()) proxy_arp(0);
@@ -501,6 +578,7 @@ void netsvc_stop(void)
 }
 
 void netsvc_set_arch(const char *path)   { arch_path = path; }
+int  netsvc_has_arch(void) { return arch_path[0] && access(arch_path, X_OK) == 0; }
 void netsvc_set_dclist(const char *cmd)  { dc_cmd = cmd; }
 void netsvc_set_dcnow(const char *prog)  { dn_prog = prog; }
 void netsvc_set_lease(const char *cmd)   { la_cmd = cmd; }

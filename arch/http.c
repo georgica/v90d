@@ -137,6 +137,10 @@ int http_parse(const char *head, size_t hlen, http_req_t *r)
                     r->host[b - a] = '\0';
                 }
             }
+        } else if (is_header(line, t, "Transfer-Encoding")) {
+            size_t a = 18;
+            while (a < t && (line[a] == ' ' || line[a] == '\t')) a++;
+            if (!starts(line + a, t - a, "identity")) r->chunked = 1;
         } else if (is_header(line, t, "Content-Length")) {
             r->body = number(line + 15, t - 15);
             if (r->body < 0) return -1;

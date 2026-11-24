@@ -291,25 +291,35 @@ front. A port whose own number looks like one of them keeps its number.
   when asked, refuses the rest, and answers only what changes something.
   255 is doubled towards the board; CR is CR NUL while we are not binary.
   A board that speaks no telnet at all (raw TCP) works the same.
-- **The list** (format in `srv/bbs.h`). The image has a short one,
-  `lists/bbs.txt` as `/etc/v90d.bbs`. The first call to the number or the
-  first look at the BBS page makes the box fetch the Telnet BBS Guide's
-  own archive from the guide, then once a day (`fw/bbsfetch.sh`: today's
-  `ibbsMMDDYY.zip`, else the month's `ibbsMMYY.zip`, else last month's;
-  nothing without a clock). `fw/bbsguide.awk` turns its
-  `dialdirectory.xml` into our lines: telnet boards only, the login name
-  is the board's name in lower case letters and digits without the word
-  BBS (what 2600.network calls the same board), a second board of one
-  name is `name2`, and each gets its number as above. The guide's list is not copied into this repository;
-  each box takes it from the guide as it is. What the script prints is
-  checked line by line by the daemon (the head line first, at least one
-  board) and only then renamed over `/tmp/v90d.bbs`. A box whose owner
-  never uses the number fetches nothing. The list is never held in
-  memory: it is read from the file, 512 octets per block of the line,
-  when a name is looked up. busybox's wget does not verify certificates,
-  so somebody on the path could hand the box another list; what that list
-  can do is send a caller to another telnet host, which a telnet session
-  cannot rule out anyway.
+- **The list** (format in `srv/bbs.h`). The image carries Netstalgia's
+  signed list as it was at the release, `lists/bbs.txt` as
+  `/etc/v90d.bbs` (`/obi/bbs.txt` on the OBi200; `make -C fw
+  bbs-snapshot` takes it and checks its signature). The first call to the
+  number or the first look at the BBS page makes the box fetch the
+  current one, then once a day (`fw/bbsfetch.sh`): plain http from
+  `http://api.netstalgia.online/v1/bbs.txt`, Netstalgia's copy of the
+  Telnet BBS Guide's list in our format, refreshed daily. Its last line is
+  `# sig ed25519 <128 hex>`, Ed25519 (RFC 8032) over every octet before
+  that line (`srv/bbssig.h`). The fetch child checks it against
+  Netstalgia's public keys built into the daemon (`srv/bbskeys.h`, two
+  places for a key change; `srv/ed25519.c`, verification only, from
+  TweetNaCl), away from the loop: a check costs a good part of a second
+  on the box. A list nobody we know signed is thrown away and the box
+  keeps the one it has, the image's at worst; the next try is a day
+  later. Inside the signed part a `# serial N` line numbers the list
+  (Netstalgia only raises it, YYYYMMDDnn); the box takes a list only when
+  its serial is above that of the list it has (the image's at first, so
+  the snapshot's serial; an equal one is the same list, kept quietly), so
+  an old signed list cannot be handed to it again, and a list without a
+  serial is never taken. There is no unsigned source any more (until 0.10 the box fell
+  back to the guide's own archive): the connection is not trusted, only
+  the signature, so someone on the path can withhold the list but cannot
+  change it. What passes is then checked line by line by the daemon (the
+  head line first, at least one board) and only then renamed over
+  `/tmp/v90d.bbs`. A box whose owner never uses the number fetches
+  nothing. The list is never held in memory by the daemon: it is read
+  from the file, 512 octets per block of the line, when a name is looked
+  up.
 - **The page** (`/bbs`, `status_render_bbs`) shows the numbers and the
   boards, 100 to a page (`/bbs?p=2`) with a search by part of a name or of
   a number (`q=`, kept as letters and digits only). Plain links and a GET
@@ -322,11 +332,101 @@ front. A port whose own number looks like one of them keeps its number.
   before the connection (`bbsdial_is_self`): 127/8, 0/8, the address of any
   of the box's own interfaces (found by asking the kernel which address it
   would send from towards it; nothing goes out), link-local 169.254/16,
-  multicast and broadcast are not connected to. The rest of the local
-  network is: a board may stand beside the box, and a dial-up caller
-  reaches the local network anyway.
+  multicast and broadcast are not connected to. Since the list is
+  Netstalgia's signed one of public boards, a board's name must also lead
+  to a public address (`BBSDIAL_PUBLIC`, as for Netstalgia's numbers of
+  services): a name pointed at the owner's network, by mistake or on
+  purpose, puts no caller on it. A board beside the box can be given its own
+  number in `[services]`, where the owner's hosts may be on the LAN.
   The host is looked at once more before it becomes an argument, and the
   fetched file is created anew, never through a link.
+
+### 5c. PROTOWEB, the archive for one call
+
+`SRV_PROTOWEB` (`7768693200`, PROTOWEB on the keypad with the board
+numbers' zeros) answers on a port whose service is internet or archive,
+unless it is the port's own number, and only when the daemon has the archive
+gateway (`netsvc_has_arch`): the telephony layer asks through `tel_cfg.more`
+like the numbers of services. The call is the port's ordinary PPP call;
+`srv_protoweb()` says it is one. The NAT plan (`build_plan` in `netsvc.c`)
+then gives that port the archive's redirection (DNS, HTTP, FTP and the
+passive ports to the gateway) for as long as the call lasts. A child
+process installs the plan when the call begins and again when it ends
+(`pw_poll`, every 100 ms), so the line's loop never waits on netlink or
+iptables; PPP takes seconds to come up, the plan milliseconds. The gateway
+is started for the first such call and kept from then on. Netstalgia's own
+dial-in answers the same number the same way.
+
+### 5d. Numbers to services
+
+A number can also lead straight to one service on the internet: a game
+server with a protocol of its own (the AOL Neverwinter Nights client at
+nwnrevival.com:5000), or a board or text service that is not in the list
+of boards. Format and rules: `[services]` in `cfg/config.h` and
+`srv/svc.h`.
+
+- **Whose.** The owner's numbers are in the settings (`[services] service =
+  NUMBER HOST:PORT raw|telnet NAME`, up to 16, the Numbers page under Services). Netstalgia
+  keeps more in a second signed list,
+  `http://api.netstalgia.online/v1/services.txt`, `v90d-svc 1`, with a serial
+  of its own, fetched and checked exactly like the list of boards (the same
+  keys, the same child, `lister_t` in `bbslink.c`) once a day while
+  `[services] netstalgia = on` (the default; off, the box never asks for
+  it). The image carries it as it was at the release, `lists/services.txt`
+  as `/etc/v90d.svc` (`/obi/services.txt`), and an empty list is a list. A
+  fetched list that passes is loaded into a table in memory (512 entries at
+  most), the next table filled while the list is checked and then swapped
+  in, so the call path never reads a file. The owner's number wins over
+  Netstalgia's.
+- **Answering.** The telephony layer asks the server about each digit
+  (`tel_cfg.more`): 2 when what was dialled is a service number, 1 while it
+  still begins one. Like the board numbers, a number of a service answers on
+  any port whatever its service, unless it is the port's own; the board
+  numbers come first and a service line may not name one. An 11-digit
+  number with a 1 in front also answers without the 1, and a 10-digit one
+  with it. The call is in octet mode with error control as `[modem]` says,
+  like a board call (`SRV_LINK_SVC`), and `bbslink.c` serves it with the
+  same connection child.
+- **Raw**: nothing is said, the connection starts the moment the modems are
+  online, and what the caller sends meanwhile waits (4 KiB at most) and
+  goes first. Octets go both ways as they are. **Telnet**: a second and a
+  half, `Calling NAME ...`, then telnet as for a board, with no prompt.
+  Either way, no answer or the service hanging up ends the call.
+- **What a list entry may reach.** Netstalgia refuses private and other
+  non-public addresses when a number is added. The box holds its list to
+  the same: a line whose host is `localhost` (or under it), an address
+  that is not public, or a number written in another base (`0x7f.0.0.1`,
+  `2130706433`) is left out, and so is one with a number the box answers
+  itself. When such a number is called, the connection child looks the
+  name up once and connects only to a public IPv4 address it gave
+  (`bbsdial_is_public`), so a name that later points into the owner's
+  network leads nowhere. The owner's own entries may name a host on the
+  LAN.
+
+### 5e. The terminal menu
+
+`[services] menu = on` (off by default) puts Netstalgia's terminal main menu
+on the PPP services' own numbers (`term/`, shared with Netstalgia's
+nsdiald; `srv/termsvc.c` is v90d's side).
+
+- **Answering.** Such a call starts in octet mode with V.42 as `[modem]`
+  says (`SRV_LINK_MENU`) and `dce` watching for PPP (`ppp_detect`): a caller
+  whose first octets begin a PPP frame (Dial-Up Networking's first LCP) is
+  a PPP call at once and never sees the menu. Anyone else gets it 1.5 s
+  after the modems connect, or at the first key.
+- **Start PPP** queues its last screen, then `srv_start_ppp()` turns the
+  call into a PPP call on the same V.42 link (`dce_start_ppp`); its login
+  deadline (`SRV_LOGIN_MAX_S`) counts from there.
+- **The directory** is one `tdir_t` for both ports, made from the list of
+  boards and Netstalgia's board details (`v90d-bbsinfo 1`, a third signed
+  list in `bbslink.c`, none in the image), a slice per block, again when one
+  of them changes and nobody is in the menu. A search runs a slice per poll
+  too. **C** on a board goes through `bbslink_menu_dial()` (the BBS: prompt's
+  connection child); when the board hangs up the caller is the menu's again.
+- **The line.** Screens go out as the changes from the last one, as fast as
+  the modem takes them; keys that pile up on a slow line become one change.
+  Ten minutes without a key end the call (the menu's clock would otherwise
+  keep the line from ever being idle).
 
 ## 6. Firmware (Track A)
 

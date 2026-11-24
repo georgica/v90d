@@ -58,6 +58,43 @@ static void raw_from_caller(void *ctx, const uint8_t *oct, size_t n)
 
 void srv_set_raw(srv_t *s, srv_raw_fn raw_out) { s->raw_out = raw_out; }
 const char *srv_dialed(const srv_t *s) { return s->tel.dialed; }
+void srv_set_svc_lookup(srv_t *s, srv_svc_fn known) { s->svc_known = known; }
+
+int srv_svc_number(const srv_t *s, const char *dialed)
+{
+    const cfg_t *c = &s->cfg;
+    int i;
+    if (!dialed[0]) return 0;
+    for (i = 0; i < c->n_services && i < CFG_MAX_SERVICES; i++)
+        if (cfg_svc_number_match(c->services[i].number, dialed)) return SRV_SVC_OWN;
+    if (c->svc_netstalgia && s->svc_known && s->svc_known(dialed) == 2) return SRV_SVC_LIST;
+    return 0;
+}
+
+void srv_set_protoweb(srv_t *s, int on) { s->protoweb_ok = on != 0; }
+void srv_set_entropy(srv_t *s, const uint8_t *b, size_t n)
+{
+    if (n > sizeof s->entropy) n = sizeof s->entropy;
+    memcpy(s->entropy, b, n); s->entropy_n = n;
+}
+int  srv_protoweb(const srv_t *s) { return s->in_call && s->protoweb; }
+/* the PROTOWEB number answers on this port */
+static int protoweb_here(const srv_t *s)
+{
+    return s->protoweb_ok && (s->cfg.service == CFG_SERVICE_INTERNET || s->cfg.service == CFG_SERVICE_ARCHIVE);
+}
+
+/* the telephony layer's question while digits come in (tel_cfg.more) */
+static int tel_more(void *ctx, const char *dialed)
+{
+    const srv_t *s = ctx; const cfg_t *c = &s->cfg;
+    int i, best = 0, m;
+    for (i = 0; i < c->n_services && i < CFG_MAX_SERVICES; i++)
+        if ((m = cfg_svc_number_begins(c->services[i].number, dialed)) > best) best = m;
+    if (best < 2 && c->svc_netstalgia && s->svc_known && (m = s->svc_known(dialed)) > best) best = m;
+    if (best < 2 && protoweb_here(s) && (m = cfg_svc_number_begins(SRV_PROTOWEB, dialed)) > best) best = m;
+    return best;
+}
 
 int srv_link(const srv_t *s, uint32_t *addr, int *online)
 {
@@ -76,6 +113,14 @@ size_t srv_send_raw(srv_t *s, const uint8_t *oct, size_t n)
     r = dce_raw_write(&s->dce, oct, n);
     if (r) { tel_activity(&s->tel); s->status.tx_octets += r; }
     return r;
+}
+
+int srv_start_ppp(srv_t *s)
+{
+    if (!s->in_call || s->link != SRV_LINK_MENU || dce_start_ppp(&s->dce) < 0) return -1;
+    s->link = SATURN_NONE;
+    s->ppp_from_s = s->call_s;
+    return 0;
 }
 
 void srv_hangup(srv_t *s)
@@ -115,6 +160,7 @@ static void tel_settings(const srv_t *s, tel_cfg *t)
     t->tone_level = srv_level_rms(-13) * 181 / 128;     /* each component -13 dBm0, as a peak */
     t->seed = s->seed;
     t->originate = s->originate;
+    t->more = tel_more; t->more_ctx = (void *)s;
 }
 
 static void adopt(srv_t *s, const cfg_t *cfg)
@@ -196,12 +242,18 @@ static void call_start(srv_t *s)
 {
     dce_cfg_t d;
     const cfg_t *c = &s->cfg;
-    int bbs, enc; char board[BBS_NUMBER_LEN + 1];
+    int bbs, svc, enc; char board[BBS_NUMBER_LEN + 1];
     s->link = SATURN_NONE;
-    s->call_start = s->clock; s->call_s = 0;
+    s->call_start = s->clock; s->call_s = 0; s->ppp_up_once = 0; s->ppp_from_s = 0;
     /* a terminal program for a bulletin board (bbs.h), unless the number is the port's own */
     bbs = strcmp(s->tel.dialed, c->line_number) != 0 && bbs_number(s->tel.dialed, board) != BBS_NUM_NONE;
+    /* a number that connects straight to a service ([services]), the same way */
+    svc = !bbs && strcmp(s->tel.dialed, c->line_number) != 0 && srv_svc_number(s, s->tel.dialed);
+    /* the PROTOWEB number: the port's dial-up connection, with the archive */
+    s->protoweb = !bbs && !svc && protoweb_here(s) && strcmp(s->tel.dialed, c->line_number) != 0
+                  && cfg_svc_number_match(SRV_PROTOWEB, s->tel.dialed);
     if (bbs) s->link = SRV_LINK_BBS;
+    else if (svc) s->link = SRV_LINK_SVC;
     else if (for_link(c)) {
         s->link = saturn_number(s->tel.dialed, &s->link_addr, s->link_game);
         if ((s->link == SATURN_MATCH_WAIT || s->link == SATURN_MATCH_CALL) && !c->sat_match) s->link = SATURN_NONE;
@@ -215,6 +267,7 @@ static void call_start(srv_t *s)
             return;
         }
     }
+    bbs |= svc;             /* from here on: a call that carries octets */
     dce_cfg_default(&d);
     d.tx_level = srv_level_rms(c->tx_level);
     d.modulations = 0;
@@ -296,9 +349,18 @@ static void call_start(srv_t *s)
     /* a different seed for every call */
     s->seed = s->seed * 1664525u + 1013904223u;
     d.ppp.seed = s->seed ^ s->clock;
+    if (s->entropy_n) { d.ppp.entropy = s->entropy; d.ppp.entropy_n = s->entropy_n; }
     d.ppp.ctx = s; d.ppp.ip_rx = ip_from_caller;
     if (for_link(c) || bbs) d.raw_rx = raw_from_caller;
     d.raw_ec = bbs;
+    /* The terminal menu on a PPP service's own number: the call starts as
+     * octets with V.42 kept; a Dial-Up Networking caller's first PPP frame
+     * takes it to PPP at once (dce.h, ppp_detect), anyone else gets the
+     * menu, whose Start PPP does the same later (srv_start_ppp). */
+    if (c->svc_menu && !bbs && !s->protoweb && !s->originate && !for_console(c) && !for_link(c)) {
+        s->link = SRV_LINK_MENU;
+        d.raw_rx = raw_from_caller; d.raw_ec = 1; d.ppp_detect = 1;
+    }
     dce_init(&s->dce, &d);
     dce_get_status(&s->dce, &s->ds);
     s->in_call = 1; s->hangup_sent = 0;
@@ -461,7 +523,19 @@ uint8_t srv_tick_lin(srv_t *s, int offhook, int16_t lin)
         s->rx_pow_last = s->rx_pow / 8000; s->rx_pow = 0;
         s->status.uptime_s++;
         if (s->clock) s->clock++;
-        if (s->in_call) { s->call_s++; dce_get_status(&s->dce, &s->ds); }
+        if (s->in_call) {
+            s->call_s++; dce_get_status(&s->dce, &s->ds);
+            /* A PPP caller has SRV_LOGIN_MAX_S from the answer to be logged
+             * in and have its network up, once: renegotiating LCP or
+             * answering every request with a Nak does not hold a port. */
+            if (s->ds.ppp_phase == PPP_PHASE_NETWORK) s->ppp_up_once = 1;
+            /* the menu's caller went over to PPP by itself (its first frame) */
+            if (s->link == SRV_LINK_MENU && s->ds.state == DCE_ONLINE && !s->ds.raw) {
+                s->link = SATURN_NONE; s->ppp_from_s = s->call_s;
+            }
+            if (s->link == SATURN_NONE && !s->originate && !s->ppp_up_once && s->call_s - s->ppp_from_s >= SRV_LOGIN_MAX_S)
+                srv_hangup(s);
+        }
         refresh(s);
     }
     return out;

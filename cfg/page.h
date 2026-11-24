@@ -1,8 +1,10 @@
-/* v90d/cfg - what the two HTML pages share: the style sheet and the frame
- * around the content (banner with the name, the row of tabs, the footer).
- * The web interface is called Nestaliga. No script, nothing fetched: the
- * server's Content-Security-Policy allows inline style only. Written for
- * this project; light and dark follow the browser. */
+/* v90d/cfg - what the pages share: the style sheet, the frame around the
+ * content (banner with the name, the menu of sections with their pages, the
+ * footer) and the one script, /ui.js (PAGE_JS). The web interface is called
+ * Nestaliga. Nothing is fetched from elsewhere: the server's
+ * Content-Security-Policy allows inline style and the box's own script, no
+ * inline script; every page works without the script too. Written for this
+ * project; light and dark follow the browser. */
 #ifndef V90D_CFG_PAGE_H
 #define V90D_CFG_PAGE_H
 #include "sbuf.h"
@@ -41,6 +43,18 @@
     "nav a{color:#fff;background:rgba(255,255,255,.12)}" \
     "nav b{color:#1f2a44;background:var(--ac)}" \
     "nav .r{margin-left:auto;background:none;color:#c3cbda}" \
+    "template{display:none}" \
+    "input.def{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}" \
+    "nav .mn{position:relative;display:flex}" \
+    "nav .mn>a.on{color:#1f2a44;background:var(--ac)}" \
+    "nav .dd{display:none;position:absolute;top:100%;left:0;z-index:9;min-width:100%;" \
+    "padding:4px 0;background:var(--hd);border:1px solid rgba(255,255,255,.15);border-radius:0 6px 6px 6px;" \
+    "box-shadow:0 6px 16px rgba(0,0,0,.3)}" \
+    "nav .mn:hover .dd,nav .mn:focus-within .dd{display:block}" \
+    "nav .dd a,nav .dd b{display:block;white-space:nowrap;border-radius:0;background:none;" \
+    "padding:7px 18px;color:#fff;letter-spacing:.04em}" \
+    "nav .dd a:hover{background:rgba(255,255,255,.12)}" \
+    "nav .dd b{color:var(--ac)}" \
     "main{padding-top:18px}" \
     "section,.k{background:var(--pn);border:1px solid var(--ln);border-radius:10px;" \
     "box-shadow:var(--sh);overflow:hidden}" \
@@ -57,6 +71,8 @@
     ".g{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:0 16px}" \
     ".sw{margin:0 0 12px}.sw a,.sw b{display:inline-block;padding:5px 14px;border:1px solid var(--lb);border-radius:4px;font-size:13px;text-decoration:none}" \
     ".sw b{background:var(--ac);border-color:var(--ac);color:#fff}" \
+    ".pg{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:4px 14px 14px;margin:0}" \
+    ".pg a,.pg b{min-width:36px;padding:5px 11px;text-align:center;border-color:var(--ln)}.pg span{color:var(--mu)}" \
     ".t{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;" \
     "margin-bottom:16px}" \
     ".k{padding:12px 14px;color:var(--mu)}" \
@@ -84,6 +100,7 @@
     "border-left:4px solid var(--ac);border-radius:6px}" \
     ".lg{max-width:440px;margin:6vh auto}" \
     "section>p.err{color:var(--er);font-weight:600}" \
+    "section>p.act,section>form>p.act{margin:0;padding:12px 14px 14px;border-top:1px solid var(--ln);text-align:right}" \
     "footer{padding-bottom:20px;font-size:12px;color:var(--mu)}" \
     "</style>\n"
 
@@ -95,43 +112,92 @@
 #define PAGE_TAB_CALLS 7
 #define PAGE_TAB_CONSOLES 8
 #define PAGE_TAB_BBS 9
+#define PAGE_TAB_SERVICES 10
 /* The Dreamcast tab is shown only while a port has that service. Whoever
  * knows the settings says so before a page is made (the settings pages by
  * themselves, the server for the others); defined in status.c. */
 extern int page_consoles_tab;   /* a port uses the dreamcast or saturn service */
+/* The menu: a row of sections; each drops down its pages when the pointer
+ * is over it (or a key has brought the focus into it), by CSS alone. The
+ * section's own link leads to its first page, so a browser without that
+ * (a period one, a touch screen) still gets everywhere. */
 static inline void page_top(sbuf_t *b, const char *title, const char *head, int active, const char *alone)
 {
     static const struct { const char *href, *label; } tabs[] = {
         { "/", "Dashboard" }, { "/line", "Line" }, { "/modem", "Modem" }, { "/users", "Users" },
         { "/network", "Network" }, { "/system", "System" }, { "/firmware", "Firmware" },
         { "/calls", "Calls" }, { "/dreamcast", "Consoles" }, { "/bbs", "BBS" },
+        { "/services", "Numbers" },
     };
-    /* the order they are shown in */
-    static const unsigned char order[] = { 0, 1, 2, 3, 4, 8, 9, 5, 6, 7 };
-    int i, k;
+    /* the sections and their pages, in the order they are shown; -1 ends a section */
+    static const struct { const char *label; signed char tab[4]; } sections[] = {
+        { "Status",   { 0, 7, -1, -1 } },
+        { "Phone",    { 1, 2, 3, -1 } },
+        { "Services", { PAGE_TAB_BBS, PAGE_TAB_SERVICES, PAGE_TAB_CONSOLES, -1 } },
+        { "System",   { 4, 5, PAGE_TAB_FIRMWARE, -1 } },
+    };
+    int s, k;
 
     sb_puts(b, "<!DOCTYPE html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">\n");
     sb_puts(b, head);
     sb_puts(b, "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n"
                "<title>" PAGE_NAME " "); sb_puts(b, title);
-    sb_puts(b, "</title>\n" PAGE_CSS "</head><body>\n"
+    sb_puts(b, "</title>\n" PAGE_CSS "<script src=\"/ui.js?v=" V90D_VERSION "\" defer></script>\n</head><body>\n"
                "<header><div><h1><i></i>" PAGE_NAME "<small>dial-up server</small></h1>\n<nav>");
     if (alone) {
         sb_puts(b, "<b>"); sb_puts(b, alone); sb_puts(b, "</b>");
     } else {
-        for (k = 0; k < (int)sizeof order; k++) {
-            i = order[k];
-            if (i == PAGE_TAB_CONSOLES && !page_consoles_tab && i != active) continue;
-            if (i == active) { sb_puts(b, "<b>"); sb_puts(b, tabs[i].label); sb_puts(b, "</b>"); }
-            else {
-                sb_puts(b, "<a href=\""); sb_puts(b, tabs[i].href); sb_puts(b, "\">");
-                sb_puts(b, tabs[i].label); sb_puts(b, "</a>");
+        for (s = 0; s < (int)(sizeof sections / sizeof sections[0]); s++) {
+            int first = -1, mine = 0;
+            for (k = 0; k < 4 && sections[s].tab[k] >= 0; k++) {
+                int i = sections[s].tab[k];
+                if (i == PAGE_TAB_CONSOLES && !page_consoles_tab && i != active) continue;
+                if (first < 0) first = i;
+                if (i == active) mine = 1;
             }
+            sb_puts(b, "<span class=\"mn\"><a"); if (mine) sb_puts(b, " class=\"on\"");
+            sb_puts(b, " href=\""); sb_puts(b, tabs[first].href); sb_puts(b, "\">");
+            sb_puts(b, sections[s].label); sb_puts(b, "</a><span class=\"dd\">");
+            for (k = 0; k < 4 && sections[s].tab[k] >= 0; k++) {
+                int i = sections[s].tab[k];
+                if (i == PAGE_TAB_CONSOLES && !page_consoles_tab && i != active) continue;
+                if (i == active) { sb_puts(b, "<b>"); sb_puts(b, tabs[i].label); sb_puts(b, "</b>"); }
+                else {
+                    sb_puts(b, "<a href=\""); sb_puts(b, tabs[i].href); sb_puts(b, "\">");
+                    sb_puts(b, tabs[i].label); sb_puts(b, "</a>");
+                }
+            }
+            sb_puts(b, "</span></span>");
         }
         sb_puts(b, "<a class=\"r\" href=\"/logout\">Log out</a>");
     }
     sb_puts(b, "</nav></div></header>\n<main>\n");
 }
+
+/* The pages' one script, served at /ui.js (the policy allows script from
+ * the box only, none inline). It does one thing: an Add button that names a
+ * template (data-tpl) puts a copy of it into its table (data-rows), the IDX
+ * in its field names replaced by the next row number, up to data-max rows,
+ * without leaving the page. A browser without it posts the button: the page
+ * is saved and comes back with one more row (settings.h). */
+#define PAGE_JS \
+    "(function(){\n" \
+    "function add(e){\n" \
+    " var b=e.target||e.srcElement;\n" \
+    " if(!b||!b.getAttribute||b.getAttribute('name')!=='add'||!b.getAttribute('data-tpl'))return;\n" \
+    " var t=document.getElementById(b.getAttribute('data-tpl')),r=document.getElementById(b.getAttribute('data-rows'));\n" \
+    " if(!t||!r||!t.innerHTML||!r.insertAdjacentHTML)return;\n" \
+    " if(e.preventDefault)e.preventDefault();\n" \
+    " var n=r.getElementsByTagName('tr').length,m=+b.getAttribute('data-max');\n" \
+    " if(n<m){\n" \
+    "  r.insertAdjacentHTML('beforeend',t.innerHTML.replace(/IDX/g,String(n)));\n" \
+    "  var f=r.getElementsByTagName('tr')[n].getElementsByTagName('input')[0];if(f&&f.focus)f.focus();\n" \
+    " }\n" \
+    " if(n+1>=m)b.disabled=true;\n" \
+    " return false;\n" \
+    "}\n" \
+    "if(document.addEventListener)document.addEventListener('click',add,false);\n" \
+    "})();\n"
 
 #define PAGE_END \
     "</main>\n<footer>" PAGE_NAME " &middot; v90d firmware " V90D_VERSION "</footer>\n</body></html>\n"

@@ -357,15 +357,39 @@ static void bbs_link(sbuf_t *b, int page, const char *q, const char *text)
 {
     sb_puts(b, "<a href=\"/bbs?p="); sb_i32(b, (int32_t)page);
     if (q[0]) { sb_puts(b, "&amp;q="); sb_puts(b, q); }
-    sb_puts(b, "\">"); sb_puts(b, text); sb_puts(b, "</a>");
+    sb_puts(b, "\">"); if (text) sb_puts(b, text); else sb_i32(b, (int32_t)page); sb_puts(b, "</a>");
+}
+/* the way through the pages: First, Previous, the pages around this one
+ * (and the first and the last, with an ellipsis for a gap), Next, Last.
+ * pages 0: how many is not known (a page past the end). */
+#define BBS_NAV_ROOM 1400               /* the most this writes, with the longest search */
+static void bbs_pages(sbuf_t *b, int page, int pages, const char *q)
+{
+    int p, lo = page - 2, hi = page + 2;
+    if (pages <= 1 && page <= 1 && !q[0]) return;
+    sb_puts(b, "<p class=\"sw pg\">");
+    if (page > 1) { bbs_link(b, 1, q, "&laquo; First"); sb_puts(b, " "); bbs_link(b, page - 1 < pages || !pages ? page - 1 : pages, q, "&lsaquo; Previous"); sb_puts(b, " "); }
+    if (pages >= 1 && page <= pages) {
+        if (lo < 1) lo = 1;
+        if (hi > pages) hi = pages;
+        if (lo > 1) { bbs_link(b, 1, q, NULL); sb_puts(b, lo > 2 ? " <span>&hellip;</span> " : " "); }
+        for (p = lo; p <= hi; p++) {
+            if (p == page) { sb_puts(b, "<b>"); sb_i32(b, (int32_t)p); sb_puts(b, "</b>"); }
+            else bbs_link(b, p, q, NULL);
+            sb_puts(b, " ");
+        }
+        if (hi < pages) { sb_puts(b, hi < pages - 1 ? "<span>&hellip;</span> " : ""); bbs_link(b, pages, q, NULL); sb_puts(b, " "); }
+        if (page < pages) { bbs_link(b, page + 1, q, "Next &rsaquo;"); sb_puts(b, " "); bbs_link(b, pages, q, "Last &raquo;"); sb_puts(b, " "); }
+    }
+    if (q[0]) sb_puts(b, "<a href=\"/bbs\">All boards</a>");
+    sb_puts(b, "</p>\n");
 }
 
 int status_render_bbs(status_bbs_rows rows, void *ctx, const char *query, size_t qlen, char *buf, size_t cap)
 {
-    sbuf_t b; int shown = 0, left = 0, page; char q[33];
-    static const char tail_room[] = "</table></div>\n<p class=\"sw\"><a href=\"/bbs?p=0000000&amp;q=00000000000000000000000000000000\">Previous</a> "
-                                    "<a href=\"/bbs?p=0000000&amp;q=00000000000000000000000000000000\">Next</a> <a href=\"/bbs\">All boards</a></p>"
-                                    "<p>The boards are those of the <a href=\"https://www.telnetbbsguide.com\">Telnet BBS Guide</a>; the box fetches its list once a day.</p></section>\n" PAGE_END;
+    sbuf_t b; int shown = 0, left = 0, page, pages = 0; char q[33];
+    static const char tail_room[] = "</table></div>\n"
+                                    "<p>The boards are those of the <a href=\"https://www.telnetbbsguide.com\">Telnet BBS Guide</a>; the box fetches its list from <a href=\"https://netstalgia.online\">Netstalgia</a> once a day.</p></section>\n" PAGE_END;
 
     bbs_query(query, qlen, q, &page);
     sb_init(&b, buf, cap);
@@ -389,12 +413,15 @@ int status_render_bbs(status_bbs_rows rows, void *ctx, const char *query, size_t
         sb_puts(&b, "Boards 0000000 to 0000000 of 0000000</p>\n"
                     "<div class=\"x\"><table>\n<tr><th>Board</th><th>Name at the prompt</th><th>Number</th></tr>\n");
         if (!b.ovf) {
-            size_t rows_at = b.len, n = rows(ctx, q, skip, STATUS_BBS_PAGE, b.p + b.len, b.cap - b.len - sizeof tail_room, &shown, &left);
+            size_t rows_at = b.len, n = b.cap - b.len > sizeof tail_room + BBS_NAV_ROOM
+                ? rows(ctx, q, skip, STATUS_BBS_PAGE, b.p + b.len, b.cap - b.len - sizeof tail_room - BBS_NAV_ROOM, &shown, &left) : 0;
             /* the count line in front, now that it is known */
             sbuf_t c; char line[80]; size_t ln;
             sb_init(&c, line, sizeof line);
             if (shown) { sb_puts(&c, "Boards "); sb_i32(&c, (int32_t)(skip + 1)); sb_puts(&c, " to "); sb_i32(&c, (int32_t)(skip + shown));
-                         sb_puts(&c, " of "); sb_i32(&c, (int32_t)(skip + shown + left)); }
+                         sb_puts(&c, " of "); sb_i32(&c, (int32_t)(skip + shown + left));
+                         pages = (skip + shown + left + STATUS_BBS_PAGE - 1) / STATUS_BBS_PAGE; }
+            else if (left < 0) sb_puts(&c, "The boards are shown while no call is in progress: try again in a moment.");
             else sb_puts(&c, q[0] ? "No board answers that search." : "No boards here.");
             sb_puts(&c, "</p>\n");
             ln = c.len;
@@ -408,14 +435,8 @@ int status_render_bbs(status_bbs_rows rows, void *ctx, const char *query, size_t
         }
         if (!shown) sb_puts(&b, "<tr><td colspan=\"3\">none</td></tr>\n");
         sb_puts(&b, "</table></div>\n");
-        if (page > 1 || left || q[0]) {
-            sb_puts(&b, "<p class=\"sw\">");
-            if (page > 1) { bbs_link(&b, page - 1, q, "Previous"); sb_puts(&b, " "); }
-            if (left) { bbs_link(&b, page + 1, q, "Next"); sb_puts(&b, " "); }
-            if (q[0]) sb_puts(&b, "<a href=\"/bbs\">All boards</a>");
-            sb_puts(&b, "</p>");
-        }
-        sb_puts(&b, "<p>The boards are those of the <a href=\"https://www.telnetbbsguide.com\">Telnet BBS Guide</a>; the box fetches its list once a day.</p>");
+        bbs_pages(&b, page, pages, q);
+        sb_puts(&b, "<p>The boards are those of the <a href=\"https://www.telnetbbsguide.com\">Telnet BBS Guide</a>; the box fetches its list from <a href=\"https://netstalgia.online\">Netstalgia</a> once a day.</p>");
     } else sb_puts(&b, "<p>The list of boards is not there.</p>");
     sb_puts(&b, "</section>\n" PAGE_END);
     return b.ovf ? -1 : (int)b.len;

@@ -57,8 +57,11 @@ the stock firmware stays in the box, one click away.
   from whoever runs that network. Not done: DreamPi's closed helper programs.
 - A telephone number for every bulletin board and **1 800 BBS DIAL**
   (1 800 227 3425), on every port, whatever its service: see below.
-- A web interface ("Nestaliga") for all of it: dashboard, line, modem,
-  users, network, system, bulletin boards, firmware and calls, with a
+- Numbers that connect straight to a service, raw or over telnet: your own
+  and Netstalgia's (a game server, a text service): see below.
+- A web interface ("Nestaliga") for all of it, in four sections: Status
+  (dashboard, calls), Phone (line, modem, users), Services (bulletin boards,
+  numbers to services) and System (network, system, firmware), with a
   Consoles page (the
   Dreamcast switches and the Saturn matchmaking switch) when a port uses one
   of those services. The pages follow the box: both phone ports on an HT802,
@@ -95,23 +98,70 @@ telnet negotiation stays inside the box; the terminal sees the board, ANSI
 and all. When the board logs you off, the line is dropped, as it always
 was.
 
-The **BBS** page of the web interface lists the boards with their numbers,
+The **BBS** page of the web interface (under **Services**) lists the boards with their numbers,
 a hundred to a page, with a search by name or number.
 The boards are those of the [Telnet BBS Guide](https://www.telnetbbsguide.com),
-more than a thousand of them: a box that uses the numbers fetches the
-guide's own list once a day and stays current without a firmware release.
+more than a thousand of them: a box that uses the numbers fetches the list
+once a day and stays current without a firmware release. It comes from
+[Netstalgia](https://netstalgia.online), which serves the guide's list
+ready for v90d and signs it: a box takes only a list Netstalgia signed.
 They go by the login names 2600.network uses for the same boards
 (`20forbeers` for "20 For Beers BBS"). Where two names begin alike, the
 second board takes the next free number, so look a number up on the page or
-with `?` before you put it in a phone book. A short list in the image
-([lists/bbs.txt](lists/bbs.txt)) serves until the first fetch or when the
-box has no way out. Only boards of the list can be called. The port's own
+with `?` before you put it in a phone book. The list as it was at the release
+([lists/bbs.txt](lists/bbs.txt)) is in the image and serves until the
+first fetch or when the box has no way out. Only boards of the list can be called. The port's own
 number is still the dial-up connection (a ten-digit one also with a 1 in
 front, the way Windows dials it).
 
 The idea is that of [2600.network](https://2600.network), which does this
 for callers on the real telephone network; here it is one box and your own
 telephone line to it.
+
+## 1 776 869 3200: PROTOWEB
+
+**776 869 3200** (PROTOWEB on the keypad, with or without the 1) is the old
+web on any port whose service is the plain internet: the port's own dial-up
+connection with its login, but every web, FTP and name lookup of that call
+goes to the archive gateway (Protoweb's web as it was), as on a port set to
+Archive. The port's own number stays the internet as it is. Netstalgia
+answers the same number the same way.
+
+## Numbers to services
+
+A number can also connect a caller straight to one service on the internet,
+with no PPP and no prompt. **Raw** passes what the modems send both ways as
+it is, for a game or program with its own protocol: the AOL client of
+Neverwinter Nights dials **1 385 596 1775** and reaches the revived server.
+**Telnet** says `Calling` and the name, then joins a board or text service.
+The call ends when the service hangs up.
+
+Put up to 16 numbers of your own under **Services**, on the **Numbers** page (number, host,
+port, raw or telnet, a name); a host on your own network is fine. The box
+also answers the numbers in [Netstalgia](https://netstalgia.online)'s
+signed list of services, which it fetches once a day (switch it off on the
+same tab and it never asks). Your numbers come first. The list as it was
+at the release ([lists/services.txt](lists/services.txt)) is in the image.
+
+## The terminal menu
+
+With **Terminal menu** on (Services, Numbers page), a caller who dials a
+port's Internet number with a terminal program (HyperTerminal, Telix,
+minicom) gets Netstalgia's main menu instead of silence: the planet and
+the wordmark in ANSI art, "ANSI colour? Y/n" (n: plain ASCII), then a
+menu with a highlight bar. **1 Start PPP** hands the same call over to PPP,
+**2 Who's online** shows what the box's lines are doing, **3 BBS
+directory** lists every board of 1-800-BBS-DIAL, 15 a page, with a search
+over names, places, software and descriptions and a page for each board
+(location, software, nodes, the login for new users, the guide's
+description), and **C** there connects to the board on the same call;
+logging off the board comes back to the directory. **G** says goodbye.
+Dial-Up Networking callers never see it: their first PPP frame takes them
+straight to PPP. The board details come from the Telnet BBS Guide, by way
+of a second signed list from Netstalgia; until the box has it, the
+directory shows names and numbers. Off by default: a PPP program that waits
+for the box to speak first needs it off. The menu is shared with
+Netstalgia's own dial-in (`term/`).
 
 ## What it is made of
 
@@ -238,8 +288,9 @@ make -C fw test-release # the firmware file, the flash tools and the loader agai
 | `ppp/` | the PPP server |
 | `tel/` | tones, dialling, the call's life |
 | `dce/` | modem, link layer and PPP tied into one call |
-| `srv/` | the daemon: calls, network, NAT, the per-port services, the bulletin board calls |
-| `lists/` | the short list of bulletin boards in the image |
+| `srv/` | the daemon: calls, network, NAT, the per-port services, the bulletin board and service calls |
+| `term/` | the terminal menu: screen, art, the BBS directory and the Telnet BBS Guide's details (shared with Netstalgia) |
+| `lists/` | Netstalgia's signed lists in the image: the bulletin boards, the numbers to services |
 | `cfg/` | settings, status and the web interface |
 | `arch/` | the Archive service's helpers |
 | `fw/` | the firmware: kernel board support and drivers, loader, flash tools, image and release build |

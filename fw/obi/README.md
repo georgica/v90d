@@ -1,12 +1,12 @@
 # v90d on the Obihai OBi200
 
 The OBi200 (one telephone port) runs v90d on **our own Linux 6.6 kernel**,
-with drivers for this box written for v90d (`fw/kernel`), and the community
-firmware's file system around it. Only the box's `/obi` part of the flash
-(the maker's application) is replaced: U-Boot, the maker's kernel in the
-flash, the root file system and the recovery mode stay as they are. At every
-start the maker's kernel boots first and `/obi/obi` then starts ours from RAM
-(see "Two kernels" below). If ours does not come up, the box stays on the
+with drivers for this box written for v90d (`fw/kernel`), on a root file
+system of our own (see "Our own root file system" below). The box's root
+file system and `/obi` parts of the flash are replaced: U-Boot, the maker's
+kernel in the flash and the recovery mode stay as they are. At every start
+the maker's kernel boots first and `/obi/obi` then starts ours from RAM (see
+"Two kernels" below). If ours does not come up, the box stays on the
 maker's kernel, where the same v90d runs too.
 
 Each release carries **`v90d-obi200.fw`**, ready to install. It is built by
@@ -66,21 +66,22 @@ DHCP, with v90d's pages (user `admin`, password `admin` until you change it
 on the Settings page). The telephone port is v90d's line; the settings live in
 the box's writable flash (`/scratch/v90d`) and survive updates.
 
-There is no SSH under our kernel, as on the HT80x: the status and settings
-pages are the way in. (Under the maker's kernel the community firmware's own
-start script still starts its dropbear.)
+There is no SSH, as on the HT80x: the status and settings pages are the way
+in, and the rescue address 169.254.90.1 when the LAN has none. (Our root
+file system starts no dropbear or telnetd under either kernel.)
 
 ## Update
 
 On v90d's **Firmware** page, upload a newer `v90d-obi200.fw` (from a
 release, or built the same way). The page checks the whole file, writes only what differs from the flash
-(normally `/obi` alone), and restarts the box.
+(normally `/obi` and the root file system), and restarts the box.
 
 ## Going back
 
 Upload the community firmware file itself (BASE) on v90d's Firmware page. It
-differs from the flash in `/obi` only, so that is all that is written, and the
-box restarts into the maker's application with its old settings.
+differs from the flash in `/obi` and the root file system, so those are
+written, and the box restarts into the maker's application with its old
+settings.
 
 If the power goes while the flash is written, or something else leaves the box
 unable to start, it comes up in the maker's **recovery mode**: a plain page
@@ -116,6 +117,56 @@ DMA, which ours takes over from the maker's kernel as it runs) were
 reconstructed from the maker's kernel and modules; `fw/kernel/*-NOTES.md`
 say what is verified and what is inferred.
 
+## Our own root file system
+
+`v90d-obi200.fw` carries v90d's own root file system (`mkrootfs.py`) in
+place of the maker's, in its 6.75 MiB part at 0x480000, so the box has what
+the HT802 has: the archive gateway, OpenVPN (the IWANGO games' VPN, its
+profile kept in `/scratch/v90d`), the daily update check and the Install
+button (`fwupdate.sh`, through obinv), the Dreamcast console's own address
+(`dclease.script`), and the clock from NTP. It holds our static BusyBox, our
+start files (`rootfs/`: `inittab`, `rcS` for the maker's kernel), the archive
+gateway and OpenVPN, and, taken out of BASE when it is built as the modules
+are, the maker's `swcfg`, `unicfg` and `iptables` with their libraries (used
+only under the maker's kernel). About a third of the part is used. Our kernel
+mounts it as before (oinit); the maker's kernel boots it from the flash and
+runs `rcS`, which makes `/dev` from `/sys` (this BusyBox's `mdev -s` names
+nodes by number on 2.6.30) and starts `/obi/obi`.
+
+Two nets against a box that starts but cannot be reached: `make test` runs
+`test_scripts.py`, which checks every command the start scripts run against
+the programs of the image, and runs the ones whose options differ between
+BusyBox versions with the scripts' own options under qemu-arm; and the box
+always answers on the rescue address 169.254.90.1 (as the HT802 does), also
+when DHCP gives it nothing: the daemon listens on the LAN port itself, not
+only once it has an address.
+
+It runs on a unit (a dial-up call with PPP and NAT through it). Every start goes through this file system, so a
+mistake in it is not caught by the boot's checksum test: the box starts, but
+may be unreachable. Keep a 3.3 V serial adapter at hand when trying a change.
+
+### Getting back in with a serial cable and a network cable
+
+The serial console (115200 8N1) stops U-Boot when a key comes during its
+one-second countdown. Its `sf` flash commands loop forever here: do not use
+them. The maker's kernel is already in RAM at 0x800000, and that kernel has a
+RAM flash device of 8 MiB at 0x3800000 (its `/dev/mtdblock0`, which its
+recovery mode boots from). With the box's LAN port cabled to a computer at
+192.168.15.102 that serves TFTP:
+
+    setenv ipaddr 192.168.15.33
+    tftpboot 3800000 rescue.sqsh        (a squashfs: BusyBox, obinv, /init, /dev/console)
+    tftpboot 4000000 v90d-obi200.fw     (above the kernel's 56 MiB: left alone)
+    setenv bootargs console=ttyS0,115200 root=/dev/mtdblock0 rootfstype=squashfs mem=56M init=/init FWSIZE=<octets> FWMD5=<md5>
+    bootm 800000
+
+The rescue's `/init` copies the file out of physical memory (through an
+mmap of `/dev/mem`: a read() above the kernel's memory is refused), checks
+its MD5, and writes it with `obinv serve-upgrade` on the whole chip
+(`/dev/mtd6` under the maker's kernel), which restarts the box. `KEY=VALUE`
+words of the command line reach init's environment; other words after
+`init=` do not reach the program.
+
 ## How it works
 
 | piece | what it is |
@@ -128,7 +179,7 @@ say what is verified and what is inferred.
 | `obinv.c` | the Firmware page's flash tool on this box (the HT80x has fw/tools/v90nv) |
 | `compat26.c` | `rename` and `accept4` for Linux 2.6.30, older than our C library expects |
 | `mkobifw.py` | the firmware file builder; the file format is in its header |
-| `udhcpc.script` | the LAN address by DHCP |
+| `udhcpc.script` | the LAN address by DHCP (fw/udhcpc.script, the HT80x's) |
 
 The daemon itself is the same as on the HT80x (`make -C srv v90d-obi`), built
 with `compat26.c` and a 16 MiB Firmware page upload. Under our kernel it uses
@@ -146,7 +197,7 @@ Read off the unit (the maker's binaries were studied, not used in ours).
 kernel 0x50000, recovery kernel 0x2D0000, **header of the last firmware file
 written 0x470000** (the boot checks the partitions against it: a firmware
 file that does not carry every part leaves the box in recovery mode), root
-file system 0x480000, `/scratch` (jffs2) 0xC0000, `/obi` 0xC00000 (0x240000),
+file system 0x480000 (0x6C0000), `/scratch` (jffs2) 0xB40000 (0xC0000), `/obi` 0xC00000 (0x240000),
 recovery root file system 0xE40000.
 
 **Firmware file:** see `mkobifw.py`. The update page checks a keyed MD5 over

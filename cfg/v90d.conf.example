@@ -114,3 +114,14 @@ level = info
 # if there is one, offer it on the Firmware page (one click to install). Off
 # means the box never contacts GitHub. Nothing is installed without a click.
 update_check = off
+
+[services]
+# Numbers that connect a caller straight to a service on the internet, on
+# either port: no PPP, the call carries what the modems send.
+# on (default) or off: also answer the numbers of Netstalgia's signed list,
+# which the box fetches once a day. Off means it never asks for it.
+netstalgia = on
+# service = NUMBER HOST:PORT raw|telnet NAME, up to 16. NUMBER is 3 to 15
+# digits as dialled; raw passes the octets as they are, telnet says
+# "Calling NAME ..." and speaks telnet. The host may be on your network.
+# service = 5550100 192.168.1.20:23 telnet My board

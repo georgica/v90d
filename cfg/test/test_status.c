@@ -2,6 +2,7 @@
  * escaping of hostile strings, bounded output at every buffer size. */
 #include <string.h>
 #include "test.h"
+#include "page.h"
 #include "status.h"
 
 #define IP(a, b, c, d) (((uint32_t)(a) << 24) | ((uint32_t)(b) << 16) | ((uint32_t)(c) << 8) | (uint32_t)(d))
@@ -168,22 +169,24 @@ static void test_idle(void)
     CHECK(strncmp(html, "<!DOCTYPE html>", 15) == 0);
     CHECK(has(html, "</html>\n"));
     CHECK(has(html, "<td>idle</td>"));
-    /* self-contained: no script, nothing fetched from anywhere */
-    CHECK(!has(html, "<script") && !has(html, "src=") &&
+    /* self-contained: the box's one script, nothing inline, nothing fetched from anywhere else */
+    CHECK(has(html, "<script src=\"/ui.js?v=" V90D_VERSION "\" defer></script>") && !has(html, "<script>"));
+    CHECK(strstr(strstr(html, "src=") + 4, "src=") == NULL &&
           !has(html, "url(") && !has(html, "http:") && !has(html, "https:") && !has(html, "@import"));
     /* every link leads to a page of the same server; the first to the settings */
     {
         const char *a = strstr(html, "href=");
         int n_links = 0;
-        CHECK(a != NULL && strncmp(a, "href=\"/line\">Line</a>", 21) == 0);
+        CHECK(a != NULL && strncmp(a, "href=\"/\">Status</a>", 19) == 0);
         for (; a; a = strstr(a + 5, "href=")) { CHECK(a[6] == '/' && a[7] != '/'); n_links++; }
-        CHECK_EQ_I(n_links, 9);                 /* five settings tabs, BBS, Firmware, Calls, Log out */
+        CHECK_EQ_I(n_links, 14);                /* four sections, their pages but this one (Consoles hidden), Log out */
     }
     CHECK(has(html, "<meta http-equiv=\"refresh\" content=\"5\">"));
     /* the look: light and dark, a header that marks this page, the state
      * as a badge with a line under it, the call list free to scroll */
     CHECK(has(html, "prefers-color-scheme:dark"));
-    CHECK(has(html, "<nav><b>Dashboard</b>"));
+    CHECK(has(html, "<nav><span class=\"mn\"><a class=\"on\" href=\"/\">Status</a><span class=\"dd\"><b>Dashboard</b><a href=\"/calls\">Calls</a></span></span>"));
+    CHECK(has(html, "nav .mn:hover .dd,nav .mn:focus-within .dd{display:block}"));      /* the drop-down, by CSS alone */
     CHECK(has(html, "<title>Nestaliga status</title>"));
     CHECK(has(html, "<h1><i></i>Nestaliga<small>dial-up server</small></h1>"));
     CHECK(has(html, "<span class=\"b s0\">idle</span>"));
@@ -420,7 +423,7 @@ static void test_escaping(void)
     fill(&s);
     strcpy(s.peer_name, "<script>alert('x')</script>&\"\\");
     CHECK(status_render_html(&s, html, sizeof html) > 0);
-    CHECK(!has(html, "<script"));
+    CHECK(!has(html, "<script>"));
     CHECK(!has(html, "alert('"));
     CHECK(has(html, "<td>&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;&amp;&quot;\\</td>"));
     CHECK(status_render_json(&s, json, sizeof json) > 0);

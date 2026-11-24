@@ -16,8 +16,11 @@
 #include "upnp.h"
 #include "saturn.h"
 #include "bbs.h"
+#include "bbssig.h"
+#include "ed25519.h"
 #include "telnet.h"
 #include "bbsdial.h"
+#include "svc.h"
 #include <signal.h>
 #include <poll.h>
 #include <sys/socket.h>
@@ -1495,6 +1498,115 @@ static void test_bbs_shipped_list(void)
     CHECK_EQ_I(twice, 0);
 }
 
+/* the signature on a fetched list (bbssig.h): Ed25519 as RFC 8032 has it,
+ * and a list taken only when a known key signed every octet before its
+ * signature line */
+static void hexin(const char *h, uint8_t *o, size_t n) { size_t i; unsigned v; for (i = 0; i < n; i++) { if (sscanf(h + 2 * i, "%2x", &v) != 1) v = 0; o[i] = (uint8_t)v; } }
+static void test_bbs_signature(void)
+{
+    static const char body[] = "# test list\nv90d-bbs 2\nbbs telehack 2278353422 telehack.com Telehack\n";
+    static const char sighex[] = "7c87360e8104f757a267de88b9578877b333a9348f2f56d443669a45a3b5b06d35c37940637e7a879607b4345fe88abbfa3ee6ed963708896eb09f8a0a815d05";
+    uint8_t keys[2][32], pk[32], sig[64], m[2], h[64];
+    uint64_t ser = 0;
+    char list[512], bad[512];
+    int i, zero;
+    printf("bbs: the signature on the list\n");
+    /* RFC 8032 7.1, tests 1 and 3 */
+    hexin("d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a", pk, 32);
+    hexin("e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b", sig, 64);
+    CHECK_EQ_I(ed25519_verify(sig, m, 0, pk), 0);
+    sig[63] ^= 0x01; CHECK_EQ_I(ed25519_verify(sig, m, 0, pk), -1);
+    hexin("fc51cd8e6218a1a38da47ed00230f0580816ed13ba3303ac5deb911548908025", pk, 32);
+    hexin("6291d657deec24024827e69c3abe01a30ce548a284743a445e3680d7db5ac3ac18ff9b538d16f290ae67f760984dc6594a7c15e9716ed28dc027beceea1ec40a", sig, 64);
+    m[0] = 0xaf; m[1] = 0x82;
+    CHECK_EQ_I(ed25519_verify(sig, m, 2, pk), 0);
+    m[1] ^= 0x80; CHECK_EQ_I(ed25519_verify(sig, m, 2, pk), -1);
+    /* SHA-512 of "abc" (FIPS 180-2) */
+    ed25519_sha512((const uint8_t *)"abc", 3, h);
+    CHECK(h[0] == 0xdd && h[1] == 0xaf && h[62] == 0xa4 && h[63] == 0x9f);
+
+    memset(keys, 0, sizeof keys);
+    hexin("2152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db12", keys[1], 32);
+    snprintf(list, sizeof list, "%s" BBS_SIG_TAG "%s\n", body, sighex);
+    CHECK_EQ_I(bbs_sig_check(list, strlen(list), (const uint8_t (*)[32])keys, 2, NULL), BBS_SIG_OK);
+    CHECK_EQ_I(bbs_sig_check(list, strlen(list) - 1, (const uint8_t (*)[32])keys, 2, NULL), BBS_SIG_OK);   /* no last line end */
+    /* a board changed, added in front or behind the signature: refused */
+    strcpy(bad, list); bad[strstr(bad, "telehack.com") - bad] = 'T';
+    CHECK_EQ_I(bbs_sig_check(bad, strlen(bad), (const uint8_t (*)[32])keys, 2, NULL), BBS_SIG_BAD);
+    snprintf(bad, sizeof bad, "bbs evil 2273845000 evil.example Evil\n%s", list);
+    CHECK_EQ_I(bbs_sig_check(bad, strlen(bad), (const uint8_t (*)[32])keys, 2, NULL), BBS_SIG_BAD);
+    snprintf(bad, sizeof bad, "%sbbs evil 2273845000 evil.example Evil\n", list);
+    CHECK_EQ_I(bbs_sig_check(bad, strlen(bad), (const uint8_t (*)[32])keys, 2, NULL), BBS_SIG_NONE);
+    /* no signature line, a short one, upper case hex: none */
+    CHECK_EQ_I(bbs_sig_check(body, strlen(body), (const uint8_t (*)[32])keys, 2, NULL), BBS_SIG_NONE);
+    snprintf(bad, sizeof bad, "%s" BBS_SIG_TAG "%.126s\n", body, sighex);
+    CHECK_EQ_I(bbs_sig_check(bad, strlen(bad), (const uint8_t (*)[32])keys, 2, NULL), BBS_SIG_NONE);
+    snprintf(bad, sizeof bad, "%s" BBS_SIG_TAG "7C%s\n", body, sighex + 2);
+    CHECK_EQ_I(bbs_sig_check(bad, strlen(bad), (const uint8_t (*)[32])keys, 2, NULL), BBS_SIG_NONE);
+    /* the serial: inside the signed part, read back, and what is taken */
+    {
+        static const char sbody[] = "# test list\n# serial 2026112301\nv90d-bbs 2\nbbs telehack 2278353422 telehack.com Telehack\n";
+        static const char ssig[] = "059b45cd2f8c8bd3f4cf3561352734bed9ef5a242cd243e69c6eceb602719f4aca37b4eb9eb7fb6ec5e80abc5e6f85177774d58f7a113909f1bb6832ad3b0f06";
+        hexin("2152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db12", keys[1], 32);
+        snprintf(list, sizeof list, "%s" BBS_SIG_TAG "%s\n", sbody, ssig);
+        CHECK_EQ_I(bbs_sig_check(list, strlen(list), (const uint8_t (*)[32])keys, 2, &ser), BBS_SIG_OK);
+        CHECK(ser == 2026112301ull);
+        /* a higher serial put in: no longer what was signed */
+        strcpy(bad, list); bad[strstr(bad, "2026112301") - bad + 9] = '9';
+        CHECK_EQ_I(bbs_sig_check(bad, strlen(bad), (const uint8_t (*)[32])keys, 2, &ser), BBS_SIG_BAD);
+        /* a serial line after the signature is not inside it */
+        snprintf(bad, sizeof bad, "%s# serial 9999999999\n", list);
+        CHECK_EQ_I(bbs_sig_check(bad, strlen(bad), (const uint8_t (*)[32])keys, 2, &ser), BBS_SIG_NONE);
+    }
+    CHECK(bbs_serial("# serial 42\n", 12) == 42);
+    CHECK(bbs_serial("# serial 42\r\n", 13) == 42);
+    CHECK(bbs_serial("# serial 42", 11) == 42);
+    CHECK(bbs_serial("a\n# serial 7\nb\n", 15) == 7);
+    CHECK(bbs_serial("# serial 1\n# serial 2\n", 22) == 0);       /* twice */
+    CHECK(bbs_serial("# serial 4x\n", 12) == 0);
+    CHECK(bbs_serial("# serial \n", 10) == 0);
+    CHECK(bbs_serial("# serial  4\n", 12) == 0);
+    CHECK(bbs_serial("# serial 9999999999999999999\n", 29) == 9999999999999999999ull);
+    CHECK(bbs_serial("# serial 99999999999999999999\n", 30) == 0); /* 20 digits */
+    CHECK(bbs_serial("# serials 4\n", 12) == 0);
+    CHECK(bbs_serial("v90d-bbs 2\n", 11) == 0);
+    CHECK_EQ_I(bbs_take(BBS_SIG_OK, 7, 6), BBS_TAKE);
+    CHECK_EQ_I(bbs_take(BBS_SIG_OK, 7, 0), BBS_TAKE);
+    CHECK_EQ_I(bbs_take(BBS_SIG_OK, 6, 6), BBS_TAKE_SAME);
+    CHECK_EQ_I(bbs_take(BBS_SIG_OK, 5, 6), BBS_TAKE_OLD);
+    CHECK_EQ_I(bbs_take(BBS_SIG_OK, 0, 0), BBS_TAKE_OLD);
+    CHECK_EQ_I(bbs_take(BBS_SIG_OK, 0, 6), BBS_TAKE_OLD);
+    CHECK_EQ_I(bbs_take(BBS_SIG_BAD, 9, 6), BBS_TAKE_UNSIGNED);
+    CHECK_EQ_I(bbs_take(BBS_SIG_NONE, 9, 6), BBS_TAKE_UNSIGNED);
+    /* signed, but by a key the box does not know (or no key at all) */
+    memset(keys, 0, sizeof keys);
+    CHECK_EQ_I(bbs_sig_check(list, strlen(list), (const uint8_t (*)[32])keys, 2, NULL), BBS_SIG_BAD);
+    keys[0][0] = 1;
+    CHECK_EQ_I(bbs_sig_check(list, strlen(list), (const uint8_t (*)[32])keys, 2, NULL), BBS_SIG_BAD);
+    /* the list in the image, once there is a key, is Netstalgia's signed one */
+    for (zero = 1, i = 0; i < BBS_SIG_KEYS * 32; i++) if (bbs_sig_keys[i / 32][i % 32]) zero = 0;
+    if (!zero) CHECK_EQ_I(bbs_sig_file("../lists/bbs.txt", bbs_sig_keys, BBS_SIG_KEYS, &ser), BBS_SIG_OK);
+    if (!zero) CHECK(ser > 0);
+    /* so is the list of services' numbers, and every line of it is one this box takes */
+    if (!zero) CHECK_EQ_I(bbs_sig_file("../lists/services.txt", bbs_sig_keys, BBS_SIG_KEYS, &ser), BBS_SIG_OK);
+    if (!zero) CHECK(ser > 0);
+    {
+        char line[512]; FILE *f = fopen("../lists/services.txt", "r"); int head = 0, bad = 0, n = 0;
+        cfg_service_t e;
+        CHECK(f != NULL);
+        while (f && fgets(line, sizeof line, f)) {
+            size_t l = strlen(line); int k;
+            if (l && line[l - 1] == '\n') line[--l] = 0;
+            k = svc_line(line, l, &e);
+            if (k == SVC_LINE_HEAD) head++;
+            else if (k == SVC_LINE_SVC) n++;
+            else if (k != SVC_LINE_NONE) bad++;
+        }
+        if (f) fclose(f);
+        CHECK_EQ_I(head, 1); CHECK_EQ_I(bad, 0); CHECK(n <= SVC_LIST_MAX);
+    }
+}
+
 static void test_v92_call(void)
 {
     cfg_t c; int ms; const st_call_t *h;
@@ -1841,9 +1953,62 @@ static void test_heavy_guard(void)
     hang_up();
 }
 
+/* the list of services' numbers (svc.h) and what a list entry may call */
+static void test_svc_list(void)
+{
+    cfg_service_t e;
+#define L(z) svc_line(z, strlen(z), &e)
+    CHECK_EQ_I(L(""), SVC_LINE_NONE);
+    CHECK_EQ_I(L("# serial 3"), SVC_LINE_NONE);
+    CHECK_EQ_I(L("v90d-svc 1"), SVC_LINE_HEAD);
+    CHECK_EQ_I(L("v90d-svc 1\r"), SVC_LINE_HEAD);
+    CHECK_EQ_I(L("v90d-svc 2"), SVC_LINE_OTHER);
+    CHECK_EQ_I(L("svc 13855961775 nwnrevival.com:5000 raw AOL Neverwinter Nights"), SVC_LINE_SVC);
+    CHECK(strcmp(e.number, "13855961775") == 0 && strcmp(e.host, "nwnrevival.com") == 0 && e.port == 5000);
+    CHECK(e.mode == CFG_SVC_RAW && strcmp(e.name, "AOL Neverwinter Nights") == 0);
+    CHECK_EQ_I(L("svc 5551234 text.example:23 telnet Text\r"), SVC_LINE_SVC);
+    CHECK(e.mode == CFG_SVC_TELNET && strcmp(e.name, "Text") == 0);
+    CHECK_EQ_I(L("menu 1 2 3"), SVC_LINE_OTHER);                    /* a kind added later */
+    CHECK_EQ_I(L("svcx 5551234 h:1 raw x"), SVC_LINE_OTHER);
+    CHECK_EQ_I(L("svc 5551234 h:1 ssh x"), SVC_LINE_BAD);
+    CHECK_EQ_I(L("svc 18002273425 h:1 raw x"), SVC_LINE_BAD);       /* the box's own */
+    CHECK_EQ_I(L("svc 2278353422 h:1 raw x"), SVC_LINE_BAD);
+    CHECK_EQ_I(L("svc 5551234 localhost:1 raw x"), SVC_LINE_BAD);
+    CHECK_EQ_I(L("svc 5551234 LocalHost.:1 raw x"), SVC_LINE_BAD);
+    CHECK_EQ_I(L("svc 5551234 a.localhost:1 raw x"), SVC_LINE_BAD);
+    CHECK_EQ_I(L("svc 5551234 127.0.0.1:1 raw x"), SVC_LINE_BAD);
+    CHECK_EQ_I(L("svc 5551234 192.168.1.1:80 raw x"), SVC_LINE_BAD);
+    CHECK_EQ_I(L("svc 5551234 10.1.2.3:80 raw x"), SVC_LINE_BAD);
+    CHECK_EQ_I(L("svc 5551234 0x7f.0.0.1:80 raw x"), SVC_LINE_BAD);
+    CHECK_EQ_I(L("svc 5551234 a.0x7f:80 raw x"), SVC_LINE_BAD);
+    CHECK_EQ_I(L("svc 5551234 0177.0.0.1:80 raw x"), SVC_LINE_BAD);
+    CHECK_EQ_I(L("svc 5551234 2130706433:80 raw x"), SVC_LINE_BAD);
+    CHECK_EQ_I(L("svc 5551234 8.8.8.8:80 raw x"), SVC_LINE_SVC);
+    CHECK_EQ_I(L("svc 5551234 1e100.net:80 raw x"), SVC_LINE_SVC);
+#undef L
+    CHECK(svc_host_ok("nwnrevival.com") && svc_host_ok("93.184.216.34"));
+    CHECK(!svc_host_ok("100.64.0.1") && !svc_host_ok("169.254.169.254") && !svc_host_ok("172.16.0.1"));
+    CHECK(svc_host_ok("172.32.0.1") && !svc_host_ok("172.31.255.255"));
+    CHECK(!svc_host_ok("224.0.0.1") && !svc_host_ok("255.255.255.255") && !svc_host_ok("0.1.2.3"));
+    CHECK(!svc_host_ok("192.0.2.1") && !svc_host_ok("198.51.100.1") && !svc_host_ok("203.0.113.1") && !svc_host_ok("198.19.0.1"));
+    CHECK(bbsdial_is_public(0x08080808u) && bbsdial_is_public(0x64800000u));    /* 8.8.8.8, 100.128.0.0 */
+    CHECK(!bbsdial_is_public(0x647fffffu) && !bbsdial_is_public(0xc0a80101u) && !bbsdial_is_public(0x7f000001u));
+    /* while digits come in */
+    CHECK_EQ_I(cfg_svc_number_begins("13855961775", "1385"), 1);
+    CHECK_EQ_I(cfg_svc_number_begins("13855961775", "3855"), 1);
+    CHECK_EQ_I(cfg_svc_number_begins("13855961775", "3855961775"), 2);
+    CHECK_EQ_I(cfg_svc_number_begins("13855961775", "13855961775"), 2);
+    CHECK_EQ_I(cfg_svc_number_begins("13855961775", "1385596177"), 1);
+    CHECK_EQ_I(cfg_svc_number_begins("3855961775", "1385596177"), 1);
+    CHECK_EQ_I(cfg_svc_number_begins("3855961775", "13855961775"), 2);
+    CHECK_EQ_I(cfg_svc_number_begins("3855961775", "4"), 0);
+    CHECK_EQ_I(cfg_svc_number_begins("555", "5556"), 0);
+}
+
 int main(void)
 {
     test_lin_scale();
+    test_svc_list();
     test_line_dev();
     test_level();
     test_v22bis_call();
@@ -1867,6 +2032,7 @@ int main(void)
     test_telnet();
     test_bbs_call();
     test_bbs_shipped_list();
+    test_bbs_signature();
     test_bbsdial();
     test_bbsdial_self();
     test_v34_call();

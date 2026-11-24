@@ -179,16 +179,44 @@ static void sl_stun_send(struct sat_link *l)
     sa.sin_family = AF_INET; sa.sin_port = htons(stun_port); sa.sin_addr.s_addr = htonl(stun_ip);
     (void)sendto(l->udp, req, sizeof req, MSG_DONTWAIT | MSG_NOSIGNAL, (struct sockaddr *)(void *)&sa, sizeof sa);
 }
-/* learn the STUN server address once (the test gives it with -S) */
-static void sl_stun_resolve(void)
+/* The STUN server's address, learnt once (the test gives it with -S). A
+ * name lookup can take seconds: a child makes it, while a port has
+ * matchmaking on, and hands the address back over a pipe; the loop never
+ * waits for it. A call that comes before it is known is ended. */
+static pid_t stun_pid; static int stun_fd = -1; static uint32_t stun_next;
+static void sl_stun_poll(uint32_t now_ms)
 {
-    struct addrinfo hints, *res = NULL;
-    if (stun_ip) return;
-    memset(&hints, 0, sizeof hints); hints.ai_family = AF_INET; hints.ai_socktype = SOCK_DGRAM;
-    if (getaddrinfo(SATURN_STUN_HOST, NULL, &hints, &res) == 0 && res) {
-        stun_ip = ntohl(((struct sockaddr_in *)(void *)res->ai_addr)->sin_addr.s_addr);
-        freeaddrinfo(res);
+    int k, want = 0, pp[2];
+    if (stun_pid > 0) {
+        uint8_t a[4]; ssize_t r = read(stun_fd, a, sizeof a);
+        if (r == 4) stun_ip = (uint32_t)a[0] << 24 | (uint32_t)a[1] << 16 | (uint32_t)a[2] << 8 | a[3];
+        if (r == 4 || r == 0 || (r < 0 && errno != EAGAIN && errno != EINTR)) {
+            close(stun_fd); stun_fd = -1;
+            (void)kill(stun_pid, SIGKILL); (void)waitpid(stun_pid, NULL, 0);   /* done, or as good as: it has written or gone */
+            stun_pid = 0;
+        }
+        return;
     }
+    if (stun_ip) return;
+    for (k = 0; k < n_ports; k++) if (S[k].cfg.service == CFG_SERVICE_SATURN && S[k].cfg.sat_match) want = 1;
+    if (!want || (int32_t)(now_ms - stun_next) < 0) return;
+    stun_next = now_ms + 60000;                 /* not found: again in a minute */
+    if (pipe2(pp, O_CLOEXEC | O_NONBLOCK) < 0) return;
+    stun_pid = fork();
+    if (stun_pid == 0) {
+        struct addrinfo hints, *res = NULL;
+        child_plain(-1, -1, 0);
+        memset(&hints, 0, sizeof hints); hints.ai_family = AF_INET; hints.ai_socktype = SOCK_DGRAM;
+        if (getaddrinfo(SATURN_STUN_HOST, NULL, &hints, &res) == 0 && res) {
+            uint32_t ip = ntohl(((struct sockaddr_in *)(void *)res->ai_addr)->sin_addr.s_addr);
+            uint8_t a[4] = { (uint8_t)(ip >> 24), (uint8_t)(ip >> 16), (uint8_t)(ip >> 8), (uint8_t)ip };
+            if (write(pp[1], a, sizeof a) != (ssize_t)sizeof a) _exit(1);
+        }
+        _exit(0);
+    }
+    close(pp[1]);
+    if (stun_pid < 0) { stun_pid = 0; close(pp[0]); return; }
+    stun_fd = pp[0];
 }
 /* start a match-server query for `action`; the answer is read over a pipe */
 static void sl_query(int k, const char *action)
@@ -200,12 +228,8 @@ static void sl_query(int k, const char *action)
     l->q_len = 0; l->q_at = 0;
     l->q_pid = fork();
     if (l->q_pid == 0) {
-        struct sched_param sp;
-        memset(&sp, 0, sizeof sp);
-        (void)sched_setscheduler(0, SCHED_OTHER, &sp);
-        (void)munlockall();
         (void)fcntl(pp[1], F_SETFL, 0);
-        if (dup2(pp[1], 1) < 0) _exit(126);
+        child_plain(-1, pp[1], 0);
         if (mm_cmd[0])
             execl("/bin/sh", "sh", "-c", mm_cmd, "mm", action, l->game, ip12, portstr, (char *)NULL);
         snprintf(url, sizeof url, "https://%s%s?action=%s&gameID=%s&client_ip=%s&port=%s&key=%s",
@@ -245,11 +269,12 @@ static int sl_peer_ok(uint32_t a, uint32_t pub)
 void satlink_poll(uint32_t now_ms)
 {
     int k;
+    sl_stun_poll(now_ms);
     for (k = 0; k < n_ports; k++) {
         struct sat_link *l = &sl[k]; uint32_t addr = 0; int on = 0, kind = srv_link(&S[k], &addr, &on);
         struct sockaddr_in sa; socklen_t sl_n; ssize_t r; int i; char a[16];
 
-        if (kind == SATURN_NONE || kind == SRV_LINK_BBS) {      /* a bulletin board call is bbslink.c's */ if (l->st != SL_IDLE) { sl_close(l); l->st = SL_IDLE; } continue; }
+        if (kind == SATURN_NONE || kind == SRV_LINK_BBS || kind == SRV_LINK_SVC || kind == SRV_LINK_MENU) {      /* a bulletin board or service call is bbslink.c's */ if (l->st != SL_IDLE) { sl_close(l); l->st = SL_IDLE; } continue; }
         switch (l->st) {
         case SL_IDLE:
             if (!on) break;                         /* the modem first */
@@ -259,7 +284,6 @@ void satlink_poll(uint32_t now_ms)
                  * address by STUN, then ask the match server to pair us */
                 l->mm_wait = kind == SATURN_MATCH_WAIT;
                 { const char *g = srv_link_game(&S[k]); l->game[0] = g[0]; l->game[1] = g[1]; l->game[2] = 0; }
-                sl_stun_resolve();
                 if (!stun_ip) { sl_over(k, "matchmaking needs the STUN server address and has none"); break; }
                 if (sl_udp_bind(l, l->mm_wait ? SATURN_UDP_WAIT : SATURN_UDP_CALL) < 0) { sl_over(k, "no UDP port for matchmaking"); break; }
                 l->pub = 0; l->stun_tries = 0; l->stun_at = now_ms; l->q_asked = 0; l->q_pid = 0; l->q_fd = -1;

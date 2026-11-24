@@ -25,6 +25,7 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 
 #include "dns.h"
 #include "http.h"
@@ -32,6 +33,8 @@
 #include "ftp.h"
 
 #define MAX_SESS   12            /* TCP sessions at a time; more are refused */
+#define PEER_SESS  8             /* of them, from one caller: the other line keeps some */
+#define HEAD_S     30            /* the whole request head, from the connect on */
 #define IN_MAX     8192          /* request head limit; also the relay buffer */
 #define UP_MAX     (IN_MAX + 1024)
 #define DN_MAX     2048          /* converted listing on its way to the client */
@@ -45,7 +48,7 @@
 enum { K_FREE = 0, K_HTTP, K_FTP };
 enum { H_HEAD, H_CONNECT, H_RELAY, H_LINGER };                     /* HTTP session */
 enum { X_IDLE, X_CONNECT, X_SEND, X_HEAD, X_DATAWAIT, X_STREAM };  /* FTP fetch */
-enum { R_SIG, R_DNS, R_LHTTP, R_LFTP, R_C, R_P, R_D, R_L };        /* what a polled fd is */
+enum { R_SIG, R_DNS, R_LHTTP, R_LFTP, R_RES, R_C, R_P, R_D, R_L };        /* what a polled fd is */
 
 typedef struct {
     int      kind, state;
@@ -57,6 +60,7 @@ typedef struct {
     long     deadline;
     uint32_t peer, orig;         /* client address, address it wanted to reach */
     int      c_eof, p_eof, strip, closing, d_conn, x_state, act, x_err, lst_done;
+    int      x_open;             /* the 150 went out: the data connection is this fetch's */
     long     body_left, x_clen;
     unsigned long x_got, n_up, n_down;
     unsigned n_cmd, n_xfer;
@@ -81,6 +85,7 @@ static unsigned proxy_port = 7851, dns_port = 8053, http_port = 8080, ftp_port =
 static unsigned pasv_lo = 50000, pasv_hi = 50015, pasv_next;
 static uint32_t bind_ip;         /* host order, 0 = any */
 static int      verbose;
+static int      redirected_only; /* -r: a connection made to our port itself is refused */
 static unsigned idle_s = IDLE_S, connect_s = CONNECT_S, linger_s = LINGER_S;
 
 static struct sockaddr_in proxy_sa;
@@ -89,8 +94,8 @@ static long proxy_tried;
 
 static int sig_pipe[2] = { -1, -1 };
 
-static struct pollfd pfds[4 + MAX_SESS * 4];
-static struct { int role; unsigned gen; sess_t *s; } pmeta[4 + MAX_SESS * 4];
+static struct pollfd pfds[5 + MAX_SESS * 4];
+static struct { int role; unsigned gen; sess_t *s; } pmeta[5 + MAX_SESS * 4];
 static int npfd;
 
 static const char page_502[] = "Archive mode could not reach the archive (the Protoweb proxy).\r\n";
@@ -153,15 +158,18 @@ static int listen_on(int type, uint32_t ip, unsigned port)
 /* The address the client wanted to reach. Behind a kernel redirect that is
  * the original destination kept by conntrack; without one (tests on a PC)
  * it is simply the local address of the connection. */
-static uint32_t orig_dst(int fd)
+static uint32_t orig_dst(int fd, unsigned *port)
 {
     struct sockaddr_in sa;
     socklen_t len = sizeof sa;
 
+    *port = 0;
 #ifdef __linux__
     memset(&sa, 0, sizeof sa);
-    if (getsockopt(fd, IPPROTO_IP, 80 /* SO_ORIGINAL_DST */, &sa, &len) == 0 && sa.sin_family == AF_INET)
+    if (getsockopt(fd, IPPROTO_IP, 80 /* SO_ORIGINAL_DST */, &sa, &len) == 0 && sa.sin_family == AF_INET) {
+        *port = ntohs(sa.sin_port);
         return ntohl(sa.sin_addr.s_addr);
+    }
     len = sizeof sa;
 #endif
     memset(&sa, 0, sizeof sa);
@@ -180,37 +188,66 @@ static int sock_err(int fd)
 
 /* --- the proxy ----------------------------------------------------------- */
 
-/* Look the proxy up. This is the one call that can block the loop for a
- * moment, so it is made at startup and after a failed connect, never more
- * often than once in RESOLVE_S. After a failure another address of the
- * name is preferred when there is one. */
+/* Look the proxy up: at startup and after a failed connect, never more
+ * often than once in RESOLVE_S. The lookup can take seconds, and every
+ * session would wait for it: a child process makes it and writes the
+ * addresses (IPv4, network order, at most RES_MAX) to a pipe the loop polls
+ * (res_fd, proxy_answer). After a failure another address of the name is
+ * preferred when there is one. */
+#define RES_MAX 8
+static int   res_fd = -1;
+static pid_t res_pid;
+
 static void proxy_resolve(void)
 {
-    struct addrinfo hints, *res = NULL, *ai;
+    int p[2];
     long t = now_s();
 
-    if (proxy_numeric) return;
+    if (proxy_numeric || res_fd >= 0) return;
     if (proxy_tried_once && t - proxy_tried < RESOLVE_S) return;
     proxy_tried_once = 1;
     proxy_tried = t;
-    memset(&hints, 0, sizeof hints);
-    hints.ai_family = AF_INET;
-    hints.ai_socktype = SOCK_STREAM;
-    if (getaddrinfo(proxy_host, NULL, &hints, &res) != 0 || res == NULL) {
-        logv("proxy %s does not resolve", proxy_host);
-        return;
+    if (pipe(p) != 0) return;
+    res_pid = fork();
+    if (res_pid == 0) {
+        struct addrinfo hints, *res = NULL, *ai;
+        uint32_t a[RES_MAX];
+        size_t n = 0;
+        close(p[0]);
+        memset(&hints, 0, sizeof hints);
+        hints.ai_family = AF_INET;
+        hints.ai_socktype = SOCK_STREAM;
+        if (getaddrinfo(proxy_host, NULL, &hints, &res) == 0) {
+            for (ai = res; ai != NULL && n < RES_MAX; ai = ai->ai_next)
+                if (ai->ai_family == AF_INET) a[n++] = ((struct sockaddr_in *)(void *)ai->ai_addr)->sin_addr.s_addr;
+            freeaddrinfo(res);
+        }
+        if (n > 0 && write(p[1], a, n * sizeof a[0]) < 0) _exit(1);   /* one write, under PIPE_BUF: whole */
+        _exit(0);
     }
-    for (ai = res; ai != NULL; ai = ai->ai_next) {
-        struct sockaddr_in *sa = (struct sockaddr_in *)(void *)ai->ai_addr;
-        if (ai->ai_family != AF_INET) continue;
-        if (proxy_ok && proxy_stale && sa->sin_addr.s_addr == proxy_sa.sin_addr.s_addr && ai->ai_next != NULL)
-            continue;
-        proxy_sa.sin_addr = sa->sin_addr;
+    close(p[1]);
+    if (res_pid < 0) { close(p[0]); return; }
+    res_fd = p[0];
+    (void)fcntl(res_fd, F_SETFD, FD_CLOEXEC);
+}
+
+static void proxy_answer(void)
+{
+    uint32_t a[RES_MAX];
+    ssize_t n = read(res_fd, a, sizeof a);
+    size_t i, k = n > 0 ? (size_t)n / sizeof a[0] : 0;
+
+    close(res_fd);
+    res_fd = -1;
+    (void)waitpid(res_pid, NULL, 0);     /* it has written, or ended: no wait to speak of */
+    if (k == 0) { logv("proxy %s does not resolve", proxy_host); return; }
+    for (i = 0; i < k; i++) {
+        if (proxy_ok && proxy_stale && a[i] == proxy_sa.sin_addr.s_addr && i + 1 < k) continue;
+        proxy_sa.sin_addr.s_addr = a[i];
         proxy_ok = 1;
         break;
     }
     proxy_stale = 0;
-    freeaddrinfo(res);
 }
 
 static void proxy_failed(void) { proxy_stale = 1; }
@@ -281,8 +318,12 @@ static void sess_close(sess_t *s, const char *why)
 
 static sess_t *sess_new(int kind, int fd, const struct sockaddr_in *peer)
 {
-    int i;
+    uint32_t ip = ntohl(peer->sin_addr.s_addr);
+    unsigned port;
+    int i, mine = 0;
 
+    for (i = 0; i < MAX_SESS; i++) if (sess[i].kind != K_FREE && sess[i].peer == ip) mine++;
+    if (mine >= PEER_SESS) return NULL;
     for (i = 0; i < MAX_SESS; i++) {
         sess_t *s = &sess[i];
         unsigned gen = s->gen;
@@ -292,10 +333,12 @@ static sess_t *sess_new(int kind, int fd, const struct sockaddr_in *peer)
         s->kind = kind;
         s->cfd = fd;
         s->pfd = s->dfd = s->lfd = -1;
-        s->peer = ntohl(peer->sin_addr.s_addr);
-        s->orig = orig_dst(fd);
+        s->peer = ip;
+        s->orig = orig_dst(fd, &port);
         s->x_clen = -1;
         touch(s);
+        /* the whole head in this time, not moved on by a byte at a time */
+        if (kind == K_HTTP) s->deadline = now_s() + (long)(idle_s < HEAD_S ? idle_s : HEAD_S);
         return s;
     }
     return NULL;
@@ -333,6 +376,10 @@ static void http_head(sess_t *s)
     }
     if (http_parse(s->in, hl, &r) != 0) {
         http_page(s, "400 Bad Request", "Not a request archive mode can pass on.\r\n");
+        return;
+    }
+    if (r.chunked) {             /* a body we would not know the end of; no browser of the time sends one */
+        http_page(s, "411 Length Required", "Archive mode takes a request body with a Content-Length only.\r\n");
         return;
     }
     memcpy(s->method, r.method, sizeof s->method);
@@ -402,7 +449,7 @@ static void http_event(sess_t *s, int role, int rev)
             if (s->state == H_HEAD) {
                 n = read(s->cfd, s->in + s->in_len, IN_MAX - s->in_len);
                 if (n == 0 || (n < 0 && !again())) { sess_close(s, "closed before request"); return; }
-                if (n > 0) { s->in_len += (size_t)n; touch(s); http_head(s); }
+                if (n > 0) { s->in_len += (size_t)n; http_head(s); }
             } else if (s->state == H_LINGER) {
                 static char waste[512];
                 n = read(s->cfd, waste, sizeof waste);
@@ -479,15 +526,22 @@ static void xfer_drop(sess_t *s)
     s->x_state = X_IDLE;
 }
 
-/* a fetch ended one way or another: tell the client */
+/* a fetch ended one way or another: tell the client. One that failed
+ * before its 150, with no data connection made yet, leaves the PASV or
+ * PORT for the next command, as any FTP server does. (A client that has
+ * connected closes that connection on the 550, as a rule: it goes.) */
 static void xfer_end(sess_t *s, int result)
 {
     char rep[FTP_REPLY_MAX];
     size_t n;
+    int keep = !s->x_open && s->dfd < 0 && (result == FTP_R_NOTFOUND || result == FTP_R_NOPROXY),
+        data = s->ftp.data;
 
     if (s->act == FTP_LIST || s->act == FTP_NLST || s->act == FTP_RETR) s->n_xfer++;
-    xfer_drop(s);
+    if (keep) { p_close(s); s->x_state = X_IDLE; }
+    else xfer_drop(s);
     n = ftp_reply_done(&s->ftp, result, rep, sizeof rep);
+    if (keep) s->ftp.data = data;
     rp_put(s, rep, n);
     touch(s);
 }
@@ -520,7 +574,7 @@ static void xfer_start(sess_t *s, int act)
 
     s->act = act;
     s->in_len = s->in_off = s->dn_len = s->dn_off = 0;
-    s->p_eof = s->x_err = s->lst_done = 0;
+    s->p_eof = s->x_err = s->lst_done = s->x_open = 0;
     s->x_got = 0;
     s->x_clen = -1;
     if (ftp_url(&s->ftp, dir, url, sizeof url) < 0) { xfer_end(s, FTP_R_NOTFOUND); return; }
@@ -565,6 +619,36 @@ static void ftp_act(sess_t *s, int act)
     }
 }
 
+/* While a fetch is busy, the lines waiting behind the first are looked
+ * through for an ABOR or QUIT (ftp_line answers DEFER to anything else):
+ * that one is taken out of the queue and done at once. */
+static void ftp_urgent(sess_t *s)
+{
+    char line[sizeof s->ln], rep[FTP_REPLY_MAX];
+    size_t at = 0;
+
+    while (at < s->ln_len) {
+        char *nl = memchr(s->ln + at, '\n', s->ln_len - at);
+        size_t l, t;
+        int act;
+        if (nl == NULL) return;
+        l = (size_t)(nl - (s->ln + at)) + 1;
+        t = l - 1;
+        if (t > 0 && s->ln[at + t - 1] == '\r') t--;
+        memcpy(line, s->ln + at, t);
+        line[t] = '\0';
+        if (at > 0 && (act = ftp_line(&s->ftp, line, rep, sizeof rep)) != FTP_DEFER) {
+            memmove(s->ln + at, s->ln + at + l, s->ln_len - at - l);
+            s->ln_len -= l;
+            s->n_cmd++;
+            rp_put(s, rep, strlen(rep));
+            ftp_act(s, act);
+            return;
+        }
+        at += l;
+    }
+}
+
 /* take complete command lines, one at a time, while nothing is in the way */
 static void ftp_ctl(sess_t *s)
 {
@@ -588,7 +672,10 @@ static void ftp_ctl(sess_t *s)
         memcpy(line, s->ln, t);
         line[t] = '\0';
         act = ftp_line(&s->ftp, line, rep, sizeof rep);
-        if (act == FTP_DEFER) break;         /* stays in the buffer until the fetch is over */
+        if (act == FTP_DEFER) {              /* stays in the buffer until the fetch is over, */
+            ftp_urgent(s);                   /* but an ABOR or QUIT behind it is taken now */
+            break;
+        }
         memmove(s->ln, s->ln + l, s->ln_len - l);
         s->ln_len -= l;
         s->n_cmd++;
@@ -658,6 +745,7 @@ static void ftp_head(sess_t *s, size_t hl, int status)
         s->in_off = hl;
         n = ftp_reply_open(&s->ftp, rep, sizeof rep);
         rp_put(s, rep, n);
+        s->x_open = 1;
         s->x_state = X_DATAWAIT;
         data_open(s);
         break;
@@ -883,19 +971,31 @@ static void on_accept(int lfd, int kind)
     struct sockaddr_in sa;
     socklen_t len;
     sess_t *s;
-    int fd, k;
+    int fd, k, nb;
 
     for (k = 0; k < 8; k++) {
         len = sizeof sa;
         memset(&sa, 0, sizeof sa);
         fd = accept(lfd, (struct sockaddr *)&sa, &len);
         if (fd < 0) return;
-        s = (nonblock(fd) == 0) ? sess_new(kind, fd, &sa) : NULL;
+        if (redirected_only) {
+            /* the callers' port 80 and 21 are sent here by the kernel; a
+             * connection made to this port itself is someone on the LAN
+             * using the box as a relay */
+            unsigned port;
+            if (orig_dst(fd, &port) != 0 && port == (kind == K_HTTP ? http_port : ftp_port)) { close(fd); logv("refused: not redirected"); continue; }
+        }
+        nb = nonblock(fd) == 0;
+        s = nb ? sess_new(kind, fd, &sa) : NULL;
         if (s == NULL) {
             const char *msg = (kind == K_HTTP) ? busy_http : busy_ftp;
+            char waste[512];
             if (write(fd, msg, strlen(msg)) < 0) { /* best effort */ }
+            /* input left unread makes the close a reset, which can overtake
+             * the answer: take what has come (the socket is non-blocking) */
+            while (nb && read(fd, waste, sizeof waste) > 0) ;
             close(fd);
-            logv("%s refused: all %d sessions in use", kind == K_HTTP ? "http" : "ftp", MAX_SESS);
+            logv("%s refused: no session free for this caller", kind == K_HTTP ? "http" : "ftp");
             continue;
         }
         small_buf(fd, SO_SNDBUF);
@@ -953,7 +1053,8 @@ static void usage(void)
     fprintf(stderr,
         "usage: v90arch [-x proxyhost:port] [-d dnsport] [-w httpport] [-f ftpport]\n"
         "               [-p pasvlo-pasvhi] [-n pool_base/prefix] [-b bind_address]\n"
-        "               [-t idle_seconds] [-v]\n"
+        "               [-t idle_seconds] [-r] [-v]\n"
+        "-r: only connections the kernel redirected here (the callers'), none made to the ports themselves\n"
         "defaults: -x wayback.protoweb.org:7851 -d 8053 -w 8080 -f 8021\n"
         "          -p 50000-50015 -n 198.18.0.0/15 -b 0.0.0.0 -t 120\n");
 }
@@ -967,7 +1068,7 @@ int main(int argc, char **argv)
     int c, i, dfd, hfd, ffd, stop = 0;
     char *p;
 
-    while ((c = getopt(argc, argv, "x:d:w:f:p:n:b:t:v")) != -1) {
+    while ((c = getopt(argc, argv, "x:d:w:f:p:n:b:t:rv")) != -1) {
         int bad = 0;
         size_t n;
         switch (c) {
@@ -996,6 +1097,7 @@ int main(int argc, char **argv)
             bad = (n == 0 || optarg[n] != '\0');
             break;
         case 't': bad = parse_num(optarg, 1, 86400, &idle_s); break;
+        case 'r': redirected_only = 1; break;
         case 'v': verbose = 1; break;
         default: bad = 1; break;
         }
@@ -1030,7 +1132,8 @@ int main(int argc, char **argv)
     }
 
     /* the proxy: a numeric address is used as it is, a name is looked up
-     * now and, when that fails or a connect fails, again later */
+     * from now on (a child, proxy_resolve) and, when that fails or a connect
+     * fails, again later */
     fill_sa(&proxy_sa, 0, proxy_port);
     if (inet_pton(AF_INET, proxy_host, &ia) == 1) {
         proxy_sa.sin_addr = ia;
@@ -1039,7 +1142,7 @@ int main(int argc, char **argv)
         proxy_resolve();
     }
     logv("v90arch: proxy %s:%u%s, dns %u, http %u, ftp %u, pasv %u-%u", proxy_host, proxy_port,
-         proxy_ok ? "" : " (not resolved yet)", dns_port, http_port, ftp_port, pasv_lo, pasv_hi);
+         proxy_ok ? "" : " (being looked up)", dns_port, http_port, ftp_port, pasv_lo, pasv_hi);
 
     while (!stop) {
         int busy = 0, r;
@@ -1050,20 +1153,21 @@ int main(int argc, char **argv)
         add(dfd, POLLIN, R_DNS, NULL);
         add(hfd, POLLIN, R_LHTTP, NULL);
         add(ffd, POLLIN, R_LFTP, NULL);
+        add(res_fd, POLLIN, R_RES, NULL);    /* -1 when no lookup runs: poll passes over it */
         for (i = 0; i < MAX_SESS; i++) {
             if (sess[i].kind == K_FREE) continue;
             busy = 1;
             sess_poll(&sess[i]);
         }
         /* with no session there is nothing to time out: sleep until asked */
-        r = poll(pfds, (nfds_t)npfd, busy ? 1000 : -1);
+        r = poll(pfds, (nfds_t)npfd, busy || res_fd >= 0 ? 1000 : -1);
         if (r < 0 && errno != EINTR) { perror("v90arch: poll"); break; }
         if (r > 0) {
             /* sessions first, new connections last, so that a slot freed in
              * this round is not handed out while its old events are pending;
              * an entry whose session changed its fds meanwhile is skipped
              * (poll reports it again next round) */
-            for (i = 4; i < npfd; i++) {
+            for (i = 5; i < npfd; i++) {
                 sess_t *s = pmeta[i].s;
                 if (pfds[i].revents == 0 || s->kind == K_FREE || s->gen != pmeta[i].gen) continue;
                 if (s->kind == K_HTTP) http_event(s, pmeta[i].role, pfds[i].revents);
@@ -1073,6 +1177,7 @@ int main(int argc, char **argv)
             if (pfds[1].revents) on_dns(dfd);
             if (pfds[2].revents) on_accept(hfd, K_HTTP);
             if (pfds[3].revents) on_accept(ffd, K_FTP);
+            if (pfds[4].revents && res_fd >= 0) proxy_answer();
         }
         now = now_s();
         for (i = 0; i < MAX_SESS; i++)
@@ -1082,6 +1187,7 @@ int main(int argc, char **argv)
     for (i = 0; i < MAX_SESS; i++)
         if (sess[i].kind != K_FREE) sess_close(&sess[i], "shutdown");
     close(dfd); close(hfd); close(ffd);
+    if (res_fd >= 0) { (void)kill(res_pid, SIGKILL); close(res_fd); (void)waitpid(res_pid, NULL, 0); }
     logv("v90arch: stopped");
     return 0;
 }
