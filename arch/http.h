@@ -9,6 +9,7 @@
 
 typedef struct {
     int    v09;                  /* "GET /path" with no version */
+    int    chunked;              /* Transfer-Encoding other than identity: a body of unknown length */
     int    absolute;             /* target already has a scheme */
     long   body;                 /* Content-Length, 0 when none */
     char   method[16];

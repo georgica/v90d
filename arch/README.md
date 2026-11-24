@@ -79,7 +79,7 @@ to the original destination address of the control connection.
 
     v90arch [-x proxyhost:port] [-d dnsport] [-w httpport] [-f ftpport]
             [-p pasvlo-pasvhi] [-n pool_base/prefix] [-b bind_address]
-            [-t idle_seconds] [-v]
+            [-t idle_seconds] [-r] [-v]
 
 | option | default | meaning |
 |--------|---------|---------|
@@ -91,6 +91,7 @@ to the original destination address of the control connection.
 | -n | 198.18.0.0/15 | address pool; prefix 8 to 22 (the pool must be larger than the name table) |
 | -b | 0.0.0.0 | address all listeners bind to |
 | -t | 120 | idle time in seconds after which a session is dropped |
+| -r | off | only connections the kernel redirected here (a caller's port 80 or 21, nat.c): one made to `-w` or `-f` itself, from the LAN, is closed at once. v90d starts the gateway with it. |
 | -v | off | one line per session on stderr, plus start and stop |
 
 Exit status 0 after SIGTERM or SIGINT, 1 when a listener cannot be opened,
@@ -147,13 +148,23 @@ Also worth doing:
   511 characters, paths at most 255, listing entries with names over 255
   characters or HTML lines over 1024 characters are skipped.
 - 512 names in the DNS table; names up to 127 characters.
-- Timeouts: 120 s without any movement drops a session (FTP: 421); 20 s for
-  the connect to the proxy; 30 s waiting for the client to close after an
-  HTTP answer was sent. Checked once a second.
+- Timeouts: 120 s without any movement drops a session (FTP: 421); an HTTP
+  request head must be whole 30 s after the connect (or the idle time, if
+  shorter), however it trickles in; 20 s for the connect to the proxy; 30 s
+  waiting for the client to close after an HTTP answer was sent. Checked
+  once a second.
+- Sessions: 12 at a time, at most 8 of them from one caller, so a browser
+  on one line cannot take the other line's. More are answered 503 (FTP 421).
+- A request body is passed on by its Content-Length only: one sent chunked
+  (no browser of the time does) is answered 411.
+- FTP: an ABOR or QUIT is taken at once even behind other commands that wait
+  for the transfer. A RETR or LIST that fails before its 150 (not in the
+  archive, no proxy) leaves the PASV or PORT for the next one, unless the
+  client had already made the data connection.
 - The proxy name is resolved with getaddrinfo at startup and, after a
-  failed connect, again at most once a minute. That one call can block the
-  loop for as long as the box's resolver takes; it is also the only place
-  where the C library may allocate. With a numeric `-x` neither happens.
+  failed connect, again at most once a minute, in a child process (the
+  loop polls its pipe): a slow resolver holds up no session. With a
+  numeric `-x` no lookup is made.
 - Memory: about 365 kB of static data (12 sessions of 22.5 kB, 72 kB name
   table), touched only as sessions and names come into use; no heap. Socket
   buffers are asked to be 16 kB (send towards the caller, receive from the

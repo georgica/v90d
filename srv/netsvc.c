@@ -449,7 +449,7 @@ static void arch_poll(uint32_t now_ms)
          * redirected to it (a secure site, mail) is refused at once instead
          * of waiting for an answer that cannot come */
         if (system("ip route replace unreachable 198.18.0.0/15 2>/dev/null") != 0) { /* the gateway works without it */ }
-        execl(arch_path, arch_path, "-w", STR(ARCH_HTTP), "-f", STR(ARCH_FTP), "-d", STR(ARCH_DNS),
+        execl(arch_path, arch_path, "-r", "-w", STR(ARCH_HTTP), "-f", STR(ARCH_FTP), "-d", STR(ARCH_DNS),
               "-p", STR(ARCH_PASV_LO) "-" STR(ARCH_PASV_HI), (char *)NULL);
         _exit(127);
     }

@@ -81,6 +81,13 @@ static void test_parse(void)
     CHECK_EQ_I(http_parse(h, strlen(h), &r), -1);
     h = "GET / HTTP/1.0\r\nContent-Length: 99999999999999999999\r\n\r\n";
     CHECK_EQ_I(http_parse(h, strlen(h), &r), -1);
+    /* a chunked body is flagged (the gateway answers 411); identity is not */
+    h = "POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n";
+    CHECK_EQ_I(http_parse(h, strlen(h), &r), 0);
+    CHECK_EQ_I(r.chunked, 1);
+    h = "POST / HTTP/1.1\r\ntransfer-encoding:  Identity\r\nContent-Length: 2\r\n\r\n";
+    CHECK_EQ_I(http_parse(h, strlen(h), &r), 0);
+    CHECK_EQ_I(r.chunked, 0);
     /* a Host value that could break the request line is not used */
     h = "GET / HTTP/1.0\r\nHost: a b\r\n\r\n";
     CHECK_EQ_I(http_parse(h, strlen(h), &r), 0);
