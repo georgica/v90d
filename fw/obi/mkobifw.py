@@ -49,9 +49,13 @@ ROOTFS_FLASH = 0x480000
 ROOTFS_PART = 0x6C0000          # 0x480000 .. 0xB40000; /scratch (the settings) follows at 0xB40000
 FIRST_SEG = 0x400
 KEEP_FROM_BASE = ("ffxav_mp.ko", "ffxav_led.ko", "ffxav_wdt.ko")
-OURS = ("obi", "kinit", "udhcpc.script", "obiline", "obinv", "v90d", "v90d.conf", "VERSION",
+# /obi: what the start needs, the kernel and the lists. The programs (v90d,
+# obiline, obinv) are in the root file system (mkrootfs.py --add), which
+# both the maker's kernel and ours start from: /obi keeps its room for the
+# kernel (IPv6 alone is 112 KB of it).
+OURS = ("obi", "kinit", "udhcpc.script", "v90d.conf", "VERSION",
         "kernel.xz", "kjump", "kjump.stub", "bbsfetch.sh", "bbs.txt", "services.txt")
-EXEC = ("obi", "kinit", "udhcpc.script", "obiline", "obinv", "v90d", "kjump")
+EXEC = ("obi", "kinit", "udhcpc.script", "kjump")
 
 
 def segments(fw):

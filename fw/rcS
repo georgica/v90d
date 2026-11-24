@@ -80,6 +80,11 @@ ifconfig lo 127.0.0.1 up
 eval "$(/usr/sbin/v90d -c $CONF -p)" || LAN_MODE=dhcp
 say "LAN $LAN_MODE"
 ifconfig $LAN up
+# IPv6 needs multicast in (neighbour discovery, router advertisements), and
+# this MAC's multicast hash filter drops it: unicast IPv6 answers, a
+# neighbour solicitation never arrives. Let all multicast in instead (little
+# of it on a LAN; IPv4 is unchanged).
+ifconfig $LAN allmulti 2>/dev/null || ip link set $LAN allmulticast on 2>/dev/null
 # The lights show state and nothing else: the socket light follows the
 # Ethernet link and its traffic, the network light is on while the LAN side
 # has its address (udhcpc.script, or below for a fixed one), and each

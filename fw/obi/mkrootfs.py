@@ -15,7 +15,9 @@ What is in it:
     /obi (mkobifw.py): the maker's swcfg and unicfg (they make the LAN port
     under the maker's kernel) and iptables with its extensions (NAT under the
     maker's kernel), with the libraries they need. v90d ships none of them;
-  - whatever --add names (the archive gateway, OpenVPN).
+  - whatever --add names: v90d, obiline and obinv (the daemon and its line
+    and flash tools: /obi keeps only the start, the kernel and the lists), the
+    archive gateway, OpenVPN.
 Under v90d's own kernel only BusyBox and the --add programs are used.
 Needs mksquashfs and unsquashfs (squashfs-tools 4.x) and readelf."""
 import argparse
