@@ -199,7 +199,16 @@ static int dvf99_qspi_probe(struct platform_device *pdev)
 	d->mtd._write = dvf99_qspi_write;
 	d->mtd._erase = dvf99_qspi_erase;
 	platform_set_drvdata(pdev, d);
-	dev_info(dev, "EN25QX128A 16 MiB, QPI\n");
+	{
+		static const char *const names[] = {
+			"unknown", "EON EN25QX128A", "Winbond W25Q128FV",
+			"GigaDevice GD25Q128", "Micron N25Q128"
+		};
+		int c = d->q.chip;
+
+		dev_info(dev, "%s 16 MiB, QPI\n",
+			 (c >= 0 && c < (int)ARRAY_SIZE(names)) ? names[c] : "unknown");
+	}
 	return mtd_device_register(&d->mtd, NULL, 0);
 }
 

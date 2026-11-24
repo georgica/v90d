@@ -21,6 +21,7 @@ stock as before.
 | HT801 | V1.0A | `9610003610A` | DSPG DVF9918 | 1 | 1 × Si3217x (factory data) | **Confirmed by its owner** (a V.90 call) |
 | HT801 | V1.0A | `9611003610A` (a flash dump) | DVF99 (same device tree) | 1 | 1 × Si3217x (factory data) | **Accepted by the loader, untested** |
 | HT801 | V1.1C | `9610003611C` | DVF99 (same device tree) | 1 | 1 × Si3217x (factory data) | **Accepted by the loader, untested** |
+| HT801 | V1.1A | `9610003611A` | DSPG DVF9918 (measured) | 1 | 1 × Si3217x (measured) | **Boots v90d from flash** (loader, network, web, one FXS port; no dial-up call yet) |
 | HT801 | V2.x | not yet known | DVF9918 (expected) | 1 | 1 × Si3217x (expected) | **Expected, untested** |
 | HT802V2 | V2.0A | `9610009420A` | Rockchip RK3308H | 2 | Si32283 ProSLIC | **Rockchip; under investigation** |
 | Obihai OBi200 | 1.4 | (none) | Marvell FFxAV (88E7251 family), ARM926 | 1 | 1 × Si3226x (channel 0 wired) | **Tested** |
@@ -317,6 +318,21 @@ driver asks the second chip select whether a SLIC is there before it makes
 the second port. On an HT801 the daemon then runs with one line and the web
 pages show one port. On the tested HT802 this was checked: both ports found,
 a call made through port 2.
+
+A real HT801 V1.1A (`9610003611A`, stock 1.0.65.3) has now run v90d from
+flash (2026-11-24). `v90d-ht801fw.bin` was installed through the stock
+upgrade page; the loader then started our system from set A, the daemon,
+the web interface and the single FXS port came up (the line driver found one
+port, as expected), the board was recognised (`9610003611A known`), and the
+start was confirmed (the loader's try counter cleared after a minute), with
+the stock firmware left good in set B. No dial-up call has been placed
+through it yet. Its flash is a Winbond W25Q128FV (JEDEC `0xEF4018`), the
+Ethernet PHY a Micrel KSZ8081 (`0x00221561`) on the generic PHY path; both
+are driven by the existing code. An earlier report that our QSPI driver
+could not bring this flash up was wrong: it came from a stale kernel image
+built before the Winbond id was added to the chip table (commit dd84708).
+Rebuilt from this branch, the driver identifies the chip and reads the flash
+on the first try.
 
 The HT801's stock upgrade page requires its own file (`v90d-ht801fw.bin`):
 the upgrader checks the part names, model key at offset 0x1A (`0xFD20`;
