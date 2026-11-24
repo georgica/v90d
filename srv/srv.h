@@ -137,6 +137,9 @@ size_t  srv_send_raw(srv_t *s, const uint8_t *oct, size_t n);
  * connection (dce_start_ppp): from now on it is a PPP call, and its login
  * deadline counts from here. -1 when it is not in the menu. */
 int     srv_start_ppp(srv_t *s);
+/* A call in its terminal menu: whether a PPP frame from the caller still
+ * takes it to PPP (dce_ppp_watch). Off while the caller is on a board. */
+void    srv_ppp_watch(srv_t *s, int on);
 void    srv_hangup(srv_t *s);
 /* The bulletin board number (bbs.h) answers on a port of any service. That
  * call carries octets like a saturn call (srv_set_raw, srv_send_raw,

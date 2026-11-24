@@ -121,7 +121,9 @@ typedef struct {
      * taken to PPP at once, those octets included, as dce_start_ppp() does;
      * any other start goes to raw_rx as it is. Nothing is dropped or sent
      * back while it decides: at most four octets wait, and a lone 7E no
-     * longer than DCE_DETECT_MS. */
+     * longer than DCE_DETECT_MS. After a terminal start the call is still
+     * watched (dce_ppp_watch): a PPP program that sent something else
+     * first (chat's CR after CONNECT) goes to PPP with its first frame. */
     int      ppp_detect;
     /* bench: the box calls (the modem on the port was told ATA): the
      * modem in the calling role (V.34, V.32bis, V.22bis, V.22, V.21 so far) and V.42
@@ -216,6 +218,9 @@ typedef struct dce {
     int         to_ppp;        /* dce_start_ppp asked: PPP once raw_q is out */
     uint8_t     det[4];        /* ppp_detect: the first octets, held while it decides */
     int         det_n, det_done;
+    int         watch;         /* ppp_detect, after a terminal start: a frame's start still takes the call to PPP */
+    uint8_t     wb[4];         /* the watch: what may be a frame's start so far */
+    int         wn;
     uint32_t    det_ms;
     union { v90m_align a; uint8_t b[V90M_MEM_SIZE]; } modem_mem;
     union { v90m_align a; uint8_t b[V90M_EC_MEM_SIZE]; } v42_mem;
@@ -268,6 +273,12 @@ size_t dce_raw_write(dce_t *d, const uint8_t *oct, size_t n);
  * raw_rx, and dce_send_ip and the PPP callbacks work as for any call.
  * Returns 0, or -1 when the call is not in its octet mode. */
 int dce_start_ppp(dce_t *d);
+/* ppp_detect: whether a PPP frame's start (7E FF 03, 7E FF 7D 23) from the
+ * caller still takes an octet-mode call to PPP after it began as a
+ * terminal's (on from the start). The octets go to raw_rx as well, at
+ * once. Off while the caller's octets are for something else whose data
+ * may hold those octets (a file sent to a board), on again after. */
+void dce_ppp_watch(dce_t *d, int on);
 /* End the call from our side, in order: PPP Terminate, LAPM release, then
  * DCE_ENDED with DCE_END_LOCAL. Takes effect in the following ticks. */
 void dce_hangup(dce_t *d);

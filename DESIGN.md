@@ -413,7 +413,12 @@ nsdiald; `srv/termsvc.c` is v90d's side).
   says (`SRV_LINK_MENU`) and `dce` watching for PPP (`ppp_detect`): a caller
   whose first octets begin a PPP frame (Dial-Up Networking's first LCP) is
   a PPP call at once and never sees the menu. Anyone else gets it 1.5 s
-  after the modems connect, or at the first key.
+  after the modems connect, or at the first key. The call stays watched
+  (`dce_ppp_watch`): a PPP frame's start later (a chat script sends a CR
+  after CONNECT, then LCP) still takes it to PPP, from that frame on; the
+  octets before it went to the menu. Not while the caller is on a board
+  (`srv_ppp_watch` off from **C** until the call to it is over), whose
+  data, a file sent to it, may hold those octets.
 - **Start PPP** queues its last screen, then `srv_start_ppp()` turns the
   call into a PPP call on the same V.42 link (`dce_start_ppp`); its login
   deadline (`SRV_LOGIN_MAX_S`) counts from there.
