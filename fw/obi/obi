@@ -134,10 +134,12 @@ $D/obinv where > /tmp/v90d.where 2>/dev/null
 ( while :; do $D/obiline -s /var/run/v90line 2>&1 | logger -t obiline; sleep 2; done ) &
 sleep 2
 # The 1-800-BBS-DIAL list and the numbers of services: the ones in the
-# image, then Netstalgia's signed ones, fetched daily (fw/bbsfetch.sh).
+# image, then Netstalgia's signed ones, fetched daily (fw/bbsfetch.sh); the
+# board details for the terminal menu's directory (none in the image).
 ( while :; do $D/v90d -c $CONF -l seq:/var/run/v90line -i $LAN -t ppp0 -N $D/obinv \
     -V /scratch/v90d/vpn.ovpn -B $D/bbs.txt -b "sh $D/bbsfetch.sh" \
     -F $D/services.txt -f "sh $D/bbsfetch.sh http://api.netstalgia.online/v1/services.txt 'v90d-svc 1'" \
+    -z "sh $D/bbsfetch.sh http://api.netstalgia.online/v1/bbsinfo.txt 'v90d-bbsinfo 1' 524288" \
     2>&1 | logger -t v90d; sleep 2; done ) &
 
 # The Restart button, and the Firmware page once it has written the flash,

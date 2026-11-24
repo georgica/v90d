@@ -17,7 +17,7 @@ static const uint16_t HIGH[128] = {
 /* the same characters for a terminal without CP437 (plain mode) */
 static const char PLAIN[129] =
     "CueaaaaceeeiiiAA" "EaAooouuyOUcLYPf" "aiounNao?--?" "?!<>"
-    ".:#|++++++|+++++" "+++++-+++++++=++" "+++++++++++#_###"
+    ".:#|++++++|+++++" "++++-++++++++=++" "+++++++++++#_###"
     "asGpSsutPOOd8pe^" "=+><()/~o.-vn2x ";
 
 uint8_t tscr_cp437(uint32_t cp)

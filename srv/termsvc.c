@@ -160,7 +160,9 @@ static int tonight(void *ctx, int i, char label[20], char value[16], int *colour
     switch (i) {
     case 0: fit(label, 20, "Lines busy");   snprintf(v, sizeof v, "%d of %d", busy_lines(), n_ports); *colour = TS_LG; break;
     case 1: fit(label, 20, "This call");    snprintf(v, sizeof v, "%s %d", mod_name(d->modulation, 1), d->bitrate); *colour = TS_YL; break;
-    case 2: fit(label, 20, "BBS boards");   snprintf(v, sizeof v, "%d", dir.n); *colour = TS_WH; break;
+    case 2: fit(label, 20, "BBS boards");
+        if (dir.n >= 1000) snprintf(v, sizeof v, "%d,%03d", dir.n / 1000, dir.n % 1000); else snprintf(v, sizeof v, "%d", dir.n);
+        *colour = TS_WH; break;
     case 3: fit(label, 20, "Calls so far"); snprintf(v, sizeof v, "%lu", (unsigned long)S[k].status.calls_total); *colour = TS_WH; break;
     default: return 0;
     }
@@ -203,7 +205,8 @@ static void start(int k, uint32_t now)
     snprintf(t->hello, sizeof t->hello, "Hello. You are on line %d of %d of this box.", k + 1, n_ports);
     snprintf(t->addr, sizeof t->addr, "%s", ip_str(S[k].cfg.ppp_peer, a));
     snprintf(t->server, sizeof t->server, "%s", ip_str(S[k].cfg.ppp_local, a));
-    snprintf(t->items_hint, sizeof t->items_hint, "%d boards to dial", dir.n);
+    if (dir.n >= 1000) snprintf(t->items_hint, sizeof t->items_hint, "%d,%03d boards to dial", dir.n / 1000, dir.n % 1000);
+    else snprintf(t->items_hint, sizeof t->items_hint, "%d boards to dial", dir.n);
     c.ctx = t;
     c.title = "NETSTALGIA ONLINE";
     c.dialed = t->dialed; c.connect = t->connect; c.node = t->node; c.speed = t->speed; c.user = t->user;
