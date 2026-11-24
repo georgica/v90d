@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Tests of obinv (the OBi200's flash tool) and mkobifw.py on the host.
+(V90D.fw is the whole image: our /obi and our root file system.)
 
     test_obinv.py OBINV BASE.fw V90D.fw
 
@@ -65,11 +66,12 @@ with tempfile.TemporaryDirectory() as tmp:
     check(r == 0 and "scheme=obi" in out and "image_name=" in out, "where: %r" % out)
 
     r, out = run(tmp, flash, ["check", V90D])
-    check(r == 0 and "would write: /obi\n" in out, "check v90d: %r" % out)
+    # the v90d file carries our /obi and our root file system
+    check(r == 0 and "would write: /obi, root file system\n" in out, "check v90d: %r" % out)
     r, out = run(tmp, flash, ["check", BASE])
     check(r == 0 and "nothing differs" in out, "check base on its own flash: %r" % out)
 
-    # install v90d: /obi and the header only
+    # install v90d: the root file system, /obi and the header only
     r, out = upload(tmp, flash, v90d)
     check(r == 0 and out.startswith("HTTP/1.0 200"), "upload v90d: %d %r" % (r, out[:60]))
     check(os.path.exists(os.path.join(tmp, "restart")), "restart note left")
@@ -77,7 +79,9 @@ with tempfile.TemporaryDirectory() as tmp:
     for t, at, seg in mk.segments(v90d):
         check(now[at:at + len(seg) - 0x40] == seg[0x40:], "part type %d in the flash" % t)
     changed = [a for a in range(0, len(now), 0x10000) if now[a:a + 0x10000] != fresh[a:a + 0x10000]]
-    check(all(a == 0x470000 or 0xC00000 <= a < 0xE40000 for a in changed), "only /obi and the header changed: %s" % [hex(a) for a in changed])
+    check(all(a == 0x470000 or 0x480000 <= a < 0xE40000 for a in changed),
+          "only the root file system, /obi and the header changed: %s" % [hex(a) for a in changed if not 0x480000 <= a < 0xE40000])
+    check(any(0x480000 <= a < 0xC00000 for a in changed), "the root file system was written")
     hdr = bytearray(now[0x470000:0x470400]); want = bytearray(v90d[:0x400])
     for i in range(struct.unpack_from("<I", v90d, 0x80)[0]):
         hdr[0xC0 + i * 0x40 + 2] = want[0xC0 + i * 0x40 + 2] = 0

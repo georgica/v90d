@@ -23,7 +23,11 @@ import mkobifw  # noqa: E402
 
 SCRIPTS = {"obi": os.path.join(HERE, "obi"), "kinit": os.path.join(HERE, "kinit"),
            "udhcpc.script": os.path.join(HERE, "udhcpc.script"),
-           "rcS": os.path.join(HERE, "rootfs", "etc", "init.d", "rcS")}
+           "rcS": os.path.join(HERE, "rootfs", "etc", "init.d", "rcS"),
+           "fwupdate.sh": os.path.join(HERE, "fwupdate.sh"),
+           "updatecheck.sh": os.path.join(HERE, "..", "updatecheck.sh"),
+           "dclease.script": os.path.join(HERE, "..", "dclease.script"),
+           "bbsfetch.sh": os.path.join(HERE, "..", "bbsfetch.sh")}
 PATH = ("sbin", "usr/sbin", "bin", "usr/bin")
 BUILTINS = set("""
 . : [ [[ alias bg break cd command continue echo eval exec exit export false fg getopts hash

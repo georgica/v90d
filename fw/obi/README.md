@@ -116,11 +116,14 @@ DMA, which ours takes over from the maker's kernel as it runs) were
 reconstructed from the maker's kernel and modules; `fw/kernel/*-NOTES.md`
 say what is verified and what is inferred.
 
-## Our own root file system (not yet the release image)
+## Our own root file system
 
-`make image-rootfs BASE=...` builds `build/v90d-obi200-rootfs.fw`: the same
-file with v90d's own root file system (`mkrootfs.py`) in place of the
-maker's, in its 7.5 MiB part at 0x480000. It holds our static BusyBox, our
+`v90d-obi200.fw` carries v90d's own root file system (`mkrootfs.py`) in
+place of the maker's, in its 7.5 MiB part at 0x480000, so the box has what
+the HT802 has: the archive gateway, OpenVPN (the IWANGO games' VPN, its
+profile kept in `/scratch/v90d`), the daily update check and the Install
+button (`fwupdate.sh`, through obinv), the Dreamcast console's own address
+(`dclease.script`), and the clock from NTP. It holds our static BusyBox, our
 start files (`rootfs/`: `inittab`, `rcS` for the maker's kernel), the archive
 gateway and OpenVPN, and, taken out of BASE when it is built as the modules
 are, the maker's `swcfg`, `unicfg` and `iptables` with their libraries (used
@@ -137,7 +140,7 @@ always answers on the rescue address 169.254.90.1 (as the HT802 does), also
 when DHCP gives it nothing: the daemon listens on the LAN port itself, not
 only once it has an address.
 
-It has run on a unit. Every start goes through this file system, so a
+It runs on a unit (a dial-up call with PPP and NAT through it). Every start goes through this file system, so a
 mistake in it is not caught by the boot's checksum test: the box starts, but
 may be unreachable. Keep a 3.3 V serial adapter at hand when trying a change.
 

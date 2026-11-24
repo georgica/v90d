@@ -7,7 +7,7 @@ CFLAGS  ?= -std=gnu99 -O2 -Wall -Wextra -Werror
 DRV     := ../drv
 BUILD   := build
 VERSION := $(shell cat ../VERSION)
-.PHONY: image-rootfs all image test clean kernel
+.PHONY: files image-rootfs all image test clean kernel
 all: $(BUILD)/obiline $(BUILD)/obinv $(BUILD)/kernel.xz
 $(BUILD):
 	@mkdir -p $(BUILD)
@@ -44,8 +44,8 @@ $(BUILD)/kernel.xz: $(BUILD)/oinit FORCE | $(BUILD)
 ../../srv/build/v90d-obi: FORCE
 	$(MAKE) -C ../../srv v90d-obi
 FORCE:
-image: $(BUILD)/obiline $(BUILD)/obinv $(BUILD)/kernel.xz ../../srv/build/v90d-obi obi kinit udhcpc.script ../v90d.conf ../VERSION ../bbsfetch.sh ../../lists/bbs.txt ../../lists/services.txt mkobifw.py
-	@test -n "$(BASE)" || { echo "make image BASE=your-OBi-firmware.fw"; exit 1; }
+# Our files of /obi, as they go into the image
+files: $(BUILD)/obiline $(BUILD)/obinv $(BUILD)/kernel.xz ../../srv/build/v90d-obi obi kinit udhcpc.script ../v90d.conf ../VERSION ../bbsfetch.sh ../../lists/bbs.txt ../../lists/services.txt
 	@rm -rf $(BUILD)/image && mkdir -p $(BUILD)/image
 	cp obi kinit udhcpc.script $(BUILD)/obiline $(BUILD)/obinv $(BUILD)/kernel.xz ../v90d.conf $(BUILD)/image/
 	cp ramboot/build/kjump $(BUILD)/image/kjump
@@ -55,26 +55,29 @@ image: $(BUILD)/obiline $(BUILD)/obinv $(BUILD)/kernel.xz ../../srv/build/v90d-o
 	cp ../bbsfetch.sh $(BUILD)/image/bbsfetch.sh
 	cp ../../lists/bbs.txt $(BUILD)/image/bbs.txt
 	cp ../../lists/services.txt $(BUILD)/image/services.txt
-	python3 mkobifw.py --full --files $(BUILD)/image "$(BASE)" $(BUILD)/v90d-obi200.fw
-# The same with v90d's own root file system (mkrootfs.py) in place of the
-# maker's: the archive gateway and OpenVPN on the box too. Not the release
-# image until it has been proven on a unit.
+# v90d's own root file system (mkrootfs.py), in place of the maker's: the
+# archive gateway, OpenVPN and the scripts the HT802 has in its /etc
 BUSYBOX = ../build/busybox-1.36.1
+ROOTFS_ADD = ../../arch/build/v90arch-arm:/usr/sbin/v90arch ../build/vpn/openvpn:/usr/sbin/openvpn \
+             ../updatecheck.sh:/etc/updatecheck.sh fwupdate.sh:/etc/fwupdate.sh ../dclease.script:/etc/dclease.script
 $(BUILD)/rootfs.sqsh: mkrootfs.py rootfs/etc/inittab rootfs/etc/init.d/rcS rootfs/etc/passwd rootfs/etc/group \
+                      fwupdate.sh ../updatecheck.sh ../dclease.script \
                       $(BUSYBOX)/busybox ../../arch/build/v90arch-arm ../build/vpn/openvpn FORCE
-	@test -n "$(BASE)" || { echo "make image-rootfs BASE=your-OBi-firmware.fw"; exit 1; }
+	@test -n "$(BASE)" || { echo "make image BASE=your-OBi-firmware.fw"; exit 1; }
 	$(MAKE) -s -C $(BUSYBOX) busybox.links
-	python3 mkrootfs.py "$(BASE)" $@ --busybox $(BUSYBOX)/busybox \
-	    --add ../../arch/build/v90arch-arm:/usr/sbin/v90arch --add ../build/vpn/openvpn:/usr/sbin/openvpn
+	python3 mkrootfs.py "$(BASE)" $@ --busybox $(BUSYBOX)/busybox $(addprefix --add ,$(ROOTFS_ADD))
 ../../arch/build/v90arch-arm:
 	$(MAKE) -C ../../arch v90arch-arm
-image-rootfs: image $(BUILD)/rootfs.sqsh
-	python3 mkobifw.py --full --rootfs $(BUILD)/rootfs.sqsh --files $(BUILD)/image "$(BASE)" $(BUILD)/v90d-obi200-rootfs.fw
+# The image: BASE's file with our /obi and our root file system in its place
+image: files $(BUILD)/rootfs.sqsh mkobifw.py
+	@test -n "$(BASE)" || { echo "make image BASE=your-OBi-firmware.fw"; exit 1; }
+	python3 mkobifw.py --full --rootfs $(BUILD)/rootfs.sqsh --files $(BUILD)/image "$(BASE)" $(BUILD)/v90d-obi200.fw
+image-rootfs: image
 # obinv and the builder on the host, against a stand-in flash (needs BASE and the image)
 $(BUILD)/obinv.host: obinv.c ../../ppp/ppp_md5.c ../../cfg/page.h ../../cfg/sbuf.h | $(BUILD)
 	cc -std=gnu99 -O2 -Wall -Wextra -Werror -I../../ppp -I../../cfg -o $@ obinv.c ../../ppp/ppp_md5.c
-test: $(BUILD)/obinv.host image image-rootfs
-	python3 test_obinv.py $(BUILD)/obinv.host "$(BASE)" $(BUILD)/v90d-obi200.fw $(BUILD)/v90d-obi200-rootfs.fw
+test: $(BUILD)/obinv.host image
+	python3 test_obinv.py $(BUILD)/obinv.host "$(BASE)" $(BUILD)/v90d-obi200.fw
 	python3 test_scripts.py $(BUILD)/rootfs.sqsh $(BUSYBOX)/busybox
 clean:
 	rm -rf $(BUILD)
