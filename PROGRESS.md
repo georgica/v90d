@@ -2931,11 +2931,15 @@ stood in the way:
   9611003610A, so the loader would not have started.
 
 `make release` now also builds `v90d-ht801fw.bin` (HT801 names, key 0xFD20,
-hardware bits FFFF as in the stock HT801 file; the same three parts), and
-the loader knows 9610003610A, under the untried rule. Our own Firmware page
-takes either model's file and keeps the box's model key in the `base` it
-writes, so an HT801 that updates itself with the HT802 file stays one the
-stock upgrader will write over.
+hardware bits FFFF as in the stock HT801 file), and the loader knows
+9610003610A, under the untried rule. The system image is wrapped once per
+model from the same kernel (`v90d ht802 VERSION`, `v90d ht801 VERSION`). The
+loader's board list gives each part number its model; our own Firmware page
+writes only an image named for the box's model ("this file is a v90d image
+for the ht802; this box is a ht801: nothing is written"), so an HT801's
+`base` never gets the HT802's model key, which the stock upgrader would
+refuse to write over. `v90nv where` prints the model, and the update check
+fetches that model's file.
 
 Proof, on one HT801 V1.0A (part number 9610003610A; 25Q128 flash, DVF9918;
 stock 1.0.65.3), its owner's report: `v90d-ht801fw.bin` (0.10.0), renamed
@@ -2954,4 +2958,12 @@ V.42              LAPM
 Compression       on
 ```
 
-Tests: TEST_PROOF
+Proof, tests: `make check` 151 programs, 3,299,858 checks, 0 failures;
+`make check-arm` (QEMU) and `make -C fw test-release` 156 programs, 1,011,136
+checks, 0 failures (v90nv 26 and the boot model 33 tests on host and ARM,
+mkgsfw 20, release 11, loader 144 on host and ARM); the same ARM binaries run
+natively on a Raspberry Pi 4: 150 programs, 1,010,778 checks, 0 failures.
+The release build made and checked both files. After the per-model images,
+`make -C fw test-release` again (v90nv 26, boot model 33 with the model check,
+loader 144, each on host and ARM) and the release build: both files, each
+image named for its model.

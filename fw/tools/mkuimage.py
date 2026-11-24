@@ -3,18 +3,20 @@
 header, as the HT802's U-Boot (2012.04) `bootm` wants it: ARM Linux kernel,
 not compressed (the zImage unpacks itself), load and entry 0xC8008000.
 
-    mkuimage.py IN OUT [VERSION]
+    mkuimage.py IN OUT [VERSION [MODEL]]
 
-The image names itself "v90d ht802 VERSION": the loader takes any name that
-starts with v90d, the running system's `v90nv upgrade` only writes an image
-that names this board.
+The image names itself "v90d MODEL VERSION" (MODEL defaults to ht802): the
+loader takes any name that starts with v90d, the running system's `v90nv
+upgrade` only writes an image whose MODEL matches this box. The kernel is the
+same for every HT80x model; only the name field differs between a model's
+images, so they are wrapped from the one zImage.
 """
 import struct, sys, time, zlib
 
 LOAD = 0xC8008000
-def main(src, dst, version='dev'):
+def main(src, dst, version='dev', model='ht802'):
     data = open(src, 'rb').read()
-    name = ('v90d ht802 ' + version).encode('ascii')
+    name = ('v90d ' + model + ' ' + version).encode('ascii')
     assert len(name) < 32, name
     name = name.ljust(32, b'\0')
     def header(hcrc):
@@ -26,5 +28,5 @@ def main(src, dst, version='dev'):
     open(dst, 'wb').write(h + data)
     print('%s: %d octets, data crc %08x' % (dst, len(h) + len(data), zlib.crc32(data) & 0xFFFFFFFF))
 if __name__ == '__main__':
-    if len(sys.argv) not in (3, 4): sys.exit(__doc__)
+    if len(sys.argv) not in (3, 4, 5): sys.exit(__doc__)
     main(*sys.argv[1:])

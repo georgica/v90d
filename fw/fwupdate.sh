@@ -12,7 +12,10 @@ v90nv="${V90NV:-/usr/sbin/v90nv}"
 case "$ver" in
     '' | *[!0-9.]*) echo "fwupdate: bad version '$ver'" >&2; exit 2 ;;
 esac
-url="https://github.com/$repo/releases/download/v$ver/v90d-ht802fw.bin"
+# the release file for this box's model (`v90nv where`); HT802 if it does not say
+model=$("$v90nv" where 2>/dev/null | sed -n 's/^model=//p')
+case "$model" in ht801 | ht802) ;; *) model=ht802 ;; esac
+url="https://github.com/$repo/releases/download/v$ver/v90d-${model}fw.bin"
 tmp="/tmp/v90d-update.bin"
 rm -f "$tmp"
 echo "fwupdate: fetching $url"

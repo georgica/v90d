@@ -240,8 +240,8 @@ def _release_files():
     """(firmware file, the system image that went into it) for the release
     and for the bench variant, as far as they are there."""
     d = os.path.join(TOP, 'fw', 'build', 'release')
-    pairs = (('v90d-ht802fw.bin', os.path.join(d, 'v90d.uimage')),
-             ('v90d-ht802fw-bench.bin', os.path.join(TOP, 'fw', 'build', 'v90d.uimage')))
+    pairs = (('v90d-ht802fw.bin', os.path.join(d, 'v90d-ht802.uimage')),
+             ('v90d-ht802fw-bench.bin', os.path.join(TOP, 'fw', 'build', 'v90d-ht802-bench.uimage')))
     return [(os.path.join(d, n), u) for n, u in pairs if os.path.exists(os.path.join(d, n))]
 
 

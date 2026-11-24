@@ -34,16 +34,37 @@ int nv_uimage_hdr_ok(const uint8_t *h)
     return nv_crc32(c, NV_UI_HDR) == nv_be32(h + 4);
 }
 
+/* the model an image names itself for: "v90d MODEL VERSION" -> out = MODEL.
+ * 1 on success, 0 if the name is not "v90d MODEL VERSION" (a model token and
+ * a version after it). */
+int nv_image_model(const uint8_t *img, char *out, size_t cap)
+{
+    static const char pfx[] = LD_SYSTEM_NAME " ";    /* "v90d " */
+    const char *name = (const char *)img + 32, *m, *e;
+    size_t i;
+    if (cap) out[0] = '\0';
+    if (strncmp(name, pfx, sizeof pfx - 1)) return 0;
+    m = name + sizeof pfx - 1;
+    for (e = m; *e && *e != ' '; e++) ;
+    if (e == m || *e != ' ' || e[1] == '\0') return 0;   /* need a model and a version after it */
+    for (i = 0; i + 1 < cap && m + i < e; i++) out[i] = m[i];
+    if (cap) out[i] = '\0';
+    return 1;
+}
+
 const char *nv_uimage_check(const uint8_t *p, size_t n, size_t *len)
 {
-    static const char tag[] = NV_IMAGE_TAG;
-    uint32_t size; size_t i;
+    static const char *const models[] = NV_MODELS;
+    const char *name = (const char *)p + 32;
+    char m[8]; uint32_t size; size_t i, mi; int known = 0;
     if (n < NV_UI_HDR || nv_be32(p) != NV_UI_MAGIC) return "this is not a v90d system image";
     if (!nv_uimage_hdr_ok(p)) return "the image header is damaged (its checksum is wrong)";
     if (memchr(p + 32, 0, 32) == 0) return "the image has no proper name";
-    if (!strncmp((const char *)p + 32, LD_LOADER_NAME, sizeof LD_LOADER_NAME - 1)) return "this is the loader, not a system image";
-    if (strncmp((const char *)p + 32, tag, sizeof tag - 1) || p[32 + sizeof tag - 1] == 0)
-        return "the image is not a v90d system for this board (" NV_BOARD ")";
+    if (!strncmp(name, LD_LOADER_NAME, sizeof LD_LOADER_NAME - 1)) return "this is the loader, not a system image";
+    /* name the image for an HT80x model: "v90d ht801 ..." or "v90d ht802 ..." */
+    if (!nv_image_model(p, m, sizeof m)) return "the image is not a v90d system (its name is not \"v90d MODEL VERSION\")";
+    for (mi = 0; mi < sizeof models / sizeof *models; mi++) if (!strcmp(m, models[mi])) known = 1;
+    if (!known) return "the image is for an HT80x model this firmware does not know";
     for (i = 32; p[i]; i++) if (p[i] < 0x20 || p[i] > 0x7E) return "the image has no proper name";
     if (p[28] != 5 || p[29] != 2 || p[30] != 2 || p[31] != 0) return "the image is not an uncompressed ARM Linux kernel image";
     if (nv_be32(p + 16) != LD_LOAD || nv_be32(p + 20) != LD_LOAD) return "the image is built for another load address";

@@ -1,7 +1,7 @@
 /* See boot.h. */
 #include "boot.h"
 
-static const char *const ld_boards[] = LD_BOARDS;
+static const struct ld_board ld_boards[] = LD_BOARDS;
 
 #define UIMAGE_HDR    64u
 #define UIMAGE_MAGIC  0x27051956ul
@@ -102,8 +102,9 @@ static int board_known(const uint8_t *name)
 {
     unsigned i, k;
     for (i = 0; i < sizeof ld_boards / sizeof ld_boards[0]; i++) {
-        for (k = 0; ld_boards[i][k] && name[k] == (uint8_t)ld_boards[i][k]; k++) ;
-        if (!ld_boards[i][k] && name[k] == 0) return 1;
+        const char *part = ld_boards[i].part;
+        for (k = 0; part[k] && name[k] == (uint8_t)part[k]; k++) ;
+        if (!part[k] && name[k] == 0) return 1;
     }
     return 0;
 }

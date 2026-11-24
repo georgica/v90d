@@ -51,12 +51,15 @@
 #define LD_LOADER_NAME "v90d-loader"    /* image name of the loader in core */
 #define LD_SYSTEM_NAME "v90d"           /* image name of the system in base */
 /* boards this has run on: the part number as the factory wrote it into
- * "factory" (also what the running system's flash tool goes by) */
-#define LD_BOARDS     { "9610003725A",  /* HT802 V2.5A: the unit this was made on */ \
-                        "9611003610A",  /* HT801 V1.0A: from a flash dump, not tried on a unit */ \
-                        "9610003611C",  /* HT801 V1.1C: the same */ \
-                        "9610003716A",  /* HT802 V1.6A: issue #4, confirmed by its owner; still under the untried rule */ \
-                        "9610003610A" } /* HT801 V1.0A: from a unit's status page */
+ * "factory" (also what the running system's flash tool goes by), each with
+ * its model, so the flash tool can check a file is for this box's model.
+ * The loader uses only the part number; the model names are in NV_MODELS. */
+struct ld_board { const char *part, *model; };
+#define LD_BOARDS     { { "9610003725A", "ht802" },  /* HT802 V2.5A: the unit this was made on */ \
+                        { "9611003610A", "ht801" },  /* HT801 V1.0A: from a flash dump, not tried on a unit */ \
+                        { "9610003611C", "ht801" },  /* HT801 V1.1C: the same */ \
+                        { "9610003716A", "ht802" },  /* HT802 V1.6A: issue #4, confirmed by its owner; still under the untried rule */ \
+                        { "9610003610A", "ht801" } } /* HT801 V1.0A: from a unit's status page */
 /* how many at the head of LD_BOARDS a unit has run: on the others a start
  * is confirmed only once the network has been heard (fw/rcS) */
 #define LD_BOARDS_TRIED 1

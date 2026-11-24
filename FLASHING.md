@@ -85,7 +85,9 @@ file from the releases page and uploading it yourself.
   only counts as good once the box has also received something on its
   network port. So plug the network cable in before the power: if the
   network does not work under v90d, or no cable is in for three starts in
-  a row, the box goes back to the stock firmware by itself. Please open an
+  a row, the box goes back to the stock firmware by itself. Once v90d runs,
+  its Firmware page takes only the HT801 file (the HT802 one is refused),
+  and the update check fetches the HT801 file by itself. Please open an
   issue and say how it went.
 - **A different board revision.** The loader knows boards by their part
   number. On any other it does not start v90d and gives the box back to the

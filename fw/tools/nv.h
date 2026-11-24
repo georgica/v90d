@@ -36,9 +36,10 @@
 #define NV_UI_HDR     64u
 #define NV_IMAGE_MAX  (LD_BASE_SIZE - LD_GS_HDR - NV_UI_HDR)
 #define NV_FILE_MAX   0x400000ul        /* the largest file `upgrade` reads */
-#define NV_BOARD      "ht802"           /* what an image names itself for: "v90d ht802 VERSION" */
+/* the HT80x models, each with its own image. An image names itself
+ * "v90d MODEL VERSION" (mkuimage.py); nv_uimage_check takes any of these
+ * models, and `upgrade` writes only the one that matches this box (nvboot). */
 #define NV_MODELS     { "ht802", "ht801" }
-#define NV_IMAGE_TAG  LD_SYSTEM_NAME " " NV_BOARD " "
 
 enum { NV_OK = 0, NV_E_IO = -1, NV_E_RANGE = -2, NV_E_VERIFY = -3 };
 
@@ -72,6 +73,9 @@ int  nv_uimage_hdr_ok(const uint8_t *h);
 /* p[0..n) is a system image of ours for this board, whole: 0, and *len is
  * header plus data (n may be longer: padding). Else the reason, as text. */
 const char *nv_uimage_check(const uint8_t *p, size_t n, size_t *len);
+/* the model a system image names itself for ("v90d MODEL VERSION") into out;
+ * 1 on success, 0 if the name is not in that form */
+int  nv_image_model(const uint8_t *img, char *out, size_t cap);
 /* p[0..n) is a firmware file in the stock format made by mkgsfw.py for
  * this board: deciphers its "base" in place. 0, with *hdr the 512-octet
  * partition header and *img, *len the system image in it (checked with
@@ -96,6 +100,7 @@ typedef struct {
     int      board_ok;
     int      board_tried;       /* a unit of this board has run this firmware */
     char     board[16];
+    char     model[8];          /* the board's model (NV_MODELS), "" if board_ok is 0 */
     int      env_tries;         /* v90d_tries of a saved environment, -1 if there is none */
     int      old_bootable;      /* ... and an image of ours where its boot command looks */
     int      loader_tries;      /* starts the loader has counted and nobody confirmed */

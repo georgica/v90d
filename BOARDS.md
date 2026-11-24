@@ -321,7 +321,9 @@ a call made through port 2.
 The HT801's stock upgrade page requires its own file (`v90d-ht801fw.bin`):
 the upgrader checks the part names, model key at offset 0x1A (`0xFD20`;
 the HT802's is `0xFD21`), and hardware bits (`ffff` vs. `7fff`). The
-system in it is the same. One unit reports `9610003610A` for a V1.0A, one
+system in it is the same kernel, named `v90d ht801 VERSION` instead of
+`v90d ht802 VERSION`; once v90d runs, its Firmware page writes only an image
+named for the box's own model. One unit reports `9610003610A` for a V1.0A, one
 digit from the dump's `9611003610A`; both are accepted.
 
 What is not known, and matters before anyone flashes one:

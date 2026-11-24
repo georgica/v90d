@@ -7,7 +7,7 @@
 #include <string.h>
 #include "nv.h"
 
-static const char *const boards[] = LD_BOARDS;
+static const struct ld_board boards[] = LD_BOARDS;
 static const uint8_t GS_MAGIC_OCTETS[4] = { 0xF9, 0x7A, 0xC9, 0x23 };
 static const uint8_t UI_MAGIC_OCTETS[4] = { 0x27, 0x05, 0x19, 0x56 };
 static const uint8_t ZERO4[4] = { 0, 0, 0, 0 };
@@ -90,7 +90,10 @@ int nv_locate(nvflash *f, nv_where *w, int deep)
     if (nf_read(f, LD_BOARD_OFF, b, sizeof b) != NV_OK) return NV_E_IO;
     for (i = 0; i < 15 && b[i] >= 0x21 && b[i] <= 0x7E; i++) w->board[i] = (char)b[i];
     for (k = 0; k < sizeof boards / sizeof boards[0]; k++)
-        if (b[i < 16 ? i : 15] == 0 && !strcmp(w->board, boards[k])) { w->board_ok = 1; w->board_tried = k < LD_BOARDS_TRIED; }
+        if (b[i < 16 ? i : 15] == 0 && !strcmp(w->board, boards[k].part)) {
+            w->board_ok = 1; w->board_tried = k < LD_BOARDS_TRIED;
+            strncpy(w->model, boards[k].model, sizeof w->model - 1);
+        }
 
     tag[0] = has_loader(f, LD_CORE_A, &counter[0]);
     tag[1] = has_loader(f, LD_CORE_B, &counter[1]);
@@ -146,6 +149,7 @@ void nv_print_where(const nv_where *w, const char *version)
     if (version) printf("version=%s\n", version);
     printf("scheme=%s\nset=%s\n", scheme[w->scheme], w->set < 0 ? "-" : w->set ? "B" : "A");
     printf("board=%s %s\n", w->board[0] ? w->board : "?", w->board_ok ? "known" : "not known");
+    if (w->model[0]) printf("model=%s\n", w->model);
     printf("tried=%s\n", w->board_tried ? "yes" : "no");
     if (w->scheme == NV_LOADER) {
         printf("core=0x%06lx\nstate=0x%06lx\nunconfirmed=%d\n", (unsigned long)w->core, (unsigned long)w->state, w->loader_tries);
@@ -233,6 +237,13 @@ int nv_upgrade_check(nvflash *f, const nv_where *w, uint8_t *p, size_t n, const 
     if (!w->board_ok) {
         if (cap) snprintf(msg, cap, "this box is a board this firmware has never run on (part number %s): nothing is written", w->board[0] ? w->board : "?");
         return 1;
+    }
+    if (w->model[0]) {                     /* the file must be for this box's model */
+        char im[8];
+        if (nv_image_model(*img, im, sizeof im) && strcmp(im, w->model)) {
+            if (cap) snprintf(msg, cap, "this file is a v90d image for the %s; this box is a %s: nothing is written", im, w->model);
+            return 1;
+        }
     }
     if (w->scheme == NV_NONE) { say(msg, cap, "this system was not started from flash by a scheme we know: there is no place to write an image to"); return 1; }
     if (w->scheme == NV_LOADER && !w->set_whole) {

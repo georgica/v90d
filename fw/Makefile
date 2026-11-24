@@ -12,8 +12,8 @@
 #                   page takes either), with a system built here without the
 #                   bring-up shell
 #   make release ALLOW_DEBUG=1
-#                   build/release/v90d-ht802fw-bench.bin, for the bench: the
-#                   same around the build/v90d.uimage that is there
+#                   build/release/v90d-ht80Xfw-bench.bin, for the bench: the
+#                   same around the build/v90d.zimage that is there
 #   make tools      the helpers; make test-v90nv, make test-release: the tests
 #
 # Needs dl/linux-$(KVER).tar.xz and dl/busybox-*.tar.bz2 unpacked under build/
@@ -108,8 +108,11 @@ REL_BITS    ?= 0000:0000:0000:7fff
 REL         := build/release
 REL_FILE    := $(REL)/v90d-ht802fw$(if $(ALLOW_DEBUG),-bench).bin
 REL_FILE801 := $(REL)/v90d-ht801fw$(if $(ALLOW_DEBUG),-bench).bin
-REL_UIMAGE  := $(if $(ALLOW_DEBUG),build/v90d.uimage,$(REL)/v90d.uimage)
 REL_ZIMAGE  := $(if $(ALLOW_DEBUG),build/v90d.zimage,$(REL)/v90d.zimage)
+# one system image per model: the same zImage, wrapped with a per-model name
+# ("v90d ht802 ..." / "v90d ht801 ...") so the running box takes only its own
+REL_UIMAGE802 := $(if $(ALLOW_DEBUG),build/v90d-ht802-bench.uimage,$(REL)/v90d-ht802.uimage)
+REL_UIMAGE801 := $(if $(ALLOW_DEBUG),build/v90d-ht801-bench.uimage,$(REL)/v90d-ht801.uimage)
 .PHONY: release release-image loader test-release test-v90nv
 loader:
 	$(MAKE) -C loader
@@ -117,22 +120,23 @@ release-image:
 	@mkdir -p $(REL)
 	$(MAKE) kernel DEBUG= KARGS= LIST=$(CURDIR)/$(REL)/initramfs.list
 	cat $(KOUT)/arch/arm/boot/zImage $(DTB) > $(REL)/v90d.zimage
-	python3 tools/mkuimage.py $(REL)/v90d.zimage $(REL)/v90d.uimage $(VERSION)
 release: loader tools/v90nv.host $(if $(ALLOW_DEBUG),,release-image)
-	@test -f $(REL_UIMAGE) || { echo "$(REL_UIMAGE) is not there: make uimage DEBUG=1 (it builds the kernel)"; exit 1; }
+	@test -f $(REL_ZIMAGE) || { echo "$(REL_ZIMAGE) is not there: make uimage DEBUG=1 (it builds the kernel)"; exit 1; }
 	@if [ -z "$(ALLOW_DEBUG)" ] && grep -q debug.note $(REL)/initramfs.list; then echo "the release image has the bring-up shell in it"; exit 1; fi
 	@mkdir -p $(REL)
 	@printf 'v90d: this partition is not used. It is here because the stock boot\nloader only starts a set whose third part names the other two.\n' > $(REL)/prog.txt
+	python3 tools/mkuimage.py $(REL_ZIMAGE) $(REL_UIMAGE802) $(VERSION) ht802
+	python3 tools/mkuimage.py $(REL_ZIMAGE) $(REL_UIMAGE801) $(VERSION) ht801
 	python3 tools/mkgsfw.py build -o $(REL_FILE) --version $(REL_VERSION) --bits $(REL_BITS) \
-	    --core loader/build/loader.uimage --base $(REL_UIMAGE) --prog $(REL)/prog.txt
+	    --core loader/build/loader.uimage --base $(REL_UIMAGE802) --prog $(REL)/prog.txt
 	python3 tools/mkgsfw.py verify $(REL_FILE)
 	python3 tools/mkgsfw.py build -o $(REL_FILE801) --model ht801 --version $(REL_VERSION) \
-	    --core loader/build/loader.uimage --base $(REL_UIMAGE) --prog $(REL)/prog.txt
+	    --core loader/build/loader.uimage --base $(REL_UIMAGE801) --prog $(REL)/prog.txt
 	python3 tools/mkgsfw.py verify $(REL_FILE801) --model ht801
 	@python3 tools/mkgsfw.py extract $(REL_FILE) $(REL)/flash > /dev/null
 	$(MAKE) -s -C loader release-test CORE=$(CURDIR)/$(REL)/flash/ht802core.bin BASE=$(CURDIR)/$(REL)/flash/ht802base.bin ZIMAGE=$(CURDIR)/$(REL_ZIMAGE)
 	@python3 tools/test_v90nv_boot.py --make-flash $(REL)/box.bin $(REL)/box.uimage && \
-	  tools/v90nv.host -f $(REL)/box.bin check $(REL_FILE) && tools/v90nv.host -f $(REL)/box.bin check $(REL_UIMAGE); \
+	  tools/v90nv.host -f $(REL)/box.bin check $(REL_FILE) && tools/v90nv.host -f $(REL)/box.bin check $(REL_UIMAGE802); \
 	  r=$$?; rm -f $(REL)/box.bin $(REL)/box.uimage; exit $$r
 	@ls -l $(REL_FILE) $(REL_FILE801)
 
