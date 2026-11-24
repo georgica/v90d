@@ -182,6 +182,14 @@ IPv4 (their name server answers them no IPv6 addresses, above); on a
 network with IPv6 alone their names still resolve, through the router's
 name servers.
 
+On a network that has no IPv4 at all, the box still carries the callers'
+IPv4 out over IPv6: it translates each caller's packets to IPv6 (through
+your network's NAT64) and back, so an old machine with no IPv6 of its own
+reaches the IPv4 internet. A site that has only an IPv6 address is reached
+too, through a stand-in IPv4 address the box's name server hands out for
+it. None of this is set up or seen by the caller, and where the network
+has IPv4 the callers' IPv4 goes out as IPv4 as before.
+
 ## The terminal menu
 
 With **Terminal menu** on (Services, Numbers page), a caller who dials a

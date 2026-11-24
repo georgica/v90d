@@ -21,6 +21,7 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <net/if.h>
+#include <linux/if_packet.h>
 #include <netinet/in.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
@@ -267,6 +268,19 @@ static size_t icmp(uint8_t *p, uint32_t src, uint32_t dst, int type, uint16_t id
     for (i = 28; i < 60; i++) p[i] = (uint8_t)(i * 3);
     c = csum(p + 20, 40); p[22] = (uint8_t)(c >> 8); p[23] = (uint8_t)c;
     return 60;
+}
+
+/* the ICMPv6 checksum of a whole IPv6 packet (no extension headers) */
+static void icmp6_sum(uint8_t *a, size_t n)
+{
+    uint32_t s = 0; size_t j, m = n - 40; uint16_t ck;
+    a[42] = a[43] = 0;
+    for (j = 8; j < 40; j += 2) s += (uint32_t)(a[j] << 8 | a[j + 1]);
+    s += (uint32_t)(m >> 16) + (uint32_t)(m & 0xffff) + 58;
+    for (j = 40; j + 1 < n; j += 2) s += (uint32_t)(a[j] << 8 | a[j + 1]);
+    if (m & 1) s += (uint32_t)a[n - 1] << 8;
+    while (s >> 16) s = (s & 0xffff) + (s >> 16);
+    ck = (uint16_t)~s; a[42] = (uint8_t)(ck >> 8); a[43] = (uint8_t)ck;
 }
 
 /* send from the caller, wait for a packet to reach the caller; 1 = got one */
@@ -1969,10 +1983,14 @@ int main(int argc, char **argv)
     {
         static char lanlog[300], rfile[300];
         int dfd = socket(AF_INET6, SOCK_DGRAM | SOCK_NONBLOCK, 0), rs = -1, one = 1, k, asked = 0, answered = 0;
-        struct sockaddr_in6 da, to;
+        struct sockaddr_in6 da;
+        struct sockaddr_ll rll;
         FILE *f;
         if (system("ip link add v0 type veth peer name v1 2>/dev/null && echo 0 > /proc/sys/net/ipv6/conf/v1/accept_dad"
-                   " && ip link set v0 up && ip link set v1 up && ip -6 addr add 2001:db8::53/128 dev lo") != 0) {
+                   " && echo 0 > /proc/sys/net/ipv6/conf/v0/accept_dad && echo 1 > /proc/sys/net/ipv6/conf/v1/disable_ipv6"
+                   " && ip link set v0 up && ip link set v1 up && ip -6 addr add 2001:db8::53/128 dev lo"
+                   " && ip -6 addr add 2001:db8:1::2/64 dev v0"
+                   " && ip -6 neigh replace fe80::1 lladdr $(ip -o link show v1 | sed -n 's/.*link.ether \\([0-9a-f:]*\\).*/\\1/p') dev v0 nud permanent") != 0) {
             printf("  (no veth here: IPv6 on the LAN not tried)\n");
             if (dfd >= 0) close(dfd);
             goto no_veth;
@@ -2006,13 +2024,12 @@ int main(int argc, char **argv)
         memset(prev_tx, 0xFF, sizeof prev_tx);
         /* the router: an advertisement each half second from v1 (link-local,
          * hop limit 255), with RDNSS 2001:db8::53 and PREF64 64:ff9b::/96 */
-        rs = socket(AF_INET6, SOCK_RAW, IPPROTO_ICMPV6);
-        {
-            int hops = 255; unsigned ix = if_nametoindex("v1");
-            setsockopt(rs, IPPROTO_IPV6, IPV6_MULTICAST_HOPS, &hops, sizeof hops);
-            setsockopt(rs, IPPROTO_IPV6, IPV6_MULTICAST_IF, &ix, sizeof ix);
-            memset(&to, 0, sizeof to); to.sin6_family = AF_INET6; inet_pton(AF_INET6, "ff02::1", &to.sin6_addr); to.sin6_scope_id = ix;
-        }
+        /* v1 has no IPv6 of its own (it would be a local address, and
+         * forward): the router is raw frames on it, from fe80::1 */
+        rs = socket(AF_PACKET, SOCK_DGRAM, htons(0x86dd));
+        memset(&rll, 0, sizeof rll); rll.sll_family = AF_PACKET; rll.sll_protocol = htons(0x86dd);
+        rll.sll_ifindex = (int)if_nametoindex("v1"); rll.sll_halen = 6;
+        memcpy(rll.sll_addr, "\x33\x33\x00\x00\x00\x01", 6);                 /* all nodes */
         for (k = 0; k < 60 && !(file_has(lanlog, "ipv6: the router gives") && file_has(rfile, "nameserver 2001:db8::53")); k++) {
             uint8_t ra[16 + 24 + 16];
             memset(ra, 0, sizeof ra);
@@ -2021,7 +2038,15 @@ int main(int argc, char **argv)
             inet_pton(AF_INET6, "2001:db8::53", ra + 24);
             ra[40] = 38; ra[41] = 2; ra[42] = (uint8_t)((225 << 3) >> 8); ra[43] = (uint8_t)(225 << 3);   /* 1800 s, /96 */
             { uint8_t pf[16]; inet_pton(AF_INET6, "64:ff9b::", pf); memcpy(ra + 44, pf, 12); }   /* the top 96 bits */
-            (void)sendto(rs, ra, sizeof ra, 0, (struct sockaddr *)(void *)&to, sizeof to);
+            {
+                uint8_t fr[40 + sizeof ra];
+                memset(fr, 0, 40);
+                fr[0] = 0x60; fr[4] = 0; fr[5] = (uint8_t)sizeof ra; fr[6] = 58; fr[7] = 255;
+                inet_pton(AF_INET6, "fe80::1", fr + 8); inet_pton(AF_INET6, "ff02::1", fr + 24);
+                memcpy(fr + 40, ra, sizeof ra);
+                icmp6_sum(fr, sizeof fr);
+                (void)sendto(rs, fr, sizeof fr, 0, (struct sockaddr *)(void *)&rll, sizeof rll);
+            }
             run_ms(500); usleep(100000);
         }
         CHECK(file_has(lanlog, "ipv6: the router gives name servers 2001:db8::53; NAT64 prefix 64:ff9b::/96"));
@@ -2065,6 +2090,49 @@ int main(int argc, char **argv)
             printf("  IPv6 alone: the IPv6 name server was asked %d time(s); the caller answered %d\n", asked, answered);
             CHECK(asked >= 1);
             CHECK(answered);
+        }
+        /* the callers' IPv4 over IPv6: no IPv4 route here, NAT64 64:ff9b::/96
+         * advertised. The caller pings 93.184.216.34; the far end of the
+         * veth plays NAT64 and the site: an echo request from the box's own
+         * IPv6 address to 64:ff9b::93.184.216.34 is answered, and the answer
+         * reaches the caller as IPv4 from 93.184.216.34. */
+        {
+            int ps = socket(AF_PACKET, SOCK_DGRAM, htons(0x86dd)), got = 0, seen6 = 0; long t;
+            struct sockaddr_ll ll;
+            uint8_t p[60]; int n0 = cli_n;
+            uint32_t site = IP4(93, 184, 216, 34);
+            memset(&ll, 0, sizeof ll); ll.sll_family = AF_PACKET; ll.sll_protocol = htons(0x86dd); ll.sll_ifindex = (int)if_nametoindex("v1");
+            CHECK(ps >= 0 && bind(ps, (struct sockaddr *)(void *)&ll, sizeof ll) == 0);
+            fcntl(ps, F_SETFL, O_NONBLOCK);
+            for (k = 0; k < 40 && !file_has(lanlog, "callers' translator is up"); k++) { run_ms(500); usleep(50000); }
+            CHECK(file_has(lanlog, "ipv6: the callers' translator is up (NAT64 64:ff9b::/96); no IPv4 out"));
+            icmp(p, C.ppp.my_ip, site, 8, 0x6464, 1);
+            for (t = 0; t < 10L * FS && !dead && !got; t++) {
+                if (t % FS == 0) (void)caller_send_ip(&C, p, 60);
+                if (t % BLK == 0) {
+                    uint8_t q[1600], a[1600]; struct sockaddr_ll from; socklen_t fl = sizeof from;
+                    ssize_t r = recvfrom(ps, q, sizeof q, 0, (struct sockaddr *)(void *)&from, &fl);
+                    static const uint8_t pre[12] = { 0, 0x64, 0xff, 0x9b, 0, 0, 0, 0, 0, 0, 0, 0 };
+                    if (r >= 48 && q[6] == 58 && q[40] == 128 && memcmp(q + 24, pre, 12) == 0) {
+                        uint8_t own[16];
+                        inet_pton(AF_INET6, "2001:db8:1::2", own);
+                        seen6++;
+                        CHECK(memcmp(q + 8, own, 16) == 0);                      /* masqueraded to the box's address */
+                        CHECK_EQ_I((long)get32(q + 36), (long)site);
+                        memcpy(a, q, (size_t)r);
+                        memcpy(a + 8, q + 24, 16); memcpy(a + 24, q + 8, 16);   /* the answer: the other way round */
+                        a[7] = 64; a[40] = 129;
+                        icmp6_sum(a, (size_t)r);
+                        (void)sendto(ps, a, (size_t)r, 0, (struct sockaddr *)(void *)&from, fl);
+                    }
+                }
+                step(0);
+                if (cli_n > n0 && cli_len >= 28 && cli_pkt[9] == 1 && cli_pkt[20] == 0 && get32(cli_pkt + 12) == site) got = 1;
+            }
+            printf("  IPv4 over IPv6: the echo went out as IPv6 %d time(s); the caller had the answer %d\n", seen6, got);
+            CHECK(seen6 >= 1);
+            CHECK(got);
+            if (ps >= 0) close(ps);
         }
         hang_up();
         close(dfd); close(rs);

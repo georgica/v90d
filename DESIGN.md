@@ -533,6 +533,42 @@ as the OBi's script already did.
   `obinv` are in `/usr/sbin` of the root file system, which both kernels
   start from.
 
+### 5i. The callers' IPv4 over IPv6 (#7)
+
+On a network with IPv6 alone, a dial-up caller is still IPv4-only, so the
+box carries its IPv4 out over IPv6 (RFC 7915 stateless translation, the
+CLAT of 464XLAT). `srv/xlat.c` is the pure translator; `srv/clat.c` drives
+it and `srv/nat.c`'s `nat_clat6` the kernel.
+
+- **Addresses.** A caller 10.64.64.x becomes `fd00:90d:c1a7::/96` + that
+  IPv4 (a unique-local /96 of the box's own); the kernel's IPv6 masquerade
+  (table `v90d6`) then puts the box's own IPv6 address on it, as the IPv4
+  NAT does for an IPv4 caller. A destination IPv4 address becomes the
+  network's NAT64 prefix (PREF64, from the router, ra6.h) + that address.
+- **A second TUN**, `clat0` (`tun_open6`), carries the IPv6 side; the
+  kernel routes the box's masqueraded traffic back through it. The
+  translator reads a reply there, turns it back into IPv4 and hands it to
+  the caller's port.
+- **When a caller's IPv4 goes through it:** always for a stand-in address
+  (below); otherwise only while the box has no IPv4 default route
+  (`/proc/net/route`, checked every 5 s). Where there is IPv4, the
+  caller's IPv4 leaves as IPv4, untouched. Only public destinations cross
+  (`bbsdial_is_public`): never the box's own network, loopback, CGNAT or
+  the rest, in either direction.
+- **IPv6-only sites.** A name with only an AAAA record is unreachable to an
+  IPv4 caller, so the callers' relay (5g) gives it an A record from a pool
+  of stand-in addresses (198.18.0.0/15, the benchmarking range); the
+  translator keeps the stand-in to IPv6 map (least-recently-used, 1024 at
+  once) and sends that traffic straight to the real IPv6 address. This
+  works even on a dual-stack network, so an IPv4 caller reaches an
+  IPv6-only site.
+- **Sizes.** Every IPv6 path carries 1280 octets, so a TCP SYN's MSS is
+  clamped to fit and an over-size IPv4 packet with DF is answered
+  "fragmentation needed"; fragments translate as fragments, and ICMP
+  errors carry their quoted packet across too.
+- **It comes up** only once a NAT64 prefix is known (so never on a plain
+  IPv4 network), and goes away when IPv6 is turned off.
+
 ## 6. Firmware (Track A)
 
 A mainline-derived Linux kernel with board support for the DVF9918 SoC written

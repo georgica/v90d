@@ -30,7 +30,7 @@ HDRS := $(wildcard *.h ../tel/*.h ../dce/*.h ../dce/test/*.h ../cfg/*.h ../ppp/*
 # the terminal menu (shared with Netstalgia's nsdiald)
 TERM_SRC := $(addprefix ../term/,tscr.c tart.c guide.c tdir.c tmenu.c)
 
-DAEMON_SRC := main.c satlink.c bbslink.c termsvc.c acts.c actsvc.c dnsrelay.c ra6.c update.c netsvc.c tun.c nat.c ../cfg/httpd.c ../cfg/settings.c ../cfg/firmware.c ../cfg/vpn.c $(CORE_SRC) $(TERM_SRC)
+DAEMON_SRC := main.c satlink.c bbslink.c termsvc.c acts.c actsvc.c dnsrelay.c ra6.c xlat.c clat.c update.c netsvc.c tun.c nat.c ../cfg/httpd.c ../cfg/settings.c ../cfg/firmware.c ../cfg/vpn.c $(CORE_SRC) $(TERM_SRC)
 # the firmware's version, shown on the pages: one place, fw/VERSION
 VERSION := $(shell cat ../fw/VERSION 2>/dev/null || echo dev)
 DAEMON_DEF := -DV90D_VERSION='"$(VERSION)"'
@@ -108,16 +108,18 @@ test-ns: $(BUILD)/v90d-nstest $(BUILD)/ns_call test-ns-nat test-ns-upnp
 	@rm -f $(BUILD)/ns_flash.bin
 	@$(MAKE) -s test-ns-pppd
 
-test: $(BUILD)/test_srv $(BUILD)/test_rig $(BUILD)/test_orig $(BUILD)/test_update $(BUILD)/test_acts $(BUILD)/test_dnsrelay $(BUILD)/test_ra6
+test: $(BUILD)/test_srv $(BUILD)/test_rig $(BUILD)/test_orig $(BUILD)/test_update $(BUILD)/test_acts $(BUILD)/test_dnsrelay $(BUILD)/test_ra6 $(BUILD)/test_xlat
 	./$(BUILD)/test_srv
+	./$(BUILD)/test_xlat
 	./$(BUILD)/test_acts
 	./$(BUILD)/test_dnsrelay
 	./$(BUILD)/test_ra6
 	./$(BUILD)/test_update
 	./$(BUILD)/test_rig
 	./$(BUILD)/test_orig
-test-arm: $(BUILD)/arm_test_srv $(BUILD)/arm_test_rig $(BUILD)/arm_test_orig $(BUILD)/arm_test_update $(BUILD)/arm_test_acts $(BUILD)/arm_test_dnsrelay $(BUILD)/arm_test_ra6
+test-arm: $(BUILD)/arm_test_srv $(BUILD)/arm_test_rig $(BUILD)/arm_test_orig $(BUILD)/arm_test_update $(BUILD)/arm_test_acts $(BUILD)/arm_test_dnsrelay $(BUILD)/arm_test_ra6 $(BUILD)/arm_test_xlat
 	$(QEMU) ./$(BUILD)/arm_test_srv
+	$(QEMU) ./$(BUILD)/arm_test_xlat
 	$(QEMU) ./$(BUILD)/arm_test_acts
 	$(QEMU) ./$(BUILD)/arm_test_dnsrelay
 	$(QEMU) ./$(BUILD)/arm_test_ra6
@@ -143,6 +145,10 @@ $(BUILD)/test_ra6: test/test_ra6.c ra6.c ra6.h | $(BUILD)
 	$(CC) $(CFLAGS) $(INC) -o $@ test/test_ra6.c ra6.c $(LDLIBS)
 $(BUILD)/arm_test_ra6: test/test_ra6.c ra6.c ra6.h | $(BUILD)
 	$(ARM_CC) $(CFLAGS) $(INC) -static -o $@ test/test_ra6.c ra6.c $(LDLIBS)
+$(BUILD)/test_xlat: test/test_xlat.c xlat.c xlat.h bbsdial.c bbsdial.h | $(BUILD)
+	$(CC) $(CFLAGS) $(INC) -o $@ test/test_xlat.c xlat.c bbsdial.c $(LDLIBS)
+$(BUILD)/arm_test_xlat: test/test_xlat.c xlat.c xlat.h bbsdial.c bbsdial.h | $(BUILD)
+	$(ARM_CC) $(CFLAGS) $(INC) -static -o $@ test/test_xlat.c xlat.c bbsdial.c $(LDLIBS)
 
 $(BUILD)/test_update: test/test_update.c update.c update.h $(HDRS) | $(BUILD)
 	$(CC) $(CFLAGS) $(INC) -o $@ test/test_update.c update.c $(LDLIBS)
