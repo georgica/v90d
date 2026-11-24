@@ -125,9 +125,10 @@ int main(void)
     tscr_box(&s, 0, 0, 4, 3, TS_LB, 1, NULL, 0);
     tscr_put(&s, 0, 4, "█▀░▒▓►●■□·", TS_WH, -1);
     tscr_put(&s, 0, 5, "é", TS_W, -1);
+    tscr_put(&s, 4, 0, "─┼═", TS_W, -1);                   /* the single line is '-', a cross '+' */
     n = tscr_ansi(&s, 0, out, sizeof out);
     CHECK(!strchr(out, 0x1b));
-    CHECKF(!strcmp(out, "+==+\r\n|  |\r\n+==+\r\n\r\n##.:#>*xo-\r\ne\r\n"), "%s", out);   /* trailing empty rows dropped */
+    CHECKF(!strcmp(out, "+==+-+=\r\n|  |\r\n+==+\r\n\r\n##.:#>*xo-\r\ne\r\n"), "%s", out);   /* trailing empty rows dropped */
     /* without colour, a diff is the whole screen again */
     CHECK(tscr_diff(&o, &s, 0, out, sizeof out) == n);
 
