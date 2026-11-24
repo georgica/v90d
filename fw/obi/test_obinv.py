@@ -81,7 +81,8 @@ with tempfile.TemporaryDirectory() as tmp:
     changed = [a for a in range(0, len(now), 0x10000) if now[a:a + 0x10000] != fresh[a:a + 0x10000]]
     check(all(a == 0x470000 or 0x480000 <= a < 0xE40000 for a in changed),
           "only the root file system, /obi and the header changed: %s" % [hex(a) for a in changed if not 0x480000 <= a < 0xE40000])
-    check(any(0x480000 <= a < 0xC00000 for a in changed), "the root file system was written")
+    check(any(0x480000 <= a < 0xB40000 for a in changed), "the root file system was written")
+    check(not any(0xB40000 <= a < 0xC00000 for a in changed), "/scratch (the settings) untouched")
     hdr = bytearray(now[0x470000:0x470400]); want = bytearray(v90d[:0x400])
     for i in range(struct.unpack_from("<I", v90d, 0x80)[0]):
         hdr[0xC0 + i * 0x40 + 2] = want[0xC0 + i * 0x40 + 2] = 0
@@ -143,7 +144,8 @@ if len(sys.argv) > 4:
         changed = [a for a in range(0, len(now), 0x10000) if now[a:a + 0x10000] != fresh[a:a + 0x10000]]
         check(all(a == 0x470000 or 0x480000 <= a < 0xE40000 for a in changed),
               "only the root file system, /obi and the header changed: %s" % [hex(a) for a in changed if not 0x480000 <= a < 0xE40000])
-        check(any(0x480000 <= a < 0xC00000 for a in changed), "the root file system was written")
+        check(any(0x480000 <= a < 0xB40000 for a in changed), "the root file system was written")
+        check(not any(0xB40000 <= a < 0xC00000 for a in changed), "/scratch (the settings) untouched")
         r, out = upload(tmp, flash, base)
         back = bytearray(open(flash, "rb").read())
         for i in range(struct.unpack_from("<I", base, 0x80)[0]):

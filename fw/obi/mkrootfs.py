@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Build v90d's root file system for the Obihai OBi200: the flash part the
-maker's root file system had (type 4, at 0x480000, 0x780000 octets), as a
+maker's root file system had (type 4, at 0x480000, 0x6C0000 octets; /scratch follows), as a
 squashfs 4.0 with gzip that both kernels read (the maker's 2.6.30, which
 U-Boot boots, and v90d's own 6.6, whose oinit mounts it).
 
@@ -30,7 +30,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import mkobifw  # noqa: E402
 
 ROOTFS_TYPE = 4
-ROOTFS_PART = 0x780000          # 0x480000 .. 0xC00000
+ROOTFS_PART = 0x6C0000          # 0x480000 .. 0xB40000; /scratch (the settings) follows at 0xB40000
 HERE = os.path.dirname(os.path.abspath(__file__))
 FROM_BASE = ("bin/swcfg", "bin/unicfg", "usr/sbin/iptables")
 FROM_BASE_DIRS = ("usr/libexec/xtables",)

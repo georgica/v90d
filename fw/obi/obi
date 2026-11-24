@@ -1,9 +1,8 @@
 #!/bin/sh
-# v90d on the Obihai OBi200: this file is /obi/obi, which the maker's
-# /etc/rc starts at boot in place of the maker's application. U-Boot, the
-# kernel in the flash and the root file system are the maker's (or the
-# community firmware's) and stay as they were; only the /obi partition is
-# ours.
+# v90d on the Obihai OBi200: this file is /obi/obi, which v90d's root file
+# system starts at boot (its rcS under the maker's kernel, kinit under ours).
+# U-Boot, the maker's kernel in the flash and the recovery images stay as
+# they were; the root file system and /obi are ours.
 #
 # Two kernels. Started by the maker's kernel, this first starts v90d's own
 # Linux kernel (kernel.xz) from RAM (kjump), unless that did not come up
@@ -110,10 +109,8 @@ if [ "$LAN_MODE" = static ]; then
     for d in $LAN_DNS1 $LAN_DNS2; do echo "nameserver $d" >> /var/tmp/resolv.conf; done
     say "LAN $LAN_ADDRESS (fixed)"
 else
-    # -x hostname: is today's BusyBox (v90d's root file system); the maker's
-    # older one knows only -H, and refuses the other
+    # (v90d's root file system's BusyBox, under both kernels; it has no -H)
     udhcpc -i $LAN -b -s $D/udhcpc.script -x hostname:v90d -p /var/run/${LAN}udhcpc.pid >/dev/null 2>&1 ||
-        udhcpc -i $LAN -b -s $D/udhcpc.script -H v90d -p /var/run/${LAN}udhcpc.pid >/dev/null 2>&1 ||   # the maker's BusyBox only
         say "cannot start udhcpc"
     say "LAN by DHCP"
 fi
@@ -146,7 +143,11 @@ sleep 2
 # leave a note: restart then (the settings are written as they are saved).
 ( while sleep 2; do
     [ -f /tmp/v90d.restart ] || continue
-    say "restart asked"; sync; sleep 1
+    say "restart asked"
+    # asked for, not a failure: a start that the daemon ran in counts as good
+    # (two restarts in its first minute would leave the box on the maker's kernel)
+    [ -n "$OWN" ] && pidof v90d >/dev/null && $D/kjump --count ok
+    sync; sleep 1
     # under v90d's own kernel process 1 is kinit, not an init that restarts
     if [ -n "$OWN" ]; then reboot -f; else reboot; fi
   done ) &

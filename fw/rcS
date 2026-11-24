@@ -126,7 +126,7 @@ if [ -z "$NOFLASH" ]; then
     while sleep 5; do
         (umask 077; conf_pack > $CONF.new)
         cmp -s $CONF.new $CONF.kept && continue
-        if v90nv conf-save $CONF.new; then mv $CONF.new $CONF.kept; say "settings kept in flash"
+        if flock /tmp/v90d.conf.lock v90nv conf-save $CONF.new; then mv $CONF.new $CONF.kept; say "settings kept in flash"
         else say "settings NOT kept in flash"; sleep 60; fi
     done &
     # Whoever started us counted this start before making it (U-Boot's
@@ -153,8 +153,10 @@ fi
     [ -f /tmp/v90d.restart ] || continue
     say "restart asked"
     if [ -z "$NOFLASH" ]; then
-        (umask 077; conf_pack > $CONF.new)
-        v90nv conf-save $CONF.new
+        # a file of its own, and one writer of the settings' flash at a time:
+        # the save loop above may be at it this very moment
+        (umask 077; conf_pack > $CONF.restart)
+        flock /tmp/v90d.conf.lock v90nv conf-save $CONF.restart
         v90nv confirm >/dev/null 2>&1
     fi
     sync

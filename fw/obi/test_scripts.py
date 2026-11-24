@@ -73,6 +73,7 @@ def commands(text):
         # a quoted string: only the commands of its $(...) are commands
         code = re.sub(r'"([^"]*)"', lambda m: " ; ".join("$(" + x + ")" for x in re.findall(r"\$\(([^)]*)\)", m.group(1))) or '""', code)
         code = re.sub(r"\$\{[^}]*\}", "x", code)
+        code = re.sub(r"\$\(\([^)]*\)\)", "x", code)     # arithmetic, no command
         code = re.sub(r"^\s*[^\s()]+\)", "", code)      # a case pattern
         # the starts of simple commands
         for part in re.split(r"\$\(|;;|&&|\|\||[;|&(){}]|\bthen\b|\bdo\b|\belse\b|\b!\s", code):
