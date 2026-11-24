@@ -107,6 +107,7 @@ static int ppp_open(const char *name, uint32_t local, uint32_t peer, int mtu)
 
     d->master = posix_openpt(O_RDWR | O_NOCTTY);
     if (d->master < 0 || grantpt(d->master) < 0 || unlockpt(d->master) < 0) goto fail;
+    (void)fcntl(d->master, F_SETFD, FD_CLOEXEC);     /* posix_openpt takes no O_CLOEXEC: not for the children */
     d->slave = open(ptsname(d->master), O_RDWR | O_NOCTTY | O_CLOEXEC);
     if (d->slave < 0) goto fail;
     if (tcgetattr(d->slave, &t) == 0) { cfmakeraw(&t); tcsetattr(d->slave, TCSANOW, &t); }

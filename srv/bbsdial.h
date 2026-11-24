@@ -25,7 +25,8 @@ int bbsdial_run(const char *host, const char *port, int fd, unsigned connect_s, 
  * interface listens there; a list entry or a name that leads to it would
  * put the caller's keystrokes on it); and for what is no single host
  * elsewhere: link-local 169.254/16, multicast and broadcast. The rest of
- * the local network is not refused: a board may well stand beside the box.
+ * the local network is left to self_ok: the owner's numbers of services may
+ * lead there, the lists' entries (BBSDIAL_PUBLIC) may not.
  * Sends nothing. */
 int bbsdial_is_self(uint32_t addr);
 

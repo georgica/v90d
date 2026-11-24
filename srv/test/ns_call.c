@@ -1537,6 +1537,8 @@ int main(int argc, char **argv)
             int a = fcntl(sv[1], F_DUPFD, 20), lfd = open(lanlog, O_WRONLY | O_CREAT | O_TRUNC, 0644);
             dup2(a, 3); if (lfd >= 0) dup2(lfd, 2);
             for (i = 4; i < 64; i++) close(i);
+            /* the loop's clock starts 3 s before it wraps: the call is made after the wrap */
+            setenv("V90D_CLOCK0", "4294964296", 1);
             execl(argv[1], "v90d", "-c", conf, "-l", "fd:3", "-i", "lo", "-t", "ppp0", "-A", arch,
                   "-b", "", "-f", "", (char *)NULL);
             _exit(127);

@@ -157,14 +157,15 @@ void update_poll(uint32_t now_ms)
 
 void update_config(int on, const char *running_version)
 {
+    int was = enabled;
     enabled = on != 0;
     running[0] = '\0';
     if (running_version) { strncpy(running, running_version, sizeof running - 1); running[sizeof running - 1] = '\0'; }
     if (!enabled) {
         (void)unlink(state_path);          /* turned off: stop offering, stop phoning home */
         ud.started = 0;
-    } else {
-        ud.started = 0;                    /* check soon after being turned on */
+    } else if (!was) {
+        ud.started = 0;                    /* check soon after being turned on (not on every save) */
     }
 }
 

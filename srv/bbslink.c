@@ -435,7 +435,8 @@ void bbslink_poll(uint32_t now_ms)
         case BL_IDLE:
             l->dn_n = 0; l->up_n = 0;
             l->st = BL_RINGING; l->t0 = now_ms;
-            l->svc = kind == SRV_LINK_SVC; l->raw = 0; l->policy = 0;
+            l->svc = kind == SRV_LINK_SVC; l->raw = 0;
+            l->policy = BBSDIAL_PUBLIC;             /* a board of the list: the internet only (svc_entry: the owner's numbers may be on the LAN) */
             if (l->svc && !svc_entry(k, l)) { bl_bye(l, "That number cannot be called.\r\n"); break; }
             if (kind == SRV_LINK_BBS) bbs_list.wanted = 1;
             break;
@@ -469,7 +470,10 @@ void bbslink_poll(uint32_t now_ms)
             bl_prompt(l);
             break;
         case BL_LINKED: {
-            uint8_t in[512], rep[64]; size_t out_n = 0, rep_n = 0; ssize_t r; int over = 0;
+            /* telnet: at most TN_READ octets at a time, whose answers (TELNET_REPLY_MAX for
+             * each 3-octet command) always fit rep: telnet_rx never stops short */
+            enum { TN_READ = 96 };
+            uint8_t in[512], rep[TN_READ / 3 * TELNET_REPLY_MAX + TELNET_REPLY_MAX]; size_t out_n = 0, rep_n = 0; ssize_t r; int over = 0;
             if (l->up_n) {
                 r = send(l->fd, l->up, l->up_n, MSG_DONTWAIT | MSG_NOSIGNAL);
                 if (r > 0) { memmove(l->up, l->up + r, l->up_n - (size_t)r); l->up_n -= (size_t)r; }
@@ -477,7 +481,7 @@ void bbslink_poll(uint32_t now_ms)
             }
             /* read only what can be handed on whole: the board waits for a slow modem, nothing is dropped */
             while (!over && sizeof l->dn - l->dn_n >= sizeof in && sizeof l->up - l->up_n >= sizeof rep) {
-                r = recv(l->fd, in, sizeof in, MSG_DONTWAIT);
+                r = recv(l->fd, in, l->raw ? sizeof in : (size_t)TN_READ, MSG_DONTWAIT);
                 if (r < 0 && (errno == EAGAIN || errno == EINTR)) break;
                 if (r <= 0) { over = 1; break; }
                 l->got += r;
@@ -541,8 +545,13 @@ static int row_line(void *ctx, int kind, const bbs_entry *e)
 size_t bbslink_rows(void *ctx, const char *q, int skip, int max, char *buf, size_t cap, int *shown, int *left)
 {
     static scan_t sc = { .fd = -1 }; struct rows r = { buf, cap, 0, 0, 0, skip, max, q };
+    int k;
     (void)ctx;
     bbs_list.wanted = 1;
+    /* The whole list is read for a page (a search needs every line): not
+     * while a line is in use, whose call must not wait for it. */
+    for (k = 0; k < n_ports; k++)
+        if (S[k].tel.state != TEL_ONHOOK) { *shown = 0; *left = -1; return 0; }
     if (scan_open(&sc, list_path()) >= 0) while (!scan_step(&sc, row_line, &r)) { }
     *shown = r.shown; *left = r.left;
     return r.n;

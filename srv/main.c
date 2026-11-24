@@ -321,7 +321,7 @@ static const char *fw_install(void *ctx)
         (void)sched_setscheduler(0, SCHED_OTHER, &sp);
         (void)munlockall();
         if (!st) st = "/tmp/v90d.fwstate";
-        fd = open(st, O_WRONLY | O_CREAT | O_TRUNC, 0600);   /* the script's words land where the page reads them */
+        fd = open(st, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0600);   /* the script's words land where the page reads them */
         if (fd >= 0) { (void)dup2(fd, 1); (void)dup2(fd, 2); }
         for (i = 3; i < 256; i++) close(i);
         execl("/bin/sh", "sh", "-c", cmd, (char *)NULL);
@@ -503,6 +503,9 @@ int main(int argc, char **argv)
     /* the telephone lights: <prefix><port>/brightness, lit while the port is off hook */
     const char *led_prefix = "/sys/class/leds/ht802:phone"; int led_fd[PORTS] = { -1, -1 }, led_on[PORTS] = { -1, -1 };
 
+    /* tests: the loop's millisecond clock may start anywhere, so that its
+     * wrap at 2^32 can be crossed in a test run */
+    { const char *c0 = getenv("V90D_CLOCK0"); if (c0) now_ms = (uint32_t)strtoul(c0, NULL, 0); }
     while ((opt = getopt(argc, argv, "c:l:d:i:t:vpow:W:L:A:N:R:P:D:G:E:O:V:M:S:XB:b:J:T:u:U:Y:F:f:K:")) != -1) {
         switch (opt) {
         case 'c': cfg_path = optarg; break;
@@ -629,7 +632,7 @@ int main(int argc, char **argv)
     for (p = 0; p < n_ports; p++) {
         char path[300];
         snprintf(path, sizeof path, "%s%d/brightness", led_prefix, p + 1);
-        led_fd[p] = open(path, O_WRONLY);       /* no such light: nothing is shown */
+        led_fd[p] = open(path, O_WRONLY | O_CLOEXEC);       /* no such light: nothing is shown */
     }
 
     while (!stop) {
@@ -656,7 +659,7 @@ int main(int argc, char **argv)
             if (p == cap_port && cap_path) {
                 /* 80 codewords heard, then the 80 sent in answer, per block; 8 MB at most */
                 if (offhook && cap_fd < 0 && cap_n == 0) {
-                    cap_fd = open(cap_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                    cap_fd = open(cap_path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
                     cap_lin = is_lin;                   /* a recording is of one kind */
                     if (cap_fd >= 0 && cap_lin && write(cap_fd, "V90DLIN1", 8) < 0) cap_n = 50000;
                 }
@@ -683,9 +686,11 @@ int main(int argc, char **argv)
                 }
             }
             if (S[p].status.calls_total != calls_seen[p]) { calls_seen[p] = S[p].status.calls_total; log_last_call(p); }
-            if (S[p].tel.state == TEL_ONHOOK) {
-                cfg_for_port(&live, p, &view);
-                if (line_law[p] != (view.law == CFG_LAW_ALAW)) { line_law[p] = view.law == CFG_LAW_ALAW; (void)line_set_law(&line[p], line_law[p]); }
+            /* the law of the settings in force (the port's own, taken on hook):
+             * no copy of the whole configuration every block */
+            if (S[p].tel.state == TEL_ONHOOK && line_law[p] != (S[p].cfg.law == CFG_LAW_ALAW)) {
+                line_law[p] = S[p].cfg.law == CFG_LAW_ALAW;
+                (void)line_set_law(&line[p], line_law[p]);
             }
             if (p != 0) continue;
 
@@ -699,7 +704,7 @@ int main(int argc, char **argv)
             bbslink_poll(now_ms);
             update_poll(now_ms);
             netsvc_poll(now_ms);
-            if (fw_pid > 0 && now_ms % 1000 == 0 && waitpid(fw_pid, NULL, WNOHANG) == fw_pid) fw_pid = 0;
+            if (fw_pid > 0 && blocks == 50 && waitpid(fw_pid, NULL, WNOHANG) == fw_pid) fw_pid = 0;   /* once a second (blocks counts to 100 and starts again) */
             /* the Restart button, once its answer has gone out */
             if (H.restart_asked && httpd_active(&H) == 0) {
                 int fd;
@@ -708,7 +713,7 @@ int main(int argc, char **argv)
                 /* The daemon does not restart the machine it runs on: it leaves a
                  * note, and the image's boot script (fw/rcS) keeps what must be
                  * kept and restarts. */
-                fd = open(RESTART_NOTE, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+                fd = open(RESTART_NOTE, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0600);
                 if (fd >= 0) close(fd);
                 else logf_(CFG_LOG_WARN, "cannot write %s: %s", RESTART_NOTE, strerror(errno));
             }

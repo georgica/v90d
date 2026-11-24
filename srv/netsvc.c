@@ -315,7 +315,7 @@ static int on_vpn(void *ctx, const char *text, size_t len)
         logf_(CFG_LOG_INFO, "IWANGO games: the VPN profile was removed");
     } else {
         snprintf(tmp, sizeof tmp, "%s.new", vp_path);
-        fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+        fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0600);
         if (fd < 0) return -1;
         if (fchmod(fd, 0600) < 0 || write(fd, text, len) != (ssize_t)len) { close(fd); unlink(tmp); return -1; }
         close(fd);
@@ -391,17 +391,24 @@ static void proxy_arp(int on)
     if (write(fd, on ? "1\n" : "0\n", 2) != 2 && on) logf_(CFG_LOG_WARN, "cannot switch proxy ARP on %s: %s", lan_if, strerror(errno));
     close(fd);
 }
-static void arch_stop(void)
+/* Stop the gateway. wait: also wait for it (the daemon's own end); in the
+ * loop it is only told, and arch_poll reaps it without waiting. */
+static int arch_told;
+static void arch_stop(int wait)
 {
-    if (arch_pid > 0) { kill(arch_pid, SIGTERM); (void)waitpid(arch_pid, NULL, 0); arch_pid = 0; }
+    if (arch_pid <= 0) return;
+    if (!arch_told) { kill(arch_pid, SIGTERM); arch_told = 1; }
+    if (wait) { (void)waitpid(arch_pid, NULL, 0); arch_pid = 0; arch_told = 0; }
 }
 static void arch_poll(uint32_t now_ms)
 {
     if (arch_pid > 0 && waitpid(arch_pid, NULL, WNOHANG) == arch_pid) {
         arch_pid = 0;
-        if (arch_want) logf_(CFG_LOG_WARN, "archive mode: the gateway stopped; starting it again");
+        if (arch_want && !arch_told) logf_(CFG_LOG_WARN, "archive mode: the gateway stopped; starting it again");
+        arch_told = 0;
     }
-    if (!arch_want) { arch_stop(); return; }
+    if (!arch_want) { arch_stop(0); return; }
+    if (arch_told) return;                  /* the one told to stop is still going */
     if (arch_pid > 0 || !arch_path[0] || (int32_t)(now_ms - arch_next_ms) < 0) return;
     arch_next_ms = now_ms + 5000;
     arch_pid = fork();
@@ -538,9 +545,16 @@ void netsvc_apply(void) { net_apply(); }
 void netsvc_poll(uint32_t now_ms)
 {
     arch_clock = now_ms;
-    if (now_ms % 100 == 0) pw_poll();
-    if (now_ms % 2000 == 0) arch_poll(now_ms);
-    if (now_ms % 1000 == 0) { dc_poll(now_ms); dn_poll(now_ms); la_poll(now_ms); up_poll(now_ms); vp_poll(now_ms); }
+    /* Deadlines, not "now_ms % N == 0": now_ms wraps after 49.7 days and
+     * 2^32 is no multiple of the 10 ms step, so after the wrap no value of
+     * it is a multiple of 100 again for months, and nothing here would run. */
+    static uint32_t at100, at1000, at2000;
+    if ((int32_t)(now_ms - at100) >= 0) { at100 = now_ms + 100; pw_poll(); }
+    if ((int32_t)(now_ms - at2000) >= 0) { at2000 = now_ms + 2000; arch_poll(now_ms); }
+    if ((int32_t)(now_ms - at1000) >= 0) {
+        at1000 = now_ms + 1000;
+        dc_poll(now_ms); dn_poll(now_ms); la_poll(now_ms); up_poll(now_ms); vp_poll(now_ms);
+    }
 }
 
 int  netsvc_on_vpn(void *ctx, const char *profile, size_t len) { return on_vpn(ctx, profile, len); }
@@ -548,7 +562,7 @@ int  netsvc_vpn_remote(char *out, size_t cap) { return vp_remote(out, cap); }
 
 void netsvc_stop(void)
 {
-    arch_stop();
+    arch_stop(1);
     if (natr_pid > 0) { (void)waitpid(natr_pid, NULL, 0); natr_pid = 0; }
     if (vp_pid > 0) { (void)kill(vp_pid, SIGTERM); (void)waitpid(vp_pid, NULL, 0); }
     if (S[0].cfg.nat || any_archive() || any_console()) (void)nat_remove();

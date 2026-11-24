@@ -332,9 +332,12 @@ front. A port whose own number looks like one of them keeps its number.
   before the connection (`bbsdial_is_self`): 127/8, 0/8, the address of any
   of the box's own interfaces (found by asking the kernel which address it
   would send from towards it; nothing goes out), link-local 169.254/16,
-  multicast and broadcast are not connected to. The rest of the local
-  network is: a board may stand beside the box, and a dial-up caller
-  reaches the local network anyway.
+  multicast and broadcast are not connected to. Since the list is
+  Netstalgia's signed one of public boards, a board's name must also lead
+  to a public address (`BBSDIAL_PUBLIC`, as for Netstalgia's numbers of
+  services): a name pointed at the owner's network, by mistake or on
+  purpose, puts no caller on it. A board beside the box can be given its own
+  number in `[services]`, where the owner's hosts may be on the LAN.
   The host is looked at once more before it becomes an argument, and the
   fetched file is created anew, never through a link.
 
