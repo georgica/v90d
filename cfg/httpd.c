@@ -42,6 +42,7 @@ typedef char httpd_pages_fit[HTTPD_BODY_MAX >= STATUS_HTML_MAX && HTTPD_BODY_MAX
 
 static const char CT_TEXT[] = "text/plain; charset=us-ascii";
 static const char CT_HTML[] = "text/html; charset=utf-8";
+static const char CT_JS[]   = "text/javascript; charset=us-ascii";
 /* extra header lines of some answers */
 static const char ALLOW_READ[] = "Allow: GET, HEAD\r\n";
 static const char ALLOW_FORM[] = "Allow: GET, HEAD, POST\r\n";
@@ -94,7 +95,7 @@ static void put_head(sbuf_t *s, int code, const char *ctype, size_t clen, const 
     sb_puts(s, "\r\nConnection: close\r\n"
                "Cache-Control: no-store\r\n"
                "X-Content-Type-Options: nosniff\r\n"
-               "Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline';"
+               "Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; script-src 'self';"
                " form-action 'self'; frame-ancestors 'none'\r\n");
     if (extra) sb_puts(s, extra);
     sb_puts(s, "\r\n");
@@ -933,6 +934,13 @@ static void handle(httpd_t *h, httpd_conn_t *c, size_t n, uint32_t now)
     else if (plen == 7 && memcmp(uri, "/logout", 7) == 0) {
         { int j = session_find(h, c->rx, n, now); if (j >= 0) h->sess[j].on = 0; }
         respond_text(h, c, 303, "Location: /\r\nSet-Cookie: sid=; Path=/; Max-Age=0\r\n", NULL, head_only, now);
+        return;
+    }
+    else if (plen == 6 && memcmp(uri, "/ui.js", 6) == 0) {
+        /* the pages' script (page.h): the same for everyone, nothing of the box in it */
+        char *body = c->tx + HTTPD_HDR_RESERVE;
+        memcpy(body, PAGE_JS, sizeof PAGE_JS - 1);
+        finish(h, c, 200, CT_JS, NULL, (int)(sizeof PAGE_JS - 1), head_only, now);
         return;
     }
     else if (plen == 14 && memcmp(uri, "/cgi-bin/login", 14) == 0) {

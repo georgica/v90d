@@ -41,6 +41,7 @@
     "nav a{color:#fff;background:rgba(255,255,255,.12)}" \
     "nav b{color:#1f2a44;background:var(--ac)}" \
     "nav .r{margin-left:auto;background:none;color:#c3cbda}" \
+    "template{display:none}" \
     "nav .mn{position:relative;display:flex}" \
     "nav .mn>a.on{color:#1f2a44;background:var(--ac)}" \
     "nav .dd{display:none;position:absolute;top:100%;left:0;z-index:9;min-width:100%;" \
@@ -135,7 +136,7 @@ static inline void page_top(sbuf_t *b, const char *title, const char *head, int 
     sb_puts(b, head);
     sb_puts(b, "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n"
                "<title>" PAGE_NAME " "); sb_puts(b, title);
-    sb_puts(b, "</title>\n" PAGE_CSS "</head><body>\n"
+    sb_puts(b, "</title>\n" PAGE_CSS "<script src=\"/ui.js\" defer></script>\n</head><body>\n"
                "<header><div><h1><i></i>" PAGE_NAME "<small>dial-up server</small></h1>\n<nav>");
     if (alone) {
         sb_puts(b, "<b>"); sb_puts(b, alone); sb_puts(b, "</b>");
@@ -166,6 +167,31 @@ static inline void page_top(sbuf_t *b, const char *title, const char *head, int 
     }
     sb_puts(b, "</nav></div></header>\n<main>\n");
 }
+
+/* The pages' one script, served at /ui.js (the policy allows script from
+ * the box only, none inline). It does one thing: an Add button that names a
+ * template (data-tpl) puts a copy of it into its table (data-rows), the IDX
+ * in its field names replaced by the next row number, up to data-max rows,
+ * without leaving the page. A browser without it posts the button: the page
+ * is saved and comes back with one more row (settings.h). */
+#define PAGE_JS \
+    "(function(){\n" \
+    "function add(e){\n" \
+    " var b=e.target||e.srcElement;\n" \
+    " if(!b||!b.getAttribute||b.getAttribute('name')!=='add'||!b.getAttribute('data-tpl'))return;\n" \
+    " var t=document.getElementById(b.getAttribute('data-tpl')),r=document.getElementById(b.getAttribute('data-rows'));\n" \
+    " if(!t||!r||!t.innerHTML||!r.insertAdjacentHTML)return;\n" \
+    " if(e.preventDefault)e.preventDefault();\n" \
+    " var n=r.getElementsByTagName('tr').length,m=+b.getAttribute('data-max');\n" \
+    " if(n<m){\n" \
+    "  r.insertAdjacentHTML('beforeend',t.innerHTML.replace(/IDX/g,String(n)));\n" \
+    "  var f=r.getElementsByTagName('tr')[n].getElementsByTagName('input')[0];if(f&&f.focus)f.focus();\n" \
+    " }\n" \
+    " if(n+1>=m)b.disabled=true;\n" \
+    " return false;\n" \
+    "}\n" \
+    "if(document.addEventListener)document.addEventListener('click',add,false);\n" \
+    "})();\n"
 
 #define PAGE_END \
     "</main>\n<footer>" PAGE_NAME " &middot; v90d firmware " V90D_VERSION "</footer>\n</body></html>\n"

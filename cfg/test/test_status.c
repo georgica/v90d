@@ -168,8 +168,9 @@ static void test_idle(void)
     CHECK(strncmp(html, "<!DOCTYPE html>", 15) == 0);
     CHECK(has(html, "</html>\n"));
     CHECK(has(html, "<td>idle</td>"));
-    /* self-contained: no script, nothing fetched from anywhere */
-    CHECK(!has(html, "<script") && !has(html, "src=") &&
+    /* self-contained: the box's one script, nothing inline, nothing fetched from anywhere else */
+    CHECK(has(html, "<script src=\"/ui.js\" defer></script>") && !has(html, "<script>"));
+    CHECK(strstr(strstr(html, "src=") + 4, "src=") == NULL &&
           !has(html, "url(") && !has(html, "http:") && !has(html, "https:") && !has(html, "@import"));
     /* every link leads to a page of the same server; the first to the settings */
     {
@@ -421,7 +422,7 @@ static void test_escaping(void)
     fill(&s);
     strcpy(s.peer_name, "<script>alert('x')</script>&\"\\");
     CHECK(status_render_html(&s, html, sizeof html) > 0);
-    CHECK(!has(html, "<script"));
+    CHECK(!has(html, "<script>"));
     CHECK(!has(html, "alert('"));
     CHECK(has(html, "<td>&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;&amp;&quot;\\</td>"));
     CHECK(status_render_json(&s, json, sizeof json) > 0);

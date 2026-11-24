@@ -142,8 +142,10 @@ static void test_page(void)
     CHECK(has(html, "<small>1 to 10</small>"));
     CHECK(has(html, "<form method=\"post\" action=\"/settings\">"));
     CHECK(has(html, "<input type=\"submit\" value=\"Save\">"));
-    /* self-contained, and it must not reload itself under the user's hands */
-    CHECK(!has(html, "<script") && !has(html, "src=") && !has(html, "url(") &&
+    /* self-contained, and it must not reload itself under the user's hands:
+     * one script, the box's own file, nothing inline */
+    CHECK(has(html, "<script src=\"/ui.js\" defer></script>") && !has(html, "<script>"));
+    CHECK(strstr(strstr(html, "src=") + 4, "src=") == NULL && !has(html, "url(") &&
           !has(html, "http:") && !has(html, "https:") && !has(html, "@import") &&
           !has(html, "http-equiv") && !has(html, "\xe2\x80\x94"));
     CHECK(!has(html, "saved") && !has(html, "Not saved"));
@@ -176,7 +178,7 @@ static void test_page(void)
     CHECK(has(html, "<input type=\"text\" name=\"user0\" size=\"24\" maxlength=\"63\" value=\"\">"));
     /* no user yet: the one new row, with its Add button */
     CHECK(!has(html, "name=\"user1\"") && !has(html, "name=\"user16\""));
-    CHECK(has(html, "<tr class=\"new\"><td>New</td>") && has(html, "<p><input type=\"submit\" name=\"add\" value=\"Add\"></p>"));
+    CHECK(has(html, "<tr class=\"new\"><td>New</td>") && has(html, "<p><input type=\"submit\" name=\"add\" value=\"Add\" data-tpl="));
     CHECK(has(html, "<input type=\"password\" name=\"pass0\" size=\"24\" maxlength=\"64\""
                     " autocomplete=\"new-password\">"));
     CHECK(!has(html, "name=\"pass1\""));
@@ -231,7 +233,7 @@ static void test_page(void)
             if (!e || (v && v < e)) with_value++;
             p++;
         }
-        CHECK_EQ_I(pw, 3 + 1);              /* the three users and the admin password */
+        CHECK_EQ_I(pw, 3 + 1 + 1);          /* the three users, the admin password, the template of a new row */
         CHECK_EQ_I(with_value, 0);
     }
 
@@ -258,7 +260,7 @@ static void test_escaping(void)
     strcpy(c.users[0].name, "\"><script>alert('x')</script>&");
     strcpy(c.line_number, "\"><b>&'");
     CHECK(settings_render_html(&c, 0, NULL, html, sizeof html) > 0);
-    CHECK(!has(html, "<script") && !has(html, "<b>&") && !has(html, "alert('"));
+    CHECK(!has(html, "<script>") && !has(html, "<b>&") && !has(html, "alert('"));
     CHECK(has(html, "name=\"user0\" size=\"24\" maxlength=\"63\" value=\"&quot;&gt;&lt;script&gt;"
                     "alert(&#39;x&#39;)&lt;/script&gt;&amp;\">"));
     CHECK(has(html, "name=\"number\" size=\"22\" maxlength=\"20\" value=\"&quot;&gt;&lt;b&gt;&amp;&#39;\">"));
@@ -928,8 +930,12 @@ static void test_users(void)
         cfg_t c2, o2; int k;
         base(&c2);
         CHECK(settings_render_page(&c2, SETTINGS_USERS, 0, NULL, html, sizeof html) > 0);
-        CHECK(!has(html, "name=\"user3\"") && has(html, "<p><input type=\"submit\" name=\"add\" value=\"Add\"></p>"));
-        CHECK(has(html, "Add saves the page and gives it an empty row for a new user."));
+        CHECK(!has(html, "name=\"user3\"") && has(html, "<p><input type=\"submit\" name=\"add\" value=\"Add\" data-tpl="));
+        CHECK(has(html, "Add gives the table an empty row for a new user; Save keeps what you fill in."));
+        /* the template, outside the form, for the script */
+        CHECK(has(html, "</form>\n<template id=\"utpl\"><tr class=\"new\"><td>New</td><td><input type=\"text\" name=\"userIDX\""));
+        CHECK(has(html, "name=\"passIDX\"") && has(html, "data-tpl=\"utpl\" data-rows=\"urows\" data-max=\"16\""));
+        CHECK(has(html, "<tbody id=\"urows\">"));
         /* Add: the form saved as it is, and the button said so */
         CHECK_EQ_I(apply(&c2, "user0=alice&pass0=&add=Add", &o2), SETTINGS_OK);
         CHECK_EQ_I(settings_added(), 1); CHECK_EQ_I(o2.n_users, 3);
@@ -1267,7 +1273,7 @@ static void test_services_page(void)
     }
     /* none yet: one empty row, and Add for more */
     CHECK(has(html, "<a class=\"on\" href=\"/bbs\">Services</a>") && has(html, "name=\"snum0\"") && !has(html, "snum1"));
-    CHECK(has(html, "<p><input type=\"submit\" name=\"add\" value=\"Add\"></p>"));
+    CHECK(has(html, "<p><input type=\"submit\" name=\"add\" value=\"Add\" data-tpl="));
     CHECK(has(html, "<select name=\"netstalgia\"><option value=\"off\">Off") && has(html, "<option value=\"on\" selected>On"));
     CHECK(has(html, "No list."));
 

@@ -74,7 +74,7 @@
 #include <stddef.h>
 #include "config.h"
 
-#define SETTINGS_HTML_MAX  26624  /* settings_render_html never needs more */
+#define SETTINGS_HTML_MAX  28672  /* settings_render_html never needs more */
 #define SETTINGS_BODY_MAX  8192   /* a browser's post of the whole form with
                                      every field at its longest fits */
 #define SETTINGS_MSG_MAX   160    /* messages of settings_apply fit */

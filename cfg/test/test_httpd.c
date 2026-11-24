@@ -1011,6 +1011,12 @@ static void test_settings_post(void)
                        "Content-Length: 0\r\n\r\nrings=6"), 303);
     CHECK_EQ_I(C.rings, 5);
     CHECK_EQ_I(httpd_active(&H), 0);
+    /* the pages' script: served to anyone, as it is, and the only script
+     * the policy lets a page run */
+    len = exchange("GET /ui.js HTTP/1.0\r\n\r\n", resp, sizeof resp);
+    CHECK(parse_resp(resp, len, &r) && r.code == 200 && strstr(resp, "Content-Type: text/javascript") != NULL);
+    CHECK(strstr(resp, "replace(/IDX/g") != NULL);
+    CHECK(strstr(resp, "script-src 'self';") != NULL && strstr(resp, "'unsafe-inline'; script") != NULL);
     /* the Add button: saved as ever, then back with an empty row */
     CHECK_EQ_I(post("", "busy_chance=40&add=Add"), 303);
     CHECK(strstr(resp, "\r\nLocation: /settings?saved=1&add=1\r\n") != NULL);
@@ -1020,7 +1026,7 @@ static void test_settings_post(void)
         char want[64]; snprintf(want, sizeof want, "<tr class=\"new\"><td>New</td><td><input type=\"text\" name=\"user%d\"", C.n_users);
         CHECK(strstr(resp, want) != NULL);
         len = exchange("GET /users HTTP/1.0\r\n\r\n", resp, sizeof resp);
-        CHECK(strstr(resp, "<tr class=\"new\">") == NULL);             /* only when asked */
+        CHECK(strstr(resp, want) == NULL);                              /* only when asked (the template has IDX) */
         len = exchange("GET /users?add=1 HTTP/1.0\r\n\r\n", resp, sizeof resp);
         CHECK(strstr(resp, want) != NULL && strstr(resp, "Settings saved") == NULL);
     }

@@ -124,11 +124,16 @@ static void row_close(sbuf_t *b, const char *note)
 }
 
 /* <input type=.. name=..[row] size=.. maxlength=..   (left open) */
+/* a row number that is written "IDX": the template of a new row, which the
+ * page's script copies with the next number in its place (/ui.js) */
+#define ROW_TEMPLATE (-2)
+
 static void in_open(sbuf_t *b, const char *type, const char *name, int row, int size, int maxlen)
 {
     sb_puts(b, "<input type=\""); sb_puts(b, type);
     sb_puts(b, "\" name=\""); sb_puts(b, name);
-    if (row >= 0) sb_u64(b, (uint64_t)row);
+    if (row == ROW_TEMPLATE) sb_puts(b, "IDX");
+    else if (row >= 0) sb_u64(b, (uint64_t)row);
     sb_puts(b, "\" size=\""); sb_u64(b, (uint64_t)size);
     sb_puts(b, "\" maxlength=\""); sb_u64(b, (uint64_t)maxlen);
     sb_putc(b, '"');
@@ -223,6 +228,59 @@ static int add_rows;
 int settings_render_html(const cfg_t *c, int saved, const char *error, char *buf, size_t cap)
 {
     return settings_render_page(c, SETTINGS_ALL, saved, error, buf, cap);
+}
+
+/* one row of the users' table: user i (name[0..nl)), or a new one ("New") */
+static void user_row(sbuf_t *b, int i, const char *name, size_t nl, int used)
+{
+    sb_puts(b, used ? "<tr><td>" : "<tr class=\"new\"><td>");
+    if (used) sb_u64(b, (uint64_t)i + 1u); else sb_puts(b, "New");
+    sb_puts(b, "</td><td>");
+    if (form_safe(name, nl)) {
+        in_open(b, "text", "user", i, 24, CFG_NAME_MAX);
+        sb_puts(b, " value=\""); sb_html(b, name, nl, 1); sb_puts(b, "\">");
+    } else {
+        sb_html(b, name, nl, 0);
+        sb_puts(b, " <i>(change it in the config file)</i>");
+    }
+    sb_puts(b, "</td><td>");
+    in_password(b, "pass", i);
+    sb_puts(b, "</td></tr>\n");
+}
+
+/* one row of the numbers' table: e, or a new one (e NULL) */
+static void svc_row(sbuf_t *b, int i, const cfg_service_t *e)
+{
+    int m;
+    sb_puts(b, e ? "<tr><td>" : "<tr class=\"new\"><td>");
+    if (e) sb_u64(b, (uint64_t)i + 1u); else sb_puts(b, "New");
+    sb_puts(b, "</td><td>");
+    in_open(b, "text", svc_col[S_NUM], i, 13, CFG_SVC_NUMBER_MAX);
+    sb_puts(b, " value=\""); if (e) sb_html(b, e->number, sizeof e->number, 0); sb_puts(b, "\"></td><td>");
+    in_open(b, "text", svc_col[S_HOST], i, 18, CFG_SVC_HOST_MAX);
+    sb_puts(b, " value=\""); if (e) sb_html(b, e->host, sizeof e->host, 0); sb_puts(b, "\"></td><td>");
+    in_open(b, "text", svc_col[S_PORT], i, 5, 5);
+    sb_puts(b, " value=\""); if (e) sb_u64(b, e->port); sb_puts(b, "\"></td><td>");
+    sb_puts(b, "<select name=\"smode");
+    if (i == ROW_TEMPLATE) sb_puts(b, "IDX"); else sb_u64(b, (uint64_t)i);
+    sb_puts(b, "\">");
+    for (m = 0; m < 2; m++) {
+        sb_puts(b, "<option value=\""); sb_puts(b, n_svcmode[m]);
+        sb_puts(b, e && e->mode == m ? "\" selected>" : "\">"); sb_puts(b, n_svcmode[m]); sb_puts(b, "</option>");
+    }
+    sb_puts(b, "</select></td><td>");
+    in_open(b, "text", svc_col[S_NAME], i, 18, CFG_SVC_NAME_MAX);
+    sb_puts(b, " value=\""); if (e) sb_html(b, e->name, sizeof e->name, 0); sb_puts(b, "\"></td></tr>\n");
+}
+
+/* the Add button: with the script (/ui.js) it puts a copy of the template
+ * tpl into the table body rows, up to max rows, without leaving the page;
+ * without it, it posts the form and the page comes back with a new row */
+static void add_button(sbuf_t *b, const char *tpl, const char *rows, int max)
+{
+    sb_puts(b, "<p><input type=\"submit\" name=\"add\" value=\"Add\" data-tpl=\""); sb_puts(b, tpl);
+    sb_puts(b, "\" data-rows=\""); sb_puts(b, rows);
+    sb_puts(b, "\" data-max=\""); sb_u64(b, (uint64_t)max); sb_puts(b, "\"></p>\n");
 }
 
 int settings_render_page_add(const cfg_t *c, int page, int saved, int add, const char *error, char *buf, size_t cap)
@@ -364,32 +422,19 @@ int settings_render_page(const cfg_t *c, int page, int saved, const char *error,
     sb_puts(&b, "<section><h2>PPP login</h2>\n<table>\n");
     in_select(&b, "Authentication", F_AUTH, c->auth, n_auth, t_auth, 3);
     sb_puts(&b, "</table>\n<div class=\"x\"><table>\n"
-                "<tr><th>#</th><th>User name</th><th>Password</th></tr>\n");
+                "<thead><tr><th>#</th><th>User name</th><th>Password</th></tr></thead>\n<tbody id=\"urows\">\n");
     n = c->n_users < 0 ? 0 : c->n_users > CFG_MAX_USERS ? CFG_MAX_USERS : c->n_users;
     /* the users there are, and an empty row when there is none yet or Add
      * asked for one */
     for (i = 0; i < CFG_MAX_USERS && i < n + (n == 0) + add_rows; i++) {
         const char *name = i < n ? c->users[i].name : "";
-        size_t nl = len_of(name, sizeof c->users[i].name);
-        sb_puts(&b, i < n ? "<tr><td>" : "<tr class=\"new\"><td>");
-        if (i < n) sb_u64(&b, (uint64_t)i + 1u); else sb_puts(&b, "New");
-        sb_puts(&b, "</td><td>");
-        if (form_safe(name, nl)) {
-            in_open(&b, "text", "user", i, 24, CFG_NAME_MAX);
-            sb_puts(&b, " value=\""); sb_html(&b, name, nl, 1); sb_puts(&b, "\">");
-        } else {
-            sb_html(&b, name, nl, 0);
-            sb_puts(&b, " <i>(change it in the config file)</i>");
-        }
-        sb_puts(&b, "</td><td>");
-        in_password(&b, "pass", i);
-        sb_puts(&b, "</td></tr>\n");
+        user_row(&b, i, name, len_of(name, sizeof c->users[i].name), i < n);
     }
-    sb_puts(&b, "</table></div>\n");
-    if (n < CFG_MAX_USERS) sb_puts(&b, "<p><input type=\"submit\" name=\"add\" value=\"Add\"></p>\n");
+    sb_puts(&b, "</tbody></table></div>\n");
+    if (n < CFG_MAX_USERS) add_button(&b, "utpl", "urows", CFG_MAX_USERS);
     sb_puts(&b, "<p>");
     if (n >= CFG_MAX_USERS) sb_puts(&b, "There are 16 users, as many as the box takes. ");
-    else sb_puts(&b, "Add saves the page and gives it an empty row for a new user. ");
+    else sb_puts(&b, "Add gives the table an empty row for a new user; Save keeps what you fill in. ");
     sb_puts(&b, "To remove one, empty its name and save. Passwords are not shown: leave the"
                 " field empty to keep the one a user has, type a new one to change it.</p></section>\n");
 
@@ -437,31 +482,13 @@ int settings_render_page(const cfg_t *c, int page, int saved, const char *error,
     }
     if (page == SETTINGS_SERVICES) {
     sb_puts(&b, "<section><h2>Numbers to services</h2>\n<div class=\"x\"><table>\n"
-                "<tr><th>#</th><th>Number</th><th>Host</th><th>Port</th><th>Mode</th><th>Name</th></tr>\n");
+                "<thead><tr><th>#</th><th>Number</th><th>Host</th><th>Port</th><th>Mode</th><th>Name</th></tr></thead>\n"
+                "<tbody id=\"srows\">\n");
     n = c->n_services < 0 ? 0 : c->n_services > CFG_MAX_SERVICES ? CFG_MAX_SERVICES : c->n_services;
-    for (i = 0; i < CFG_MAX_SERVICES && i < n + (n == 0) + add_rows; i++) {
-        const cfg_service_t *e = &c->services[i];
-        int used = i < n, m;
-        sb_puts(&b, used ? "<tr><td>" : "<tr class=\"new\"><td>");
-        if (used) sb_u64(&b, (uint64_t)i + 1u); else sb_puts(&b, "New");
-        sb_puts(&b, "</td><td>");
-        in_open(&b, "text", svc_col[S_NUM], i, 13, CFG_SVC_NUMBER_MAX);
-        sb_puts(&b, " value=\""); if (used) sb_html(&b, e->number, sizeof e->number, 0); sb_puts(&b, "\"></td><td>");
-        in_open(&b, "text", svc_col[S_HOST], i, 18, CFG_SVC_HOST_MAX);
-        sb_puts(&b, " value=\""); if (used) sb_html(&b, e->host, sizeof e->host, 0); sb_puts(&b, "\"></td><td>");
-        in_open(&b, "text", svc_col[S_PORT], i, 5, 5);
-        sb_puts(&b, " value=\""); if (used) sb_u64(&b, e->port); sb_puts(&b, "\"></td><td>");
-        sb_puts(&b, "<select name=\"smode"); sb_u64(&b, (uint64_t)i); sb_puts(&b, "\">");
-        for (m = 0; m < 2; m++) {
-            sb_puts(&b, "<option value=\""); sb_puts(&b, n_svcmode[m]);
-            sb_puts(&b, used && e->mode == m ? "\" selected>" : "\">"); sb_puts(&b, n_svcmode[m]); sb_puts(&b, "</option>");
-        }
-        sb_puts(&b, "</select></td><td>");
-        in_open(&b, "text", svc_col[S_NAME], i, 18, CFG_SVC_NAME_MAX);
-        sb_puts(&b, " value=\""); if (used) sb_html(&b, e->name, sizeof e->name, 0); sb_puts(&b, "\"></td></tr>\n");
-    }
-    sb_puts(&b, "</table></div>\n");
-    if (n < CFG_MAX_SERVICES) sb_puts(&b, "<p><input type=\"submit\" name=\"add\" value=\"Add\"></p>\n");
+    for (i = 0; i < CFG_MAX_SERVICES && i < n + (n == 0) + add_rows; i++)
+        svc_row(&b, i, i < n ? &c->services[i] : NULL);
+    sb_puts(&b, "</tbody></table></div>\n");
+    if (n < CFG_MAX_SERVICES) add_button(&b, "stpl", "srows", CFG_MAX_SERVICES);
     sb_puts(&b, "<table>\n");
     in_select(&b, "Netstalgia's numbers", F_SVCNET, c->svc_netstalgia, n_v92, t_svcnet, 2);
     sb_puts(&b, "</table>\n<p>A caller who dials one of these numbers, on either port and whatever its"
@@ -474,6 +501,13 @@ int settings_render_page(const cfg_t *c, int page, int saved, const char *error,
                 " on your network. A row without a number is not used.</p></section>\n");
     }
     sb_puts(&b, "<p><input type=\"submit\" value=\"Save\"></p>\n</form>\n");
+    /* the new rows the Add button copies (outside the form: never posted) */
+    if (ON(SETTINGS_USERS)) {
+        sb_puts(&b, "<template id=\"utpl\">"); user_row(&b, ROW_TEMPLATE, "", 0, 0); sb_puts(&b, "</template>\n");
+    }
+    if (page == SETTINGS_SERVICES) {
+        sb_puts(&b, "<template id=\"stpl\">"); svc_row(&b, ROW_TEMPLATE, NULL); sb_puts(&b, "</template>\n");
+    }
     if (page == SETTINGS_CONSOLES) {
         /* one profile for the box, whichever port's page this is; posted as
          * it is (text/plain), since it is longer than a form field may be */

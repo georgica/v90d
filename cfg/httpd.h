@@ -100,7 +100,7 @@
 #define HTTPD_POST_MAX     SETTINGS_BODY_MAX  /* largest body of a posted
                                      settings form (8192) */
 #define HTTPD_HDR_RESERVE  512    /* room for our response head */
-#define HTTPD_BODY_MAX     26624  /* largest response body (>= STATUS_HTML_MAX,
+#define HTTPD_BODY_MAX     28672  /* largest response body (>= STATUS_HTML_MAX,
                                      STATUS_JSON_MAX, CFG_TEXT_REDACTED_MAX,
                                      SETTINGS_HTML_MAX) */
 #define HTTPD_TX_MAX       (HTTPD_HDR_RESERVE + HTTPD_BODY_MAX)
