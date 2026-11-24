@@ -245,7 +245,21 @@ static int write_all(const uint8_t *f, seg_t *s, int k, char *msg, size_t cap)
     for (i = 0; i < k; i++) {
         if (!s[i].differs) continue;
         if (flash_write(s[i].at, s[i].payload, s[i].len)) { snprintf(msg, cap, "writing the %s failed", PLACE[s[i].place].name); return 2; }
+        /* the rest of its part as the updater leaves it, erased: a shorter
+         * part (the stock /obi after ours) must not keep what ours had there */
+        {
+            uint32_t a = s[i].at + (s[i].len + SECTOR - 1) / SECTOR * SECTOR;
+            uint32_t lim = PLACE[s[i].place].at + PLACE[s[i].place].size;
+            for (; a < lim; a += SECTOR) {
+                uint32_t j;
+                if (flash_read(a, sec, SECTOR)) { snprintf(msg, cap, "the flash cannot be read"); return 2; }
+                for (j = 0; j < SECTOR && sec[j] == 0xFF; j++) ;
+                if (j < SECTOR && flash_erase(a, SECTOR)) { snprintf(msg, cap, "erasing the rest of the %s failed", PLACE[s[i].place].name); return 2; }
+            }
+        }
     }
+    /* (sec held the header's sector: read it again) */
+    if (flash_read(TABLE_AT, sec, SECTOR)) { snprintf(msg, cap, "the flash cannot be read"); return 2; }
     /* the header, with the updater's "written" mark (octet 2 of each type):
      * set for what was written now, else as the box had it for that part */
     memcpy(hdr, f, HDR_LEN);

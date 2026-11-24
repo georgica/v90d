@@ -94,7 +94,8 @@ with tempfile.TemporaryDirectory() as tmp:
     back = bytearray(open(flash, "rb").read())
     for i in range(struct.unpack_from("<I", base, 0x80)[0]):
         back[0x470000 + 0xC0 + i * 0x40 + 2] = fresh[0x470000 + 0xC0 + i * 0x40 + 2]
-    check(r == 0 and back == fresh, "back to BASE restores the flash")
+    check(r == 0 and back == fresh, "back to BASE restores the flash: %d %r, differs at %s" %
+          (r, out[:120], [hex(a) for a in range(0, len(back), 0x10000) if back[a:a + 0x10000] != fresh[a:a + 0x10000]][:8]))
 
     # refused, and nothing written
     def refused(data, what):
