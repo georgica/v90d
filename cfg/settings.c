@@ -805,7 +805,7 @@ static void build_services(form_t *f, const cfg_t *cur)
     if (!any) return;
     memset(c->services, 0, sizeof c->services);
     for (i = 0; i < CFG_MAX_SERVICES; i++) {
-        char col[S_COLS][VAL_MAX + 1], port[8], line[VAL_MAX * 4 + 8];
+        char col[S_COLS][VAL_MAX + 1], port[8], line[S_COLS * (VAL_MAX + 1) + 8];
         const cfg_service_t *e = i < ncur ? &cur->services[i] : NULL;
         const char *why = "";
         for (k = 0; k < S_COLS; k++) {
