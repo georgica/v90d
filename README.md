@@ -160,6 +160,18 @@ signed list of services, which it fetches once a day (switch it off on the
 same tab and it never asks). Your numbers come first. The list as it was
 at the release ([lists/services.txt](lists/services.txt)) is in the image.
 
+## The callers' names
+
+A dial-up caller's name server is the box itself (`[network] dns_relay`, on
+by default): the box asks the DNS servers of the Network settings, or with
+both empty the ones your network gave it, and passes the answers on. It
+answers a question for IPv6 addresses (AAAA) itself, with none: the dial-up
+link carries IPv4 only, and a caller with an IPv6 stack (Windows XP with
+IPv6 installed, on a network that is mostly IPv6) would otherwise be handed
+addresses it cannot reach. With it off the callers are given the two
+servers to ask themselves, as before. A Dreamcast port keeps its own name
+servers, and a call in archive mode keeps the archive's.
+
 ## The terminal menu
 
 With **Terminal menu** on (Services, Numbers page), a caller who dials a

@@ -1796,5 +1796,113 @@ int main(int argc, char **argv)
         CHECK_EQ_I(waitpid(pid, &st, 0), pid);
         CHECK(WIFEXITED(st) && WEXITSTATUS(st) == 0);
     }
+    /* 18. the callers' name server ([network] dns_relay, srv/dnsrelay.h):
+     * the caller is given the box's PPP address; an A question goes to the
+     * name server set (a stand-in on 127.0.0.1) and its answer comes back;
+     * a AAAA question is answered by the box, with none, and never asked. */
+    {
+        static char lanlog[300];
+        int dfd = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK, 0), asked = 0, asked_aaaa = 0, one = 1;
+        struct sockaddr_in da;
+        cfg_default(&c);
+        strcpy(c.line_number, "5551234"); c.rings = 1; c.status_port = 8080;
+        c.dns[0] = IP4(192, 0, 2, 53); c.dns[1] = 0;     /* the stand-in, on lo (a loopback address is no name server to the settings) */
+        if (system("ip addr add 192.0.2.53/32 dev lo 2>/dev/null")) { }
+        CHECK_EQ_I(c.dns_relay, 1);                         /* on by default */
+        CHECK_EQ_I(cfg_save(&c, conf, err, sizeof err), CFG_OK);
+        setsockopt(dfd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+        memset(&da, 0, sizeof da); da.sin_family = AF_INET; da.sin_port = htons(53); da.sin_addr.s_addr = htonl(IP4(192, 0, 2, 53));
+        CHECK(bind(dfd, (struct sockaddr *)(void *)&da, sizeof da) == 0);
+        CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
+        snprintf(lanlog, sizeof lanlog, "%s/ns_dns.log", argv[2]);
+        pid = fork();
+        if (pid == 0) {
+            int a = fcntl(sv[1], F_DUPFD, 20), lfd = open(lanlog, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            dup2(a, 3); if (lfd >= 0) dup2(lfd, 2);
+            for (i = 4; i < 64; i++) close(i);
+            execl(argv[1], "v90d", "-c", conf, "-l", "fd:3", "-i", "lo", "-t", "ppp0", "-b", "", "-f", "", (char *)NULL);
+            _exit(127);
+        }
+        close(sv[1]);
+        line_fd = sv[0]; idle_fd = -1;
+        dead = quiet_exit = 0; hook = modem_on = 0; blk_n = 0; c_tx = 0; c_rx_pw = 0;
+        channel_init(&CH, &cc);
+        memset(prev_tx, 0xFF, sizeof prev_tx);
+        run_ms(1000);
+        hook = 1; run_ms(500);
+        dial("5551234");
+        run_ms(2000 + 300);
+        start_modem(0);
+        CHECK(wait_ip(60000) >= 0);
+        printf("  IPCP name server: %08x\n", (unsigned)C.ppp.dns1);
+        CHECK_EQ_I((long)C.ppp.dns1, (long)PPP_LOCAL);     /* the box itself */
+        CHECK_EQ_I((long)C.ppp.dns2, 0);
+        {
+            /* a question from the caller: IPv4 + UDP to 10.64.64.1:53 */
+            static const uint8_t name[] = "\7example\3com";
+            int qt, got_a = 0, got_none = 0;
+            for (qt = 0; qt < 2; qt++) {
+                uint8_t p[200]; size_t qn = 12, n; uint16_t ck; long t; int n0 = cli_n, sent = 0;
+                uint16_t id = (uint16_t)(0x4242 + qt), type = qt ? 28 : 1;
+                memset(p, 0, sizeof p);
+                p[28 + 0] = (uint8_t)(id >> 8); p[28 + 1] = (uint8_t)id; p[28 + 2] = 0x01; p[28 + 5] = 1;   /* RD, one question */
+                memcpy(p + 28 + qn, name, sizeof name); qn += sizeof name;          /* with its 0 */
+                p[28 + qn++] = 0; p[28 + qn++] = (uint8_t)type; p[28 + qn++] = 0; p[28 + qn++] = 1;
+                n = 28 + qn;
+                p[0] = 0x45; p[2] = (uint8_t)(n >> 8); p[3] = (uint8_t)n; p[8] = 64; p[9] = 17;
+                put32(p + 12, C.ppp.my_ip); put32(p + 16, PPP_LOCAL);      /* the address IPCP gave it */
+                ck = csum(p, 20); p[10] = (uint8_t)(ck >> 8); p[11] = (uint8_t)ck;
+                p[20] = 0x14; p[21] = 0xe9; p[22] = 0; p[23] = 53;                 /* 5353 -> 53 */
+                p[24] = (uint8_t)((n - 20) >> 8); p[25] = (uint8_t)(n - 20);       /* no UDP checksum */
+                for (t = 0; t < 8L * FS && !dead; t++) {
+                    if (t % FS == 0 && caller_send_ip(&C, p, n) == 0) sent++;   /* as a resolver: again each second */
+                    if (t % BLK == 0) {                 /* the name server stand-in: A only, 192.0.2.7 */
+                        uint8_t m[512]; struct sockaddr_in fa; socklen_t fl = sizeof fa;
+                        ssize_t r = recvfrom(dfd, m, sizeof m, 0, (struct sockaddr *)(void *)&fa, &fl);
+                        if (r > 12 + 5) {
+                            size_t e = (size_t)r;
+                            int mt = m[e - 3];
+                            if (mt == 28) asked_aaaa++;
+                            asked++;
+                            m[2] |= 0x80; m[3] = 0x80; m[7] = 1;
+                            {   static const uint8_t ans[] = { 0xc0, 0x0c, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4, 192, 0, 2, 7 };
+                                memcpy(m + e, ans, sizeof ans); e += sizeof ans; }
+                            (void)sendto(dfd, m, e, 0, (struct sockaddr *)(void *)&fa, fl);
+                        }
+                    }
+                    step(0);
+                    if (cli_n > n0 && cli_len > 28 && cli_pkt[9] == 17) break;
+                }
+                CHECK(cli_n > n0);
+                printf("  %s: sent %d time(s)\n", qt ? "AAAA" : "A", sent);
+                if (cli_n > n0 && cli_len > 28 + 12 && cli_pkt[9] == 17) {
+                    const uint8_t *m = cli_pkt + 28;
+                    CHECK_EQ_I(get32(cli_pkt + 12), (long)PPP_LOCAL);             /* from the box */
+                    CHECK_EQ_I(cli_pkt[20] << 8 | cli_pkt[21], 53);
+                    CHECK_EQ_I(m[0] << 8 | m[1], id);                           /* the caller's id back */
+                    CHECK(m[2] & 0x80);
+                    if (!qt) {
+                        got_a = m[7] == 1 && cli_len >= 28 + qn + 16 && memcmp(cli_pkt + cli_len - 4, "\xc0\x00\x02\x07", 4) == 0;
+                        CHECK(got_a);
+                    } else {
+                        got_none = (m[3] & 0x0f) == 0 && m[6] == 0 && m[7] == 0;
+                        CHECK(got_none);
+                    }
+                }
+            }
+            printf("  relay: A answered %d, AAAA answered with none %d; the name server was asked %d time(s), %d for AAAA\n",
+                   got_a, got_none, asked, asked_aaaa);
+            CHECK_EQ_I(asked, 1);
+            CHECK_EQ_I(asked_aaaa, 0);
+        }
+        hang_up();
+        close(dfd);
+        quiet_exit = 1;
+        kill(pid, SIGTERM);
+        for (i = 0; i < 400 && !dead; i++) step(0);
+        close(line_fd);
+        CHECK_EQ_I(waitpid(pid, &st, 0), pid);
+        CHECK(WIFEXITED(st) && WEXITSTATUS(st) == 0);
+    }
     T_REPORT("ns_call");
 }
