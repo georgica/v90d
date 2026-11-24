@@ -2,6 +2,7 @@
  * body. See settings.h. */
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "settings.h"
 #include "sbuf.h"
@@ -197,6 +198,11 @@ const char *settings_page_path(int page)
     return pages[page >= 0 && page < SETTINGS_PAGES ? page : 0].path;
 }
 
+int settings_page_port2(int page)
+{
+    return page == SETTINGS_LINE2 || page == SETTINGS_MODEM2 || page == SETTINGS_CONSOLES2;
+}
+
 static int two_ports = 1;       /* the box has two FXS ports unless told otherwise */
 void settings_set_two_ports(int two) { two_ports = two != 0; }
 
@@ -328,6 +334,10 @@ int settings_render_page(const cfg_t *c, int page, int saved, const char *error,
         sb_puts(&b, "</p>\n");
     }
     sb_puts(&b, "<form method=\"post\" action=\""); sb_puts(&b, pages[own].path); sb_puts(&b, "\">\n");
+    /* Enter in a field presses the form's first button: a Save first, out of
+     * sight, so that it is never the Add button of a table */
+    if (ON(SETTINGS_USERS) || page == SETTINGS_SERVICES)
+        sb_puts(&b, "<input type=\"submit\" value=\"Save\" class=\"def\" tabindex=\"-1\" aria-hidden=\"true\">\n");
     if (port2) {
         sb_puts(&b, "<input type=\"hidden\" name=\""); sb_puts(&b, fields[F_PORT].name);
         sb_puts(&b, "\" value=\"2\">\n");
@@ -809,7 +819,9 @@ static void set_field(form_t *f, int fi, const char *v, size_t len)
     case F_DOWN:    set_num(f, fi, &c->max_down, v); break;
     case F_UP:      set_num(f, fi, &c->max_up, v); break;
     case F_PORT:
-        if (len != 1 || (v[0] != '1' && v[0] != '2') || (v[0] == '2' && !two_ports)) f->bad = 1;
+        /* the pass before took port 2 from the literal pair "port=2" only:
+         * the field must say the same however it was written */
+        if (len != 1 || (v[0] != '1' && v[0] != '2') || (v[0] == '2' && !two_ports) || (v[0] == '2') != f->port2) f->bad = 1;
         break;
     case F_ADMINPW:
         if (len > CFG_SECRET_MAX)
@@ -833,25 +845,35 @@ static void build_users(form_t *f, const cfg_t *cur)
     int i, j, n = 0;
     char sn[41];
 
-    memset(c->users, 0, sizeof c->users);
+    cfg_user_t row[CFG_MAX_USERS]; int used[CFG_MAX_USERS], last = -1;
+
+    memset(row, 0, sizeof row); memset(used, 0, sizeof used);
     for (i = 0; i < CFG_MAX_USERS; i++) {
         const char *name = (f->user_seen >> i) & 1u ? f->row[i].name : i < ncur ? cur->users[i].name : "";
         const char *pw = f->row[i].secret;
-        cfg_user_t *u = &c->users[n];
+        cfg_user_t *u = &row[i];
 
         if (name[0] == '\0') {
             if (pw[0]) fail(f, "[ppp] user %d: password without a name", i + 1);
             continue;
         }
+        used[i] = 1; last = i;
         for (j = 0; j < ncur; j++)
             if (strcmp(cur->users[j].name, name) == 0) break;
         strcpy(u->name, name);
         if (pw[0]) strcpy(u->secret, pw);
         else if (j < ncur) strcpy(u->secret, cur->users[j].secret);
         else fail(f, "[ppp] user '%s': a new user needs a password", safe(name, sn));
-        n++;
     }
-    c->n_users = n;
+    /* Closed up when all is well. On an error the page comes back with the
+     * rows where they were posted, so the next post's row numbers still
+     * mean the rows of the current settings. */
+    memset(c->users, 0, sizeof c->users);
+    for (i = 0; i < CFG_MAX_USERS; i++) {
+        if (f->invalid) { if (i <= last) c->users[i] = row[i]; }
+        else if (used[i]) c->users[n++] = row[i];
+    }
+    c->n_users = f->invalid ? last + 1 : n;
 }
 
 /* a value without the blanks at its ends, into out[VAL_MAX + 1] */
@@ -872,9 +894,11 @@ static void build_services(form_t *f, const cfg_t *cur)
     int ncur = cur->n_services < 0 ? 0 : cur->n_services > CFG_MAX_SERVICES ? CFG_MAX_SERVICES : cur->n_services;
     int i, k, n = 0, any = 0;
 
+    cfg_service_t row[CFG_MAX_SERVICES]; int used[CFG_MAX_SERVICES], last = -1;
+
     for (k = 0; k < S_COLS; k++) any |= f->svc_seen[k] != 0;
     if (!any) return;
-    memset(c->services, 0, sizeof c->services);
+    memset(row, 0, sizeof row); memset(used, 0, sizeof used);
     for (i = 0; i < CFG_MAX_SERVICES; i++) {
         char col[S_COLS][VAL_MAX + 1], port[8], line[S_COLS * (VAL_MAX + 1) + 8];
         const cfg_service_t *e = i < ncur ? &cur->services[i] : NULL;
@@ -889,19 +913,33 @@ static void build_services(form_t *f, const cfg_t *cur)
             else if (k == S_MODE) strcpy(col[k], n_svcmode[e->mode == CFG_SVC_TELNET]);
             else strcpy(col[k], e->name);
         }
-        if (!col[S_NUM][0]) {
-            if (col[S_HOST][0] || col[S_PORT][0] || col[S_NAME][0]) fail(f, "[services] service %d: a number is needed", i + 1);
-            continue;
-        }
         if (!col[S_MODE][0]) strcpy(col[S_MODE], "raw");
+        if (!col[S_NUM][0] && !col[S_HOST][0] && !col[S_PORT][0] && !col[S_NAME][0]) continue;   /* an empty row: not used */
+        used[i] = 1; last = i;
         snprintf(line, sizeof line, "%s %s:%s %s %s", col[S_NUM], col[S_HOST], col[S_PORT], col[S_MODE], col[S_NAME]);
-        if (strchr(col[S_NUM], ' ') || strchr(col[S_HOST], ' ') || strchr(col[S_PORT], ' ') || strchr(col[S_MODE], ' '))
+        if (!col[S_NUM][0])
+            fail(f, "[services] service %d: a number is needed", i + 1);
+        else if (strchr(col[S_NUM], ' ') || strchr(col[S_HOST], ' ') || strchr(col[S_PORT], ' ') || strchr(col[S_MODE], ' '))
             fail(f, "[services] service %d: a blank inside the number, host, port or mode", i + 1);
-        else if (cfg_svc_parse(line, strlen(line), &c->services[n], &why))
+        else if (cfg_svc_parse(line, strlen(line), &row[i], &why))
             fail(f, "[services] service %d: %s", i + 1, why);
-        else n++;
+        else continue;
+        /* not taken: the row as it was typed, for the page that says why */
+        memset(&row[i], 0, sizeof row[i]);
+        /* (cut to what each field holds: the page shows it again) */
+        memcpy(row[i].number, col[S_NUM], strnlen(col[S_NUM], sizeof row[i].number - 1));
+        memcpy(row[i].host, col[S_HOST], strnlen(col[S_HOST], sizeof row[i].host - 1));
+        memcpy(row[i].name, col[S_NAME], strnlen(col[S_NAME], sizeof row[i].name - 1));
+        { unsigned long pv = strtoul(col[S_PORT], NULL, 10); row[i].port = pv <= 65535 ? (uint16_t)pv : 0; }
+        row[i].mode = strcmp(col[S_MODE], "telnet") == 0 ? CFG_SVC_TELNET : CFG_SVC_RAW;
     }
-    c->n_services = n;
+    /* as for the users: closed up when all is well, in place on an error */
+    memset(c->services, 0, sizeof c->services);
+    for (i = 0; i < CFG_MAX_SERVICES; i++) {
+        if (f->invalid) { if (i <= last) c->services[i] = row[i]; }
+        else if (used[i]) c->services[n++] = row[i];
+    }
+    c->n_services = f->invalid ? last + 1 : n;
 }
 
 static int last_add;

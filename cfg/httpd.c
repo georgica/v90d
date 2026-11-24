@@ -92,8 +92,11 @@ static void put_head(sbuf_t *s, int code, const char *ctype, size_t clen, const 
     sb_puts(s, reason(code));
     sb_puts(s, "\r\nServer: v90d\r\nContent-Type: "); sb_puts(s, ctype);
     sb_puts(s, "\r\nContent-Length: "); sb_u64(s, clen);
-    sb_puts(s, "\r\nConnection: close\r\n"
-               "Cache-Control: no-store\r\n"
+    sb_puts(s, "\r\nConnection: close\r\n");
+    /* the script is the same for everyone and named with the firmware's
+     * version (page.h): kept by the browser; everything else never */
+    sb_puts(s, ctype == CT_JS ? "Cache-Control: max-age=86400\r\n" : "Cache-Control: no-store\r\n");
+    sb_puts(s, ""
                "X-Content-Type-Options: nosniff\r\n"
                "Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; script-src 'self';"
                " form-action 'self'; frame-ancestors 'none'\r\n");
@@ -413,7 +416,16 @@ static int authorised(httpd_t *h, const char *p, size_t n, uint32_t now)
 
     if (!h->cfg->admin_password[0]) return 1;
     hdr_find(p, n, "authorization", &hd);
-    if (hd.count) return hd.count == 1 && auth_ok(hd.v, hd.len, h->cfg->admin_password) ? 1 : -1;
+    if (hd.count) {
+        /* the same hold as for a wrong login: while it lasts no password is
+         * even looked at, so guessing goes no faster this way than by /login */
+        if (h->hold_on && (int32_t)(h->hold_until - now) > 0) return -1;
+        h->hold_on = 0;
+        if (hd.count == 1 && auth_ok(hd.v, hd.len, h->cfg->admin_password)) { h->bad_auth = 0; return 1; }
+        /* a mistyped password is no attack: the hold comes with the third in a row */
+        if (++h->bad_auth >= 3) { h->bad_auth = 0; h->hold_on = 1; h->hold_until = now + LOGIN_HOLD_MS; }
+        return -1;
+    }
     return session_ok(h, p, n, now);
 }
 
@@ -551,7 +563,19 @@ static void post_done(httpd_t *h, httpd_conn_t *c, uint32_t now)
 
     if (c->post_login == 1) { login_done(h, c, now); return; }
     if (c->post_login == 2) { vpn_done(h, c, now); return; }
-    r = settings_apply(h->cfg, c->tx, c->body_want, &cand, err, sizeof err);
+    {
+        /* the port is the page's: a post to a port-2 page says port=2, any
+         * other page's does not (settings_apply reads it from the body) */
+        size_t pos = 0, len = c->body_want; int two = 0;
+        while (pos < len) {
+            size_t pl = 0;
+            while (pos + pl < len && c->tx[pos + pl] != '&') pl++;
+            if (pl == 6 && memcmp(c->tx + pos, "port=2", 6) == 0) two = 1;
+            pos += pl + 1;
+        }
+        r = two != settings_page_port2(c->post_page) ? SETTINGS_BAD
+          : settings_apply(h->cfg, c->tx, c->body_want, &cand, err, sizeof err);
+    }
 
     /* from here on the posted octets are no longer needed and the answer
      * may be written over them */

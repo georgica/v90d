@@ -1017,6 +1017,17 @@ static void test_settings_post(void)
     CHECK(parse_resp(resp, len, &r) && r.code == 200 && strstr(resp, "Content-Type: text/javascript") != NULL);
     CHECK(strstr(resp, "replace(/IDX/g") != NULL);
     CHECK(strstr(resp, "script-src 'self';") != NULL && strstr(resp, "'unsafe-inline'; script") != NULL);
+    /* the port is the page's: a post to /line2 without port=2, or with it
+     * escaped, changes nothing */
+    {
+        static status_t st2; const status_t *had2 = H.status2; int rings = C.rings;
+        httpd_status2(&H, &st2);                    /* a two-port box: the port-2 pages are there */
+        CHECK_EQ_I(code_of("POST /line2 HTTP/1.0\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 7\r\n\r\nrings=9"), 400);
+        CHECK_EQ_I(code_of("POST /line HTTP/1.0\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 14\r\n\r\nrings=9&port=2"), 400);
+        CHECK_EQ_I(code_of("POST /line2 HTTP/1.0\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 16\r\n\r\nrings=9&port=%32"), 400);
+        CHECK_EQ_I(C.rings, rings);
+        httpd_status2(&H, had2);
+    }
     /* the Add button: saved as ever, then back with an empty row */
     CHECK_EQ_I(post("", "busy_chance=40&add=Add"), 303);
     CHECK(strstr(resp, "\r\nLocation: /settings?saved=1&add=1\r\n") != NULL);
@@ -1462,6 +1473,11 @@ static void test_settings_auth(void)
     CHECK(strstr(resp, "WWW-Authenticate") == NULL && strstr(resp, "down_bps") == NULL);
     CHECK_EQ_I(code_of("GET /config HTTP/1.0\r\n\r\n"), 303);
     CHECK(strstr(resp, "[line]") == NULL);
+    /* the wrong passwords above brought the hold on: none is looked at for a
+     * second, the right one included; then it is as before */
+    snprintf(hdr, sizeof hdr, "GET / HTTP/1.0\r\n%s\r\n", basic("admin", pw));
+    CHECK_EQ_I(code_of(hdr), 401);
+    now += 1100;
     snprintf(hdr, sizeof hdr, "GET / HTTP/1.0\r\n%s\r\n", basic("admin", pw));
     CHECK_EQ_I(code_of(hdr), 200);
     snprintf(hdr, sizeof hdr, "GET /status.json HTTP/1.0\r\n%s\r\n", basic("admin", pw));

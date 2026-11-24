@@ -42,6 +42,7 @@
     "nav b{color:#1f2a44;background:var(--ac)}" \
     "nav .r{margin-left:auto;background:none;color:#c3cbda}" \
     "template{display:none}" \
+    "input.def{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}" \
     "nav .mn{position:relative;display:flex}" \
     "nav .mn>a.on{color:#1f2a44;background:var(--ac)}" \
     "nav .dd{display:none;position:absolute;top:100%;left:0;z-index:9;min-width:100%;" \
@@ -139,7 +140,7 @@ static inline void page_top(sbuf_t *b, const char *title, const char *head, int 
     sb_puts(b, head);
     sb_puts(b, "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n"
                "<title>" PAGE_NAME " "); sb_puts(b, title);
-    sb_puts(b, "</title>\n" PAGE_CSS "<script src=\"/ui.js\" defer></script>\n</head><body>\n"
+    sb_puts(b, "</title>\n" PAGE_CSS "<script src=\"/ui.js?v=" V90D_VERSION "\" defer></script>\n</head><body>\n"
                "<header><div><h1><i></i>" PAGE_NAME "<small>dial-up server</small></h1>\n<nav>");
     if (alone) {
         sb_puts(b, "<b>"); sb_puts(b, alone); sb_puts(b, "</b>");

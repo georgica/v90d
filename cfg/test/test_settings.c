@@ -4,6 +4,7 @@
  * would post back from the rendered page gives the same config again. */
 #include <string.h>
 #include "test.h"
+#include "page.h"
 #include "settings.h"
 
 static char html[SETTINGS_HTML_MAX];
@@ -144,7 +145,7 @@ static void test_page(void)
     CHECK(has(html, "<input type=\"submit\" value=\"Save\">"));
     /* self-contained, and it must not reload itself under the user's hands:
      * one script, the box's own file, nothing inline */
-    CHECK(has(html, "<script src=\"/ui.js\" defer></script>") && !has(html, "<script>"));
+    CHECK(has(html, "<script src=\"/ui.js?v=" V90D_VERSION "\" defer></script>") && !has(html, "<script>"));
     CHECK(strstr(strstr(html, "src=") + 4, "src=") == NULL && !has(html, "url(") &&
           !has(html, "http:") && !has(html, "https:") && !has(html, "@import") &&
           !has(html, "http-equiv") && !has(html, "\xe2\x80\x94"));
@@ -1271,6 +1272,31 @@ static void test_services_page(void)
         CHECK(has(html, "name=\"snum2\" size=\"13\" maxlength=\"15\" value=\"\"") && !has(html, "name=\"snum3\""));
         CHECK(settings_render_page(&c, SETTINGS_SERVICES, 0, NULL, html, sizeof html) > 0);
     }
+    /* Enter presses the first button of a form: a Save, before any Add */
+    CHECK(settings_render_page(&c, SETTINGS_USERS, 0, NULL, html, sizeof html) > 0);
+    CHECK(has(html, "<form method=\"post\" action=\"/users\">\n<input type=\"submit\" value=\"Save\" class=\"def\""));
+    CHECK(strstr(html, "class=\"def\"") < strstr(html, "name=\"add\""));
+    /* an error: the rows stay where they were posted, a bad one as it was typed */
+    {
+        cfg_t c4 = c, o4; c4.n_services = 3;
+        strcpy(c4.services[0].number, "5550001"); strcpy(c4.services[0].host, "a"); c4.services[0].port = 1; strcpy(c4.services[0].name, "A");
+        strcpy(c4.services[1].number, "5550002"); strcpy(c4.services[1].host, "b"); c4.services[1].port = 2; strcpy(c4.services[1].name, "B");
+        strcpy(c4.services[2].number, "5550003"); strcpy(c4.services[2].host, "c"); c4.services[2].port = 3; strcpy(c4.services[2].name, "C");
+        CHECK_EQ_I(apply(&c4, "snum0=&shost0=&sport0=&sname0=&snum1=5550002&shost1=b&sport1=99999&sname1=B"
+                              "&snum2=5550003&shost2=c&sport2=3&sname2=C", &o4), SETTINGS_INVALID);
+        CHECK_EQ_I(o4.n_services, 3);
+        CHECK(o4.services[0].number[0] == 0 && strcmp(o4.services[1].number, "5550002") == 0 && strcmp(o4.services[1].host, "b") == 0);
+        CHECK(o4.services[1].port == 0 && strcmp(o4.services[2].number, "5550003") == 0);
+        /* that page posted again, fixed: the row numbers still mean the same rows */
+        CHECK_EQ_I(apply(&c4, "snum0=&shost0=&sport0=&sname0=&snum1=5550002&shost1=b&sport1=22&sname1=B"
+                              "&snum2=5550004&shost2=c&sport2=3&sname2=C", &o4), SETTINGS_OK);
+        CHECK_EQ_I(o4.n_services, 2);
+        CHECK(strcmp(o4.services[0].number, "5550002") == 0 && o4.services[0].port == 22 && strcmp(o4.services[1].number, "5550004") == 0);
+        /* the users the same way: a new one without a password keeps its place */
+        CHECK_EQ_I(apply(&c4, "user0=alice&pass0=&user1=&pass1=&user2=carol&pass2=&user3=dave&pass3=", &o4), SETTINGS_INVALID);
+        CHECK_EQ_I(o4.n_users, 4); CHECK(o4.users[1].name[0] == 0 && strcmp(o4.users[3].name, "dave") == 0);
+    }
+    CHECK(settings_render_page(&c, SETTINGS_SERVICES, 0, NULL, html, sizeof html) > 0);
     /* none yet: one empty row, and Add for more */
     CHECK(has(html, "<a class=\"on\" href=\"/bbs\">Services</a>") && has(html, "name=\"snum0\"") && !has(html, "snum1"));
     CHECK(has(html, "<p><input type=\"submit\" name=\"add\" value=\"Add\" data-tpl="));

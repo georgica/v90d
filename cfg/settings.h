@@ -133,6 +133,9 @@ void settings_set_svc_rows(settings_svc_rows_fn fn);
 const char *settings_page_path(int page);
 /* the page whose path is path[0..len), -1 if it is none */
 int settings_page_of(const char *path, size_t len);
+/* 1 for the pages of port 2 (/line2, /modem2, /dreamcast2): their post
+ * carries port=2, and no other page's may */
+int settings_page_port2(int page);
 
 /* Decode a posted form body and build the candidate config *out from the
  * current one *cur (which must be valid). Returns

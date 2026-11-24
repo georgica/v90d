@@ -2,6 +2,7 @@
  * escaping of hostile strings, bounded output at every buffer size. */
 #include <string.h>
 #include "test.h"
+#include "page.h"
 #include "status.h"
 
 #define IP(a, b, c, d) (((uint32_t)(a) << 24) | ((uint32_t)(b) << 16) | ((uint32_t)(c) << 8) | (uint32_t)(d))
@@ -169,7 +170,7 @@ static void test_idle(void)
     CHECK(has(html, "</html>\n"));
     CHECK(has(html, "<td>idle</td>"));
     /* self-contained: the box's one script, nothing inline, nothing fetched from anywhere else */
-    CHECK(has(html, "<script src=\"/ui.js\" defer></script>") && !has(html, "<script>"));
+    CHECK(has(html, "<script src=\"/ui.js?v=" V90D_VERSION "\" defer></script>") && !has(html, "<script>"));
     CHECK(strstr(strstr(html, "src=") + 4, "src=") == NULL &&
           !has(html, "url(") && !has(html, "http:") && !has(html, "https:") && !has(html, "@import"));
     /* every link leads to a page of the same server; the first to the settings */

@@ -195,6 +195,7 @@ typedef struct httpd {
                                     (httpd_active() == 0) */
     httpd_fw_t      fw;
     int             hold_on;     /* a wrong login: none accepted until hold_until */
+    int             bad_auth;    /* wrong Authorization headers in a row (three: the hold) */
     uint32_t        hold_until;
     httpd_conn_t    conn[HTTPD_MAX_CONN];
 } httpd_t;
