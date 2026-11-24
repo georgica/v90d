@@ -37,6 +37,7 @@
 #define NV_IMAGE_MAX  (LD_BASE_SIZE - LD_GS_HDR - NV_UI_HDR)
 #define NV_FILE_MAX   0x400000ul        /* the largest file `upgrade` reads */
 #define NV_BOARD      "ht802"           /* what an image names itself for: "v90d ht802 VERSION" */
+#define NV_MODELS     { "ht802", "ht801" }
 #define NV_IMAGE_TAG  LD_SYSTEM_NAME " " NV_BOARD " "
 
 enum { NV_OK = 0, NV_E_IO = -1, NV_E_RANGE = -2, NV_E_VERIFY = -3 };

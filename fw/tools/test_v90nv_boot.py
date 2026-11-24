@@ -63,7 +63,7 @@ def stock_flash():
     return bytes(f)
 
 
-def loader_flash(our_set=0, sysimg=OLD_SYS):
+def loader_flash(our_set=0, sysimg=OLD_SYS, model='ht802', dev=None):
     """A stock unit whose stock system, running from the other set, has
     installed our firmware file."""
     f = bytearray(stock_flash())
@@ -72,8 +72,8 @@ def loader_flash(our_set=0, sysimg=OLD_SYS):
             a, b = R.PARTS[kind]
             n = R.SIZE[kind]
             f[a:a + n], f[b:b + n] = f[b:b + n], f[a:a + n]
-    c = G.parse(release(sysimg))[0]
-    return R.stock_upgrade(bytes(f), c, 1 - our_set, R.HT802)
+    c = G.parse(release(sysimg, model=model))[0]
+    return R.stock_upgrade(bytes(f), c, 1 - our_set, dev or R.HT802)
 
 
 def env_image(tries):
@@ -487,7 +487,7 @@ class Upgrade(unittest.TestCase):
             'load address': system(2, 21000, load=0xC8800000),
             'too large': system(2, 0x300000 - 0x200 - 64 + 1),
             'stock firmware': stock_file,
-            'other model': release(NEW_SYS, model='ht801'),
+            'other model': release(NEW_SYS, model='ht814'),
             'other cpu': release(NEW_SYS, cpu='dvf9919'),
             'damaged file': bytes(broken),
             'half a file': release(NEW_SYS)[:9000],
@@ -507,7 +507,7 @@ class Upgrade(unittest.TestCase):
             self.assertEqual(b.get(), make())
 
     def test_one_port_board_is_known_but_not_tried(self):
-        for pn in (b'9611003610A\0', b'9610003611C\0'):
+        for pn in (b'9611003610A\0', b'9610003611C\0', b'9610003610A\0'):
             f = bytearray(loader_flash(0))
             f[0x4020:0x4020 + 12] = pn
             w = Box(self, bytes(f)).where()

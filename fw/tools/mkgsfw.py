@@ -6,9 +6,9 @@ upgrade works").
 
     mkgsfw.py list FILE
     mkgsfw.py verify FILE [--model ht802] [--cpu dvf9918] [--generation 1]
-                          [--required-bits 0000:0000:0000:0000] [--quick]
+                          [--required-bits 0000:0000:0000:0000] [--model-key K] [--quick]
     mkgsfw.py build -o OUT --version A.B.C.D --core F --base F --prog F
-                          [--model ht802] [--cpu dvf9918] [--bits 0000:0000:0000:7fff]
+                          [--model ht802|ht801] [--cpu dvf9918] [--bits B] [--model-key K]
     mkgsfw.py extract FILE DIR          every file as it would stand in flash
     mkgsfw.py part -o OUT --kind core|base|prog --version A.B.C.D [--counter N] IN
     mkgsfw.py uimage -o OUT --name NAME --load ADDR IN
@@ -45,6 +45,13 @@ CBC_IV = b'Grandstream Inc.'    # the same for every 32-octet unit
 KINDS = {'boot': (0x0B, 256 * 1024), 'core': (0x0C, 1280 * 1024), 'base': (0x0D, 3072 * 1024), 'prog': (0x0E, 3324 * 1024)}
 STOCK_MODEL_KEY = 0xFD21        # header offset 0x1A on every HT802 file and partition seen
 STOCK_BITS = (0, 0, 0, 0x7FFF)  # hardware bits of the 1.0.65 files: every board they know
+# model -> (model key, hardware bits), as in each model's stock files
+MODELS = {'ht802': (0xFD21, (0, 0, 0, 0x7FFF)),
+          'ht801': (0xFD20, (0, 0, 0, 0xFFFF))}
+
+
+def model_key_of(model):
+    return MODELS.get(model.lower(), (STOCK_MODEL_KEY, STOCK_BITS))[0]
 
 
 # ---------------------------------------------------------------- AES (FIPS-197)
@@ -415,10 +422,13 @@ def verify(c, dev, bodies=True, key_text=STOCK_KEY_TEXT):
     return bad
 
 
-def build(files, model, version, cpu, bits=STOCK_BITS, mask=1, generation=1, model_key=STOCK_MODEL_KEY,
+def build(files, model, version, cpu, bits=None, mask=1, generation=1, model_key=None,
           when=None, key_text=STOCK_KEY_TEXT):
     """A container of our files: [(kind, payload), ...] in the order given.
     All carry the same version, and name it as the version they go with."""
+    key0, bits0 = MODELS.get(model.lower(), (STOCK_MODEL_KEY, STOCK_BITS))
+    bits = bits0 if bits is None else bits
+    model_key = key0 if model_key is None else model_key
     if not 1 <= len(files) <= SLOTS:
         raise ValueError('1 to %d files' % SLOTS)
     v = version_int(version)
@@ -474,9 +484,11 @@ def main(argv):
     p.add_argument('--model', default='ht802'); p.add_argument('--cpu', default='dvf9918')
     p.add_argument('--generation', type=int, default=1); p.add_argument('--required-bits', default='0000:0000:0000:0000')
     p.add_argument('--quick', action='store_true', help='headers only, no bodies')
+    p.add_argument('--model-key', type=lambda s: int(s, 0), help='of the partitions in the unit (default: the model\'s)')
     p = sub.add_parser('build'); p.add_argument('-o', required=True); p.add_argument('--version', required=True)
     p.add_argument('--model', default='ht802'); p.add_argument('--cpu', default='dvf9918')
-    p.add_argument('--bits', default=':'.join('%04x' % b for b in STOCK_BITS))
+    p.add_argument('--bits', help='hardware bits (default: the model\'s stock files\')')
+    p.add_argument('--model-key', type=lambda s: int(s, 0), help='(default: the model\'s)')
     for k in ('core', 'base', 'prog'):
         p.add_argument('--' + k)
     p = sub.add_parser('part'); p.add_argument('-o', required=True); p.add_argument('--kind', required=True, choices=sorted(KINDS))
@@ -491,7 +503,8 @@ def main(argv):
         for n, c in enumerate(parse(rd(a.file))):
             _list(c, n)
     elif a.cmd == 'verify':
-        dev = Device(a.model, a.cpu, a.generation, bits_tuple(a.required_bits))
+        dev = Device(a.model, a.cpu, a.generation, bits_tuple(a.required_bits),
+                     a.model_key if a.model_key is not None else model_key_of(a.model))
         c = pick(parse(rd(a.file)), dev)
         bad = verify(c, dev, bodies=not a.quick)
         names = wanted(dev).values()
@@ -503,7 +516,8 @@ def main(argv):
         return 1 if bad or not used else 0
     elif a.cmd == 'build':
         files = [(k, rd(getattr(a, k))) for k in ('core', 'base', 'prog') if getattr(a, k)]
-        img = build(files, a.model, a.version, a.cpu, bits=bits_tuple(a.bits))
+        img = build(files, a.model, a.version, a.cpu, bits=bits_tuple(a.bits) if a.bits else None,
+                    model_key=a.model_key)
         open(a.o, 'wb').write(img)
         print('%s: %d octets, version %s, %s' % (a.o, len(img), a.version, ', '.join(k for k, _ in files)))
     elif a.cmd == 'extract':

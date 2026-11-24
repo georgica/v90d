@@ -192,10 +192,10 @@ Tried on one unit: HT802 hardware V2.5A, part number 9610003725A, coming
 from stock firmware 1.0.65. The loader refuses to start on a board whose
 part number it does not know and hands the box back to the stock firmware,
 so an untried revision should end up where it started; that path has been
-tested on models only. Two HT801 revisions are accepted from what their
-flash contents say (one phone port, found by the line driver), but no HT801
-has run it yet; other HT802 revisions are not listed. See
-[BOARDS.md](BOARDS.md).
+tested on models only. Three HT801 part numbers are accepted from what their
+flash contents say (one phone port, found by the line driver); V1.0A
+(`9610003610A`) has been confirmed by its owner. Other HT802 revisions are
+not listed. See [BOARDS.md](BOARDS.md).
 
 The **HT802V2** is a different, newer product that runs signed firmware
 (stock 1.0.15.x, `SecureStatus: 3`). Its stock upgrader refuses v90d, because
@@ -250,13 +250,13 @@ number from Linux (227 835 3422 reached Telehack), and 1 800 BBS DIAL from
 HyperTerminal in Windows XP at V.90 with error correction. The box fetched
 the Telnet BBS Guide's list by itself, 1073 boards that day.
 
-Not tested yet: other modems, an HT801, a real Dreamcast or Saturn,
+Not tested yet: other modems, the HT801 V1.1C, a real Dreamcast or Saturn,
 Windows 95 and Windows Me, and a file transfer (Zmodem) on a bulletin
 board call.
 
 ## Installing
 
-Download `v90d-ht802fw.bin` from the releases page and see
+Download `v90d-ht802fw.bin` (or `v90d-ht801fw.bin` for an HT801) from the releases page and see
 [FLASHING.md](FLASHING.md). In short: log in to the stock web page, wait two
 minutes after the box has started, upload the file on the firmware upload
 page, wait three minutes. The box comes back on the same address with the
@@ -270,7 +270,7 @@ bison) is enough.
 
 ```
 sh fw/setup.sh          # fetches libv90modem, the cross toolchain, Linux, busybox, OpenVPN and mbed TLS (checked by SHA-256) and builds them
-make -C fw release      # fw/build/release/v90d-ht802fw.bin
+make -C fw release      # fw/build/release/v90d-ht802fw.bin and v90d-ht801fw.bin
 ```
 
 Tests (no box needed):

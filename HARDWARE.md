@@ -753,7 +753,7 @@ left alone.
   as its hardware check. The rest of `factory` holds per-unit data and is
   not described here on purpose.
 
-## The HT801 (from public flash dumps, no unit here)
+## The HT801 (public flash dumps, the stock 1.0.65.3 file, one owner's unit)
 - Two HT801 dumps (crvallance/Grandstream-hax; a raw chip read has each
   32-bit word byte-swapped against what the CPU sees): part numbers
   9611003610A (V1.0A) and 9610003611C (V1.1C). Same partition map as above.
@@ -772,6 +772,27 @@ left alone.
 - Not readable from a dump: the SLIC's revision and which Ethernet PHY is
   fitted (the device tree says RMII with a fixed link on all three; the
   stock kernel reads the PHY's identity at run time).
+- Stock firmware file `ht801fw.bin` 1.0.65.3: two containers, generation 1
+  and generation 2, all names starting `ht801`. Generation 1 has the HT802's
+  partition sizes (boot 0x40000, core 0x140000, base 0x300000, prog
+  0x33F000); generation 2 is another flash layout with larger partitions
+  (boot 0x80000, core 0x280000, base and prog 0x500000 each). Every file
+  header carries model key **0xFD20** (the HT802's files 0xFD21) and
+  hardware bits 0000:0000:0000:**FFFF** (the HT802 1.0.65.1 files 7FFF).
+  Boot and core come for both processors (cpu text `dvf9918` and, in files
+  named `*.dvf9919.bin`, `dvf9919`); base and prog say `any`.
+- The upload page of 1.0.65.3 checks the file's name in the browser before
+  anything is sent: the chosen file's base name must equal the value
+  `firmware_filename`, which the page's script sets to the unit's
+  `/proc/gxp/dev_info/dev_id` in lower case without dashes, followed by
+  `fw.bin` (`ht801fw.bin`; the HT812/HT814 script uses `ht81xfw.bin`).
+  Any other name gets "Your firmware file is invalid, please use correct
+  firmware!" and no upload: nothing reaches the box, and its syslog shows
+  nothing of it.
+- One owner's V1.0A unit: part number **9610003610A** on the status page
+  (one digit away from the dump's 9611003610A), a 25Q128 flash chip (16 MiB,
+  so generation 1), a DVF9918, 32 MB of Etron SDRAM. Under stock 1.0.65.3 it
+  reports 23740 kB of memory in total.
 
 ## RECOVERY (tested)
 - **Full 16 MiB flash backup taken and verified**: all 15 partitions md5-match

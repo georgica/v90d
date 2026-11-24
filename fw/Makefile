@@ -7,9 +7,10 @@
 #   make uimage     build/v90d.uimage: the system image, as U-Boot's bootm and
 #                   our loader want it, and what `v90nv upgrade` and the
 #                   Firmware page take (pass the same DEBUG and KARGS)
-#   make release    build/release/v90d-ht802fw.bin: the one file for the stock
-#                   firmware's upgrade page (and for our own Firmware page),
-#                   with a system built here without the bring-up shell
+#   make release    build/release/v90d-ht802fw.bin and v90d-ht801fw.bin: the
+#                   file for each model's stock upgrade page (our own Firmware
+#                   page takes either), with a system built here without the
+#                   bring-up shell
 #   make release ALLOW_DEBUG=1
 #                   build/release/v90d-ht802fw-bench.bin, for the bench: the
 #                   same around the build/v90d.uimage that is there
@@ -106,6 +107,7 @@ REL_VERSION ?= 90.$(VERSION)
 REL_BITS    ?= 0000:0000:0000:7fff
 REL         := build/release
 REL_FILE    := $(REL)/v90d-ht802fw$(if $(ALLOW_DEBUG),-bench).bin
+REL_FILE801 := $(REL)/v90d-ht801fw$(if $(ALLOW_DEBUG),-bench).bin
 REL_UIMAGE  := $(if $(ALLOW_DEBUG),build/v90d.uimage,$(REL)/v90d.uimage)
 REL_ZIMAGE  := $(if $(ALLOW_DEBUG),build/v90d.zimage,$(REL)/v90d.zimage)
 .PHONY: release release-image loader test-release test-v90nv
@@ -124,12 +126,15 @@ release: loader tools/v90nv.host $(if $(ALLOW_DEBUG),,release-image)
 	python3 tools/mkgsfw.py build -o $(REL_FILE) --version $(REL_VERSION) --bits $(REL_BITS) \
 	    --core loader/build/loader.uimage --base $(REL_UIMAGE) --prog $(REL)/prog.txt
 	python3 tools/mkgsfw.py verify $(REL_FILE)
+	python3 tools/mkgsfw.py build -o $(REL_FILE801) --model ht801 --version $(REL_VERSION) \
+	    --core loader/build/loader.uimage --base $(REL_UIMAGE) --prog $(REL)/prog.txt
+	python3 tools/mkgsfw.py verify $(REL_FILE801) --model ht801
 	@python3 tools/mkgsfw.py extract $(REL_FILE) $(REL)/flash > /dev/null
 	$(MAKE) -s -C loader release-test CORE=$(CURDIR)/$(REL)/flash/ht802core.bin BASE=$(CURDIR)/$(REL)/flash/ht802base.bin ZIMAGE=$(CURDIR)/$(REL_ZIMAGE)
 	@python3 tools/test_v90nv_boot.py --make-flash $(REL)/box.bin $(REL)/box.uimage && \
 	  tools/v90nv.host -f $(REL)/box.bin check $(REL_FILE) && tools/v90nv.host -f $(REL)/box.bin check $(REL_UIMAGE); \
 	  r=$$?; rm -f $(REL)/box.bin $(REL)/box.uimage; exit $$r
-	@ls -l $(REL_FILE)
+	@ls -l $(REL_FILE) $(REL_FILE801)
 
 # the running system's flash tool: the plain commands, and what it does to a
 # box (where, confirm, to-stock, upgrade, settings, the web page's two

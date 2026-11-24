@@ -2915,3 +2915,43 @@ nftables NAT (the same as on the maker's kernel); the settings from /scratch
 updates through the Firmware page under our kernel and the way back to 0.9.1;
 the lights, seen by the owner. obinv `make test` (27 checks), host tests and
 the HT802 release build pass. /obi is 94 % full (2.23 of 2.36 MB).
+
+## The HT801: a file of its own, and the first one on v90d (2026-11-24)
+
+The HT802 file could not be installed on an HT801. Read from the stock HT801
+1.0.65.3 file and its upload page (HARDWARE.md, "The HT801"), four things
+stood in the way:
+
+- the upload page checks the file's name in the browser: it must be
+  `ht801fw.bin` (nothing is sent otherwise, and the box logs nothing);
+- the upgrader only takes parts named for the model (`ht801core.bin` ...);
+- every stock HT801 part carries model key 0xFD20 (the HT802's 0xFD21), and
+  a part whose key differs from the partition it replaces is refused;
+- the owner's V1.0A reports part number 9610003610A, not the dump's
+  9611003610A, so the loader would not have started.
+
+`make release` now also builds `v90d-ht801fw.bin` (HT801 names, key 0xFD20,
+hardware bits FFFF as in the stock HT801 file; the same three parts), and
+the loader knows 9610003610A, under the untried rule. Our own Firmware page
+takes either model's file and keeps the box's model key in the `base` it
+writes, so an HT801 that updates itself with the HT802 file stays one the
+stock upgrader will write over.
+
+Proof, on one HT801 V1.0A (part number 9610003610A; 25Q128 flash, DVF9918;
+stock 1.0.65.3), its owner's report: `v90d-ht801fw.bin` (0.10.0), renamed
+`ht801fw.bin`, installed from the stock page; the box came back on v90d,
+and a call connected. Its Line status, as the owner pasted it:
+
+```
+State             connected
+Modulation        V.90
+Downstream        52000 bit/s
+Upstream          28800 bit/s
+Round-trip delay  33 ms
+Receive level     -15.0 dBm0
+Receive SNR       37.3 dB
+V.42              LAPM
+Compression       on
+```
+
+Tests: TEST_PROOF

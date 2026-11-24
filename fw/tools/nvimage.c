@@ -153,19 +153,26 @@ static int has_nocase(const char *s, size_t n, const char *word)
 
 const char *nv_container_open(uint8_t *p, size_t n, const uint8_t **hdr, const uint8_t **img, size_t *len)
 {
-    static const char want[] = NV_BOARD "base.bin";
-    uint8_t key[16], *f = 0; size_t at = DIR_LEN, fsize = 0, used; int i; const char *why;
+    /* either model's file: the system is the same */
+    static const char *const models[] = NV_MODELS;
+    char want[16]; const char *model = 0;
+    uint8_t key[16], *f = 0; size_t at = DIR_LEN, fsize = 0, used; int i; unsigned m; const char *why;
     if (n < DIR_LEN || nv_le32(p) != NV_GS_MAGIC) return "this is not a firmware file";
     if (le16(p + 0x206) != 1) return "the firmware file is for another flash layout";
+    if (!memchr(p + 4, 0, 64)) return "this is not a firmware file";
+    for (m = 0; m < sizeof models / sizeof *models && !model; m++)
+        if (has_nocase((const char *)p + 4, 64, models[m])) model = models[m];
+    if (!model) return "the firmware file is for another model";
+    snprintf(want, sizeof want, "%sbase.bin", model);
     for (i = 0; i < SLOTS; i++) {
         const char *name = (const char *)p + 4 + 64 * i; uint32_t size = nv_le32(p + 0x1C4 + 4 * i);
         if (!memchr(name, 0, 64)) return "this is not a firmware file";
-        if (name[0] && !has_nocase(name, 64, NV_BOARD)) return "the firmware file is for another model";
+        if (name[0] && !has_nocase(name, 64, model)) return "the firmware file is for another model";
         if (size > n - at) return "the firmware file is cut short";
         if (size && !strcmp(name, want)) { f = p + at; fsize = size; }
         at += size;
     }
-    if (!f) return "the firmware file holds no system for this board (" NV_BOARD ")";
+    if (!f) return "the firmware file holds no v90d system";
     if (fsize < LD_GS_HDR + NV_UI_HDR || (fsize - LD_GS_HDR) % 16) return "the firmware file is damaged";
     nv_stock_header_key(key);
     nv_aes128_decrypt_units(key, f, 32);

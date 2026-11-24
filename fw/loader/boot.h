@@ -55,7 +55,8 @@
 #define LD_BOARDS     { "9610003725A",  /* HT802 V2.5A: the unit this was made on */ \
                         "9611003610A",  /* HT801 V1.0A: from a flash dump, not tried on a unit */ \
                         "9610003611C",  /* HT801 V1.1C: the same */ \
-                        "9610003716A" } /* HT802 V1.6A: issue #4, confirmed by its owner; still under the untried rule */
+                        "9610003716A",  /* HT802 V1.6A: issue #4, confirmed by its owner; still under the untried rule */ \
+                        "9610003610A" } /* HT801 V1.0A: from a unit's status page */
 /* how many at the head of LD_BOARDS a unit has run: on the others a start
  * is confirmed only once the network has been heard (fw/rcS) */
 #define LD_BOARDS_TRIED 1

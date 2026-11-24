@@ -5,8 +5,8 @@ against the same checks.
 
     python3 fw/tools/test_mkgsfw.py
 
-The stock file is read from recon/ at test time (nothing of it is kept
-here); without it those tests are skipped and say so.
+The stock files are read from recon/ at test time (nothing of them is kept
+here); without them those tests are skipped and say so.
 """
 import os, struct, sys, unittest, zlib
 
@@ -22,7 +22,9 @@ def rd(path):
     with open(path, 'rb') as f:
         return f.read()
 
+STOCK801 = os.path.join(TOP, 'Release_HT801_1.0.65.3', 'Release_HT801_1.0.65.3', 'ht801fw.bin')
 HT802 = G.Device(model='ht802', cpu='dvf9918', generation=1, required_bits=(0, 0, 0, 0))
+HT801 = G.Device(model='ht801', cpu='dvf9918', generation=1, required_bits=(0, 0, 0, 0x8000), model_key=0xFD20)
 
 
 class Aes(unittest.TestCase):
@@ -143,6 +145,20 @@ class Ours(unittest.TestCase):
         img[0x1E0] ^= 1                               # a version in the container header
         self.assertIn('version', ' / '.join(G.verify(G.parse(bytes(img))[0], HT802)))
 
+    def test_for_the_ht801(self):
+        c = G.parse(ours(model='ht801'))[0]
+        self.assertEqual([f.name for f in c.files], ['ht801core.bin', 'ht801base.bin', 'ht801prog.bin'])
+        self.assertEqual(c.bits, (0, 0, 0, 0xFFFF))
+        for f in c.files:
+            self.assertEqual(f.open().model_key, 0xFD20)
+        self.assertEqual(G.verify(c, HT801), [])
+        self.assertIn('name', ' / '.join(G.verify(c, HT802)))
+        self.assertIn('name', ' / '.join(G.verify(G.parse(ours())[0], HT801)))
+        wrong_key = G.parse(ours(model='ht801', model_key=0xFD21))[0]
+        self.assertIn('model key', ' / '.join(G.verify(wrong_key, HT801)))
+        lacks_bit = G.parse(ours(model='ht801', bits=(0, 0, 0, 0x7FFF)))[0]
+        self.assertIn('bits', ' / '.join(G.verify(lacks_bit, HT801)))
+
     def test_too_big_for_its_partition(self):
         with self.assertRaises(ValueError):
             G.build([('core', bytes(1280 * 1024))], model='ht802', version='90.0.1.0', cpu='dvf9918')
@@ -194,6 +210,15 @@ class Stock(unittest.TestCase):
         c = G.parse(rd(OLD))[0]
         self.assertIn('generation', ' / '.join(G.verify(c, HT802, bodies=False)))
 
+
+@unittest.skipUnless(os.path.exists(STOCK801), 'no stock HT801 file here: ' + STOCK801)
+class StockHt801(unittest.TestCase):
+    def test_what_it_carries(self):
+        c = G.pick(G.parse(rd(STOCK801)), HT801)
+        self.assertEqual(c.bits, G.MODELS['ht801'][1])
+        for f in c.files:
+            self.assertEqual(f.open(body=False).model_key, G.MODELS['ht801'][0])
+        self.assertEqual(G.verify(c, HT801, bodies=False), [])
 
 if __name__ == '__main__':
     unittest.main(verbosity=1)
