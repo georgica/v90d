@@ -338,7 +338,23 @@ front. A port whose own number looks like one of them keeps its number.
   The host is looked at once more before it becomes an argument, and the
   fetched file is created anew, never through a link.
 
-### 5c. Numbers to services
+### 5c. PROTOWEB, the archive for one call
+
+`SRV_PROTOWEB` (`7768693200`, PROTOWEB on the keypad with the board
+numbers' zeros) answers on a port whose service is internet or archive,
+unless it is the port's own number, and only when the daemon has the archive
+gateway (`netsvc_has_arch`): the telephony layer asks through `tel_cfg.more`
+like the numbers of services. The call is the port's ordinary PPP call;
+`srv_protoweb()` says it is one. The NAT plan (`build_plan` in `netsvc.c`)
+then gives that port the archive's redirection (DNS, HTTP, FTP and the
+passive ports to the gateway) for as long as the call lasts. A child
+process installs the plan when the call begins and again when it ends
+(`pw_poll`, every 100 ms), so the line's loop never waits on netlink or
+iptables; PPP takes seconds to come up, the plan milliseconds. The gateway
+is started for the first such call and kept from then on. Netstalgia's own
+dial-in answers the same number the same way.
+
+### 5d. Numbers to services
 
 A number can also lead straight to one service on the internet: a game
 server with a protocol of its own (the AOL Neverwinter Nights client at

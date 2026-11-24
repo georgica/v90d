@@ -1339,6 +1339,9 @@ int main(int argc, char **argv)
         hang_up();
         CHECK_EQ_I(bt_call("8002273426"), 0);
         hang_up();
+        /* this daemon has no archive gateway (-A ""): PROTOWEB is nobody's number */
+        CHECK_EQ_I(bt_call("7768693200"), 0);
+        hang_up();
         quiet_exit = 1;
         kill(pid, SIGTERM);
         for (i = 0; i < 400 && !dead; i++) step(0);
@@ -1505,6 +1508,79 @@ int main(int argc, char **argv)
         hang_up();
         CHECK_EQ_I(bt_call("2278353422"), 1);                   /* a board's number stays the board's */
         CHECK(bt_wait("bulletin board gateway", 5000));
+        hang_up();
+        quiet_exit = 1;
+        kill(pid, SIGTERM);
+        for (i = 0; i < 400 && !dead; i++) step(0);
+        close(line_fd);
+        CHECK_EQ_I(waitpid(pid, &st, 0), pid);
+        CHECK(WIFEXITED(st) && WEXITSTATUS(st) == 0);
+    }
+    /* 16. PROTOWEB (776 869 3200, with or without the 1): the port's own
+     * dial-up connection, on a port whose service is the internet, with the
+     * archive's redirection for that call alone. The gateway is a stand-in
+     * that only runs; the NAT plan is read back from the kernel. */
+    {
+        static char lanlog[300], arch[300], ruleset[300], cmd[700]; FILE *f;
+        snprintf(arch, sizeof arch, "%s/ns_arch.sh", argv[2]);
+        snprintf(ruleset, sizeof ruleset, "%s/ns_pw.rules", argv[2]);
+        f = fopen(arch, "w");
+        if (f) { fprintf(f, "#!/bin/sh\nexec sleep 3600\n"); fclose(f); chmod(arch, 0755); }
+        cfg_default(&c);
+        strcpy(c.line_number, "5551234"); c.rings = 1; c.status_port = 8080;
+        CHECK_EQ_I(cfg_save(&c, conf, err, sizeof err), CFG_OK);
+        CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
+        snprintf(lanlog, sizeof lanlog, "%s/ns_pw.log", argv[2]);
+        unlink(lanlog);
+        pid = fork();
+        if (pid == 0) {
+            int a = fcntl(sv[1], F_DUPFD, 20), lfd = open(lanlog, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            dup2(a, 3); if (lfd >= 0) dup2(lfd, 2);
+            for (i = 4; i < 64; i++) close(i);
+            execl(argv[1], "v90d", "-c", conf, "-l", "fd:3", "-i", "lo", "-t", "ppp0", "-A", arch,
+                  "-b", "", "-f", "", (char *)NULL);
+            _exit(127);
+        }
+        close(sv[1]);
+        line_fd = sv[0]; idle_fd = -1;
+        dead = quiet_exit = 0; hook = modem_on = 0; blk_n = 0; c_tx = 0; c_rx_pw = 0;
+        channel_init(&CH, &cc);
+        memset(prev_tx, 0xFF, sizeof prev_tx);
+        run_ms(2000);
+        CHECK(!file_has(lanlog, "PROTOWEB"));
+        /* (a) the number: PPP as on the port's own number, the archive for this call */
+        hook = 1; run_ms(500);
+        dial("7768693200");
+        run_ms(2000 + 300);
+        start_modem(0);
+        CHECK(wait_ip(60000));
+        for (i = 0; i < 50 && !file_has(lanlog, "a call to PROTOWEB"); i++) { run_ms(100); usleep(10000); }
+        CHECK(file_has(lanlog, "port 1: a call to PROTOWEB: its web, FTP and names go to the archive gateway"));
+        for (i = 0; i < 50 && !file_has(lanlog, "archive mode:"); i++) { run_ms(100); usleep(10000); }
+        CHECK(file_has(lanlog, "archive mode: ") && file_has(lanlog, "ns_arch.sh started"));
+        snprintf(cmd, sizeof cmd, "nft list ruleset > %s 2>&1 || iptables-save -t nat > %s 2>&1", ruleset, ruleset);
+        for (i = 0; i < 30; i++) { if (system(cmd)) { } if (file_has(ruleset, "8380")) break; run_ms(100); usleep(20000); }
+        CHECK(file_has(ruleset, "8380"));                       /* the web to the gateway */
+        hang_up();
+        /* (b) the call over: the port's web goes out as ever */
+        for (i = 0; i < 30; i++) { if (system(cmd)) { } if (!file_has(ruleset, "8380")) break; run_ms(100); usleep(20000); }
+        CHECK(!file_has(ruleset, "8380"));
+        /* (c) with the 1 in front, the same */
+        hook = 1; run_ms(500);
+        dial("17768693200");
+        run_ms(2000 + 300);
+        start_modem(0);
+        CHECK(wait_ip(60000));
+        hang_up();
+        /* (d) the port's own number: no archive */
+        hook = 1; run_ms(500);
+        dial("5551234");
+        run_ms(2000 + 300);
+        start_modem(0);
+        CHECK(wait_ip(60000));
+        run_ms(500); usleep(200000);
+        if (system(cmd)) { }
+        CHECK(!file_has(ruleset, "8380"));
         hang_up();
         quiet_exit = 1;
         kill(pid, SIGTERM);

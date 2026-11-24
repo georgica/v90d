@@ -585,6 +585,7 @@ int main(int argc, char **argv)
         srv_init(&S[p], &view, seed + 0x9E3779B9u * (uint32_t)p, ip_to_kernel, &S[p]);
         srv_set_raw(&S[p], raw_from_modem);
         srv_set_svc_lookup(&S[p], bbslink_svc_known);
+        srv_set_protoweb(&S[p], netsvc_has_arch());
         srv_set_echo_delay(&S[p], echo_delay);
         srv_set_max_tx_code(&S[p], max_tx_code);
         srv_set_originate(&S[p], originate);

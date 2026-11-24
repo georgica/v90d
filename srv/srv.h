@@ -29,6 +29,9 @@ typedef void (*srv_raw_fn)(void *ctx, const uint8_t *oct, size_t n);
 #define SRV_LINK_BBS 16
 /* srv_link(): a call to a number of a service ([services], srv/svc.h) */
 #define SRV_LINK_SVC 17
+/* PROTOWEB on the keypad with zeros behind (the rule of the board numbers):
+ * the old web of Protoweb, as Netstalgia also has it */
+#define SRV_PROTOWEB "7768693200"
 /* dialed against Netstalgia's list of services (the daemon's): 2 = it is
  * one of its numbers, 1 = it begins one, 0 = neither (cfg_svc_number_begins) */
 typedef int (*srv_svc_fn)(const char *dialed);
@@ -62,6 +65,8 @@ typedef struct {
     char       link_game[3];                /* matchmaking: the two-character game id */
     console_t  console;         /* service = dreamcast: the packets on their way out */
     srv_svc_fn svc_known;       /* Netstalgia's numbers of services, NULL = none */
+    int        protoweb_ok;     /* the box has the archive gateway: SRV_PROTOWEB answers */
+    int        protoweb;        /* the call in progress came in on SRV_PROTOWEB */
     uint8_t    pkt[1500];
 } srv_t;
 
@@ -134,6 +139,14 @@ const char *srv_dialed(const srv_t *s);
 enum { SRV_SVC_OWN = 1, SRV_SVC_LIST = 2 };
 void    srv_set_svc_lookup(srv_t *s, srv_svc_fn known);
 int     srv_svc_number(const srv_t *s, const char *dialed);
+/* SRV_PROTOWEB, with or without a 1 in front, on a port whose service is
+ * internet or archive, unless it is the port's own number: the dial-up
+ * connection as on the port's own number (its PPP login), with the web,
+ * FTP and names of the archive (the daemon's archive mode, for that call
+ * alone). Only when the daemon says it has the archive gateway (on = 1).
+ * srv_protoweb() is 1 while such a call is in progress. */
+void    srv_set_protoweb(srv_t *s, int on);
+int     srv_protoweb(const srv_t *s);
 /* 1 while a caller has IP up (packets can be sent to it) */
 int     srv_ip_up(const srv_t *s);
 

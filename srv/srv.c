@@ -71,6 +71,14 @@ int srv_svc_number(const srv_t *s, const char *dialed)
     return 0;
 }
 
+void srv_set_protoweb(srv_t *s, int on) { s->protoweb_ok = on != 0; }
+int  srv_protoweb(const srv_t *s) { return s->in_call && s->protoweb; }
+/* the PROTOWEB number answers on this port */
+static int protoweb_here(const srv_t *s)
+{
+    return s->protoweb_ok && (s->cfg.service == CFG_SERVICE_INTERNET || s->cfg.service == CFG_SERVICE_ARCHIVE);
+}
+
 /* the telephony layer's question while digits come in (tel_cfg.more) */
 static int tel_more(void *ctx, const char *dialed)
 {
@@ -79,6 +87,7 @@ static int tel_more(void *ctx, const char *dialed)
     for (i = 0; i < c->n_services && i < CFG_MAX_SERVICES; i++)
         if ((m = cfg_svc_number_begins(c->services[i].number, dialed)) > best) best = m;
     if (best < 2 && c->svc_netstalgia && s->svc_known && (m = s->svc_known(dialed)) > best) best = m;
+    if (best < 2 && protoweb_here(s) && (m = cfg_svc_number_begins(SRV_PROTOWEB, dialed)) > best) best = m;
     return best;
 }
 
@@ -227,6 +236,9 @@ static void call_start(srv_t *s)
     bbs = strcmp(s->tel.dialed, c->line_number) != 0 && bbs_number(s->tel.dialed, board) != BBS_NUM_NONE;
     /* a number that connects straight to a service ([services]), the same way */
     svc = !bbs && strcmp(s->tel.dialed, c->line_number) != 0 && srv_svc_number(s, s->tel.dialed);
+    /* the PROTOWEB number: the port's dial-up connection, with the archive */
+    s->protoweb = !bbs && !svc && protoweb_here(s) && strcmp(s->tel.dialed, c->line_number) != 0
+                  && cfg_svc_number_match(SRV_PROTOWEB, s->tel.dialed);
     if (bbs) s->link = SRV_LINK_BBS;
     else if (svc) s->link = SRV_LINK_SVC;
     else if (for_link(c)) {

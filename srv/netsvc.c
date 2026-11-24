@@ -43,11 +43,20 @@ static const char *arch_path = "/usr/sbin/v90arch";
 static pid_t    arch_pid;
 static int      arch_want;
 static uint32_t arch_next_ms;       /* not before this: a gateway that dies is not restarted in a loop */
+/* PROTOWEB (srv.h, SRV_PROTOWEB): a call to that number has the archive
+ * for itself, on a port whose service is the plain internet. The NAT plan
+ * then sends that port's web, FTP and names to the gateway while the call
+ * lasts; a child process installs it (pw_poll), so the line's loop never
+ * waits on it. The gateway, once started for such a call, keeps running. */
+static int   pw_used;                   /* a PROTOWEB call has been: the gateway stays */
+static int   arch_on[PORTS];            /* what the NAT plan in force gives each port */
+static pid_t natr_pid; static int natr_again;
+static int port_archive(int i) { return S[i].cfg.service == CFG_SERVICE_ARCHIVE || srv_protoweb(&S[i]); }
 static int any_archive(void)
 {
     int i;
-    for (i = 0; i < n_ports; i++) if (S[i].cfg.service == CFG_SERVICE_ARCHIVE) return 1;
-    return 0;
+    for (i = 0; i < n_ports; i++) if (port_archive(i)) return 1;
+    return pw_used;
 }
 static int any_console(void)
 {
@@ -415,9 +424,68 @@ static void arch_poll(uint32_t now_ms)
 }
 static uint32_t arch_clock;
 static void arch_apply(int on) { arch_want = on; arch_next_ms = arch_clock; arch_poll(arch_clock); }
+/* the NAT plan for the settings and the calls now; 0 = no rules at all */
+static int build_plan(nat_plan *p)
+{
+    int i;
+    memset(p, 0, sizeof *p);
+    if (!(S[0].cfg.nat || any_archive() || any_console())) return 0;
+    p->peer[0] = S[0].cfg.ppp_peer; p->peer[1] = n_ports > 1 ? S[1].cfg.ppp_peer : 0;
+    p->masquerade = S[0].cfg.nat;
+    for (i = 0; i < n_ports; i++) p->archive[i] = port_archive(i);
+    for (i = 0; i < n_ports; i++) p->console[i] = S[i].cfg.service == CFG_SERVICE_DREAMCAST;
+    for (i = 0; i < n_ports; i++) p->lan[i] = lan_wanted(i) && la[i].ip;
+    p->rewrite = dc_rw; p->n_rewrite = dc_n;
+    p->n_open = dclist_ports(&p->open);
+    strncpy(p->wan, lan_if, sizeof p->wan - 1);
+    if (vp_on) strcpy(p->vpn, VPN_DEV);
+    p->http_port = ARCH_HTTP; p->ftp_port = ARCH_FTP; p->dns_port = ARCH_DNS; p->pasv_lo = ARCH_PASV_LO; p->pasv_hi = ARCH_PASV_HI;
+    return 1;
+}
+
+/* the plan again, by a child (a call began or ended: the loop must not wait) */
+static void nat_refresh(void)
+{
+    nat_plan p; int need;
+    if (natr_pid > 0) { natr_again = 1; return; }
+    natr_again = 0;
+    need = build_plan(&p);
+    natr_pid = fork();
+    if (natr_pid == 0) {
+        struct sched_param sp;
+        memset(&sp, 0, sizeof sp);
+        (void)sched_setscheduler(0, SCHED_OTHER, &sp);
+        (void)munlockall();
+        if (need) _exit(nat_apply(&p) < 0);
+        _exit(nat_remove() < 0 && errno != ENOENT);
+    }
+    if (natr_pid < 0) { natr_pid = 0; logf_(CFG_LOG_ERROR, "cannot change the NAT rules: %s", strerror(errno)); }
+}
+
+static void pw_poll(void)
+{
+    int i, changed = 0, st;
+    if (natr_pid > 0 && waitpid(natr_pid, &st, WNOHANG) == natr_pid) {
+        natr_pid = 0;
+        if (!WIFEXITED(st) || WEXITSTATUS(st) != 0) logf_(CFG_LOG_ERROR, "cannot change the NAT rules for a PROTOWEB call");
+        if (natr_again) nat_refresh();
+    }
+    for (i = 0; i < n_ports; i++) {
+        int w = port_archive(i);
+        if (w == arch_on[i]) continue;
+        arch_on[i] = w; changed = 1;
+        if (srv_protoweb(&S[i])) {
+            pw_used = 1;
+            logf_(CFG_LOG_INFO, "port %d: a call to PROTOWEB: its web, FTP and names go to the archive gateway", i + 1);
+        }
+    }
+    if (changed) { nat_refresh(); arch_apply(any_archive()); }
+}
+
 static void net_apply(void)
 {
     char a[16], b[16];
+    nat_plan p;
     int i;
     net_dirty = 0;
     for (i = 0; i < n_ports; i++) {
@@ -443,20 +511,9 @@ static void net_apply(void)
         else logf_(CFG_LOG_INFO, "%s up: %s -> %s", tun_name[i], ip_str(c->ppp_local, a), ip_str(c->ppp_peer, b));
     }
     if (nat_ip_forward(1) < 0) logf_(CFG_LOG_WARN, "cannot enable IP forwarding: %s", strerror(errno));
-    if (S[0].cfg.nat || any_archive() || any_console()) {
-        nat_plan p;
-        uint32_t p2 = n_ports > 1 ? S[1].cfg.ppp_peer : 0;
-        memset(&p, 0, sizeof p);
-        p.peer[0] = S[0].cfg.ppp_peer; p.peer[1] = p2;
-        p.masquerade = S[0].cfg.nat;
-        for (i = 0; i < n_ports; i++) p.archive[i] = S[i].cfg.service == CFG_SERVICE_ARCHIVE;
-        for (i = 0; i < n_ports; i++) p.console[i] = S[i].cfg.service == CFG_SERVICE_DREAMCAST;
-        for (i = 0; i < n_ports; i++) p.lan[i] = lan_wanted(i) && la[i].ip;
-        p.rewrite = dc_rw; p.n_rewrite = dc_n;
-        p.n_open = dclist_ports(&p.open);
-        strncpy(p.wan, lan_if, sizeof p.wan - 1);
-        if (vp_on) strcpy(p.vpn, VPN_DEV);
-        p.http_port = ARCH_HTTP; p.ftp_port = ARCH_FTP; p.dns_port = ARCH_DNS; p.pasv_lo = ARCH_PASV_LO; p.pasv_hi = ARCH_PASV_HI;
+    if (natr_pid > 0) { (void)waitpid(natr_pid, NULL, 0); natr_pid = 0; natr_again = 0; }
+    for (i = 0; i < n_ports; i++) arch_on[i] = port_archive(i);
+    if (build_plan(&p)) {
         if (nat_apply(&p) < 0) logf_(CFG_LOG_ERROR, "cannot install the NAT rules: %s", strerror(errno));
         else {
             for (i = 0; i < n_ports; i++) {
@@ -481,6 +538,7 @@ void netsvc_apply(void) { net_apply(); }
 void netsvc_poll(uint32_t now_ms)
 {
     arch_clock = now_ms;
+    if (now_ms % 100 == 0) pw_poll();
     if (now_ms % 2000 == 0) arch_poll(now_ms);
     if (now_ms % 1000 == 0) { dc_poll(now_ms); dn_poll(now_ms); la_poll(now_ms); up_poll(now_ms); vp_poll(now_ms); }
 }
@@ -491,6 +549,7 @@ int  netsvc_vpn_remote(char *out, size_t cap) { return vp_remote(out, cap); }
 void netsvc_stop(void)
 {
     arch_stop();
+    if (natr_pid > 0) { (void)waitpid(natr_pid, NULL, 0); natr_pid = 0; }
     if (vp_pid > 0) { (void)kill(vp_pid, SIGTERM); (void)waitpid(vp_pid, NULL, 0); }
     if (S[0].cfg.nat || any_archive() || any_console()) (void)nat_remove();
     if (any_lan()) proxy_arp(0);
@@ -501,6 +560,7 @@ void netsvc_stop(void)
 }
 
 void netsvc_set_arch(const char *path)   { arch_path = path; }
+int  netsvc_has_arch(void) { return arch_path[0] && access(arch_path, X_OK) == 0; }
 void netsvc_set_dclist(const char *cmd)  { dc_cmd = cmd; }
 void netsvc_set_dcnow(const char *prog)  { dn_prog = prog; }
 void netsvc_set_lease(const char *cmd)   { la_cmd = cmd; }

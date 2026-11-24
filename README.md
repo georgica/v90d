@@ -117,6 +117,15 @@ The idea is that of [2600.network](https://2600.network), which does this
 for callers on the real telephone network; here it is one box and your own
 telephone line to it.
 
+## 1 776 869 3200: PROTOWEB
+
+**776 869 3200** (PROTOWEB on the keypad, with or without the 1) is the old
+web on any port whose service is the plain internet: the port's own dial-up
+connection with its login, but every web, FTP and name lookup of that call
+goes to the archive gateway (Protoweb's web as it was), as on a port set to
+Archive. The port's own number stays the internet as it is. Netstalgia
+answers the same number the same way.
+
 ## Numbers to services
 
 A number can also connect a caller straight to one service on the internet,
