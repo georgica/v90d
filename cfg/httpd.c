@@ -830,7 +830,7 @@ bad:
 /* Parse the request head p[0..n) and decide the answer. Nothing in it is
  * trusted: the head must be free of control bytes, the request line must
  * be exactly "METHOD SP path SP HTTP/1.digits", and the path is only ever
- * compared with the four we serve. It is never decoded, never used as a
+ * compared with the paths we serve. It is never decoded, never used as a
  * file name. */
 static void handle(httpd_t *h, httpd_conn_t *c, size_t n, uint32_t now)
 {

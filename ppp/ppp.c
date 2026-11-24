@@ -1,5 +1,6 @@
-/* PPP server session: phases (RFC 1661 3.2), LCP, PAP/CHAP authenticator,
- * IPCP with address assignment and DNS, CCP with PPP Deflate and MPPC.
+/* PPP server session: phases (RFC 1661 3.2), LCP, PAP / CHAP / MS-CHAPv2
+ * authenticator, IPCP with address assignment and DNS, CCP with PPP Deflate,
+ * MPPC and MPPE.
  * See ppp.h for the API. */
 #include <string.h>
 #include "ppp.h"

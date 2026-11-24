@@ -4,10 +4,16 @@
  *   GET /status.json  the same as JSON
  *   GET /port2, /status2.json   the same for the second port, when there is one
  *   GET /config       effective configuration as text, secrets redacted
- *   GET /line /modem /users /network /system
+ *   GET /line /modem /users /network /system /services /dreamcast, and
+ *       /line2 /modem2 /dreamcast2 for the second port
  *                     the settings a user changes, one page per subject
  *                     (settings.h); POST on the same path: the form coming
- *                     back, answered 303 to that path with ?saved=1
+ *                     back, answered 303 to that path with ?saved=1 (and
+ *                     &add=1 after an Add button without the script)
+ *   GET /bbs          the bulletin boards, with p= and q= (status.h)
+ *   GET /calls, /log  the call history; the logs (by address only while no
+ *                     password is set)
+ *   GET /ui.js        the pages' one script (page.h), the same for anyone
  *   GET, POST /settings   all of them on one page (no tab leads here)
  *
  *   GET /firmware     which firmware runs, the upload form (firmware.h)
@@ -22,20 +28,21 @@
  *   POST /restart     sets restart_asked (the Restart button)
  *
  * With an admin password in the config every view above needs a login: the
- * session cookie that POST /login hands out (one session, 15 minutes after
- * its last use, HttpOnly, SameSite=Strict), or HTTP Basic credentials with
- * the user name admin (for scripts). A browser without either is sent to
- * /login (303); a wrong login is answered 401 and holds further tries for
- * a second (429). Without an admin password there is no login and the
+ * session cookie that POST /login hands out (a few sessions, each 15 minutes
+ * after its last use, HttpOnly, SameSite=Lax), or HTTP Basic credentials
+ * with the user name admin (for scripts). A browser without either is sent
+ * to /login (303); a wrong login, or the third wrong Basic password in a
+ * row, holds further tries for a second (429, or 401 for Basic). Without an admin password there is no login and the
  * pages are open to the LAN.
  *
  * /cgi-bin/login, where the
  * stock firmware of the box sent browsers for good, is a 302 to /.
  * HEAD is answered like GET without the body. Any other path is 404, any
- * other method 405 (POST too, except on /settings), anything malformed
- * 400, a request head that does not fit HTTPD_REQ_MAX is 431, a request
- * that does not arrive in time is 408. A query string is ignored, except
- * that /settings?saved=1 adds the line "Settings saved." Every response
+ * other method 405 (POST too, except on the settings pages, /login,
+ * /restart and the firmware paths), anything malformed 400, a request head
+ * that does not fit HTTPD_REQ_MAX is 431, a request that does not arrive in
+ * time is 408. A query string is ignored, except ?saved=1 (and &add=1) on a
+ * settings page and the BBS page's p= and q=. Every response
  * closes the connection; bytes after the first request are discarded.
  *
  * POST /settings takes an application/x-www-form-urlencoded body of at
@@ -60,17 +67,22 @@
  * When the config has a non-empty admin_password, GET, HEAD and POST on
  * /settings need HTTP Basic credentials (RFC 7617) with the user name
  * `admin` and that password; without them the answer is 401 with a
- * WWW-Authenticate challenge. The comparison is constant-time. The status
- * views are never protected. Basic credentials cross the LAN in clear
- * text, like everything else here.
+ * WWW-Authenticate challenge. The comparison is constant-time. With a
+ * password, every view but /ui.js and /login needs it. Basic credentials
+ * cross the LAN in clear text, like everything else here.
  *
- * Nothing here blocks, allocates or uses a global: all state is in the
- * caller's httpd_t (about 76 KB), so two instances are independent. The
+ * Nothing here allocates: the state is in the caller's httpd_t (about
+ * 125 KB: four connections with a 28 KiB answer each), but the page
+ * renderers keep a little state of their own (settings.c, status.c), so
+ * the daemon runs one instance. The
  * daemon calls httpd_poll() from its loop; one call costs one poll() system
  * call with a zero timeout when no socket is ready, and at most one recv
  * and one send per ready connection otherwise. Calling it every 10 to 20 ms
- * is plenty; do not call it per audio sample. The one thing that can take
- * time inside httpd_poll() is the save callback, see httpd_on_save().
+ * is plenty; do not call it per audio sample. What can take time inside
+ * httpd_poll() is the owner's callbacks: the save (httpd_on_save), the VPN
+ * profile (httpd_on_vpn), the firmware texts and the install
+ * (httpd_on_firmware), the log page (httpd_on_diag) and the BBS rows
+ * (httpd_on_bbs); each is the owner's to keep short.
  *
  * At most HTTPD_MAX_CONN connections are held. A further one is sent a
  * short 503 (best effort) and closed at once. A connection has

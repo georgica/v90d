@@ -185,56 +185,12 @@ static void ip_to_kernel(void *ctx, const uint8_t *pkt, size_t len)
     if (tun_fd[i] >= 0 && tun_write(tun_fd[i], pkt, len) < 0) S[i].status.rx_errors++;
 }
 
-/* a port has the archive for its service */
-
-/* a port has the game console service */
-
-/* The address list of the game revival projects (dclist.h): fetched by a
- * child process while a port has the console service. The child writes the
- * list to its standard output, a pipe we read as it comes (no file, so
- * nothing in /tmp to be put in its way); it is parsed when the child is
- * done and in force from the next time the line is idle. A fetch that fails
- * leaves the list as it was. */
-
-/* "Dreamcast Now" (dcnow.h): while the caller of a console port that asks
- * for it has its network up, a report every 15 s, sent by a child process
- * (the image's wget; dn_prog, when set, is run instead as "prog URL BODY"). */
-
-/* A console as a host on the network (dreamcast_lan): the caller of that
- * port gets an address of the network itself. The address comes from a
- * command that prints it (on the box, udhcpc asking the network's DHCP
- * server for a second lease under a client name of its own; the script it
- * is given prints the address and changes nothing). It is asked again every
- * half hour, which also keeps the lease. Without an answer the port stays
- * as the settings have it, behind this box's address. */
-/* Game ports from the router (dreamcast_upnp): a child process asks the
- * network's router to pass the ports of dclist.h on, to the console itself
- * when it is a host on the network and to this box otherwise (which passes
- * them on). Asked again whenever the addresses change and every half hour;
- * taken back when the switch goes off and when the daemon stops. */
-
-
-/* ---- the VPN for the IWANGO games (dreamcast_iwango). The games' servers
- * of today stand in a private network behind an OpenVPN server; the owner
- * of the box has a client profile for it and gives it to the Dreamcast
- * page (cfg/vpn.h checks it). OpenVPN itself is not ours: the image carries
- * the program as it is (DESIGN.md, the owner's decision), and this code
- * only keeps it running while a dreamcast port wants it. ---- */
-
-/* the server a stored profile names, for the page and the log; 0 = no profile */
-/* the Dreamcast page was given a profile (len 0: take the stored one away) */
-
-/* the network side answers ARP for the console's address, or not */
-
 static int all_onhook(void)
 {
     int i;
     for (i = 0; i < n_ports; i++) if (S[i].tel.state != TEL_ONHOOK) return 0;
     return 1;
 }
-
-
-/* start, stop or restart the gateway as wanted; called on a change and every few seconds */
 
 static int fw_text(void *ctx, int which, char *buf, size_t cap)
 {

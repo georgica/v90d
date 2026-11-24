@@ -1,9 +1,9 @@
 /* v90d/cfg - what the daemon knows about itself, and two renderers for it.
  *
  * status_t is a plain struct the daemon fills in; nothing here reads the
- * modem. The renderers write an HTML page (no script, no external
- * resources, refreshes itself every 5 s with a meta tag, one link to the
- * settings page the HTTP server has at /settings) and a JSON object
+ * modem. The renderers write an HTML page (nothing from elsewhere, the
+ * box's one script only, refreshes itself every 5 s with a meta tag, the
+ * menu of page.h) and a JSON object
  * into a caller buffer. They never write past the buffer, always NUL
  * terminate (when cap > 0) and return the length without the NUL, or -1 if
  * the buffer is too small. STATUS_HTML_MAX and STATUS_JSON_MAX are large
@@ -162,6 +162,8 @@ int status_render_calls(const status_t *const ports[2], char *buf, size_t cap);
  * is what followed the ? in the address (p = page from 1, q = search),
  * NULL if nothing did. */
 #define STATUS_BBS_PAGE 25
+/* (a rows that cannot give the boards now, while a call is in progress,
+ * says *left = -1 and gives none) */
 typedef size_t (*status_bbs_rows)(void *ctx, const char *q, int skip, int max, char *buf, size_t cap, int *shown, int *left);
 int status_render_bbs(status_bbs_rows rows, void *ctx, const char *query, size_t qlen, char *buf, size_t cap);
 int status_render_json(const status_t *s, char *buf, size_t cap);

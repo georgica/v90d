@@ -35,8 +35,9 @@ static void child_setup(int in, int out)
     for (fd = 3; fd < 1024; fd++) (void)close(fd);
 }
 
-/* ---- the list, a line at a time: a file is never read in one go, the
- * loop has a telephone line to serve ---- */
+/* ---- the list, a line at a time: a call's look-up is read a piece per
+ * block, the loop has a telephone line to serve (the BBS page reads it
+ * whole, and only while every line is on hook: bbslink_rows) ---- */
 #define SCAN_CHUNK 512
 typedef int (*scan_fn)(void *ctx, int kind, const bbs_entry *e);   /* 1 = enough */
 typedef int (*scan_raw_fn)(void *ctx, const char *line, size_t n);   /* the same, for a line as it is */

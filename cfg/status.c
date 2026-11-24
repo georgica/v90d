@@ -421,6 +421,7 @@ int status_render_bbs(status_bbs_rows rows, void *ctx, const char *query, size_t
             if (shown) { sb_puts(&c, "Boards "); sb_i32(&c, (int32_t)(skip + 1)); sb_puts(&c, " to "); sb_i32(&c, (int32_t)(skip + shown));
                          sb_puts(&c, " of "); sb_i32(&c, (int32_t)(skip + shown + left));
                          pages = (skip + shown + left + STATUS_BBS_PAGE - 1) / STATUS_BBS_PAGE; }
+            else if (left < 0) sb_puts(&c, "The boards are shown while no call is in progress: try again in a moment.");
             else sb_puts(&c, q[0] ? "No board answers that search." : "No boards here.");
             sb_puts(&c, "</p>\n");
             ln = c.len;

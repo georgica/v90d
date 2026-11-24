@@ -361,9 +361,9 @@ int settings_render_page(const cfg_t *c, int page, int saved, const char *error,
                 " (HTTP) and FTP address the caller opens is fetched from Protoweb, the archive of"
                 " the web as it was, with no proxy to set on the caller's computer; mail, chat and"
                 " secure sites do not work. Dreamcast: set the console to dial this port's number"
-                " with a user name and password of the PPP page; PPP compression, PPP encryption and V.92 are off"
+                " with a user name and password of the Users page; PPP compression, PPP encryption and V.92 are off"
                 " for this port and the console is given the name servers of the game revival"
-                " projects, whatever the other pages say. Its further switches are on the Dreamcast tab. Saturn: two consoles that telephone each other, each on a box of its own; dial 0 to wait for the other player, #a*b*c*d# to call the one at that address. The last two have not been tried with a real"
+                " projects, whatever the other pages say. Its further switches are on the Consoles page (under Services). Saturn: two consoles that telephone each other, each on a box of its own; dial 0 to wait for the other player, #a*b*c*d# to call the one at that address. The last two have not been tried with a real"
                 " console. A change takes effect when the lines are free.</p></section>\n");
 
     }

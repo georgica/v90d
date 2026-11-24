@@ -1,6 +1,6 @@
 /* Microsoft Point-to-Point Compression (RFC 2118): the "software
  * compression" of Windows dial-up networking. Compression only; the
- * encryption that shares its option (MPPE, RFC 3078) is not implemented.
+ * encryption that shares its option (MPPE, RFC 3078) is ppp_mppe.h.
  *
  * Written from RFC 2118. A compressor for the direction we transmit and a
  * decompressor for the direction we receive, one packet per call, 8192

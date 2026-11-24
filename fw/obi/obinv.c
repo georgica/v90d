@@ -11,7 +11,7 @@
  *
  * What it writes. An OBi firmware file (fw/obi/mkobifw.py has the format)
  * carries segments, each for a place in the flash. Ours and the maker's
- * differ only in /obi; a file for this box is written segment by segment,
+ * differ in /obi and the root file system; a file for this box is written segment by segment,
  * only where the flash differs, and only these places: /obi, the root file
  * system, the kernel. A file whose boot loader or recovery images differ
  * from the box's is refused: those stay as they are, so the box's recovery
@@ -24,7 +24,7 @@
  *
  * The same file therefore takes the box back to the maker's application:
  * the owner's OBi firmware file (the one the v90d image was built from)
- * differs from the flash in /obi only.
+ * differs from the flash in /obi and the root file system only.
  *
  * Exit: 0 done, 1 refused (nothing written), 2 trouble.
  * Written for the v90d project; no vendor code. */
@@ -470,7 +470,7 @@ static int serve_stock(long want)
     if (want > 0 && want < (long)sizeof body) (void)read_body(body, (size_t)want);
     answer(400, "not done", "This box has no stock firmware set aside to switch to.",
            "To go back to the maker's application, upload your OBi firmware file (the one the v90d image was built from)"
-           " under \"Upload new firmware\": it differs from the flash in /obi only, and that is all that is written.", 0);
+           " under \"Upload new firmware\": it differs from the flash in /obi and the root file system, and those are all that is written.", 0);
     return 1;
 }
 

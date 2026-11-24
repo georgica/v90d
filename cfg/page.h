@@ -1,8 +1,10 @@
-/* v90d/cfg - what the two HTML pages share: the style sheet and the frame
- * around the content (banner with the name, the row of tabs, the footer).
- * The web interface is called Nestaliga. No script, nothing fetched: the
- * server's Content-Security-Policy allows inline style only. Written for
- * this project; light and dark follow the browser. */
+/* v90d/cfg - what the pages share: the style sheet, the frame around the
+ * content (banner with the name, the menu of sections with their pages, the
+ * footer) and the one script, /ui.js (PAGE_JS). The web interface is called
+ * Nestaliga. Nothing is fetched from elsewhere: the server's
+ * Content-Security-Policy allows inline style and the box's own script, no
+ * inline script; every page works without the script too. Written for this
+ * project; light and dark follow the browser. */
 #ifndef V90D_CFG_PAGE_H
 #define V90D_CFG_PAGE_H
 #include "sbuf.h"

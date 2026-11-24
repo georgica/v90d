@@ -6,9 +6,10 @@
  *
  * THE FORM
  *
- * Plain HTML: a few tables of text inputs, selects and checkboxes, one
- * submit button, no script, no external resource, a link back to the
- * status page. It posts application/x-www-form-urlencoded with these
+ * Plain HTML: a few tables of text inputs, selects and checkboxes, a Save
+ * button in the last card (and one out of sight first, for Enter), the Add
+ * buttons of the Users and Numbers tables (/ui.js adds a row at once; without
+ * it Add posts), nothing from elsewhere. It posts application/x-www-form-urlencoded with these
  * fields:
  *
  *   number            phone number; empty or `any` = every number connects
@@ -21,7 +22,7 @@
  *   auth              none | pap | chap
  *   user0 .. user15   user names, empty = row not used
  *   pass0 .. pass15   their passwords, see below
- *   mods              1: the four mod_ fields below are a complete set of
+ *   mods              1: the six mod_ fields below are a complete set of
  *                     checkboxes, one that is missing means off
  *   mod_v90, mod_v34, mod_v32bis, mod_v22bis, mod_v22, mod_v21
  *                     1 = on, 0 = off
@@ -90,8 +91,8 @@
  * the length without the NUL, or -1 if cap is too small. */
 int settings_render_html(const cfg_t *c, int saved, const char *error, char *buf, size_t cap);
 
-/* The settings are spread over five pages, each with its own form, path
- * and tab; SETTINGS_ALL is all of them on one page at /settings (kept for
+/* The settings are spread over pages, each with its own form, path and
+ * place in the menu; SETTINGS_ALL is all of them on one page at /settings (kept for
  * scripts, no tab leads there). settings_render_page() is the renderer of
  * one of them; settings_apply() takes the post of any. */
 enum { SETTINGS_ALL, SETTINGS_LINE, SETTINGS_MODEM, SETTINGS_USERS, SETTINGS_NETWORK,
@@ -100,9 +101,7 @@ enum { SETTINGS_ALL, SETTINGS_LINE, SETTINGS_MODEM, SETTINGS_USERS, SETTINGS_NET
         * fields with a hidden port=2, which makes settings_apply() put them
         * into cfg_t.port2. They sit under the Line and Modem tabs. */
        SETTINGS_LINE2, SETTINGS_MODEM2,
-       /* the Dreamcast tab (/dreamcast, /dreamcast2): the switches of the
-        * dreamcast service, per port */
-       /* the Consoles tab (/dreamcast, /dreamcast2): the dreamcast switches
+       /* the Consoles page (/dreamcast, /dreamcast2): the dreamcast switches
         * and the saturn matchmaking switch, per port */
        SETTINGS_CONSOLES, SETTINGS_CONSOLES2,
        /* the Numbers page (/services, under Services): the owner's numbers that connect

@@ -1,5 +1,5 @@
-/* See netsvc.h. The daemon's network layer, extracted from srv/main.c
- * unchanged (0.2.3): the per-port services' background work (the address
+/* See netsvc.h. The daemon's network layer (taken out of srv/main.c in
+ * 0.2.3, PROTOWEB's per-call NAT since): the per-port services' background work (the address
  * list, Dreamcast Now, the console's DHCP lease, UPnP, the IWANGO VPN, the
  * archive gateway) and net_apply(), which turns the current settings and
  * that work into the TUN devices, the nftables plan, proxy ARP and the
@@ -78,6 +78,12 @@ static void dc_drain(void)
         if (dc_len < sizeof dc_text) dc_len += (size_t)r;
     }
 }
+/* The address list of the game revival projects (dclist.h): fetched by a
+ * child process while a port has the console service. The child writes the
+ * list to its standard output, a pipe we read as it comes (no file, so
+ * nothing in /tmp to be put in its way); it is parsed when the child is
+ * done and in force from the next time the line is idle. A fetch that fails
+ * leaves the list as it was. */
 static void dc_poll(uint32_t now_ms)
 {
     int st;
@@ -126,6 +132,9 @@ static void dc_poll(uint32_t now_ms)
 }
 static const char *dn_prog;
 static struct { dcnow_t d; int on; uint32_t next_ms; pid_t pid; } dn[PORTS];
+/* "Dreamcast Now" (dcnow.h): while the caller of a console port that asks
+ * for it has its network up, a report every 15 s, sent by a child process
+ * (the image's wget; dn_prog, when set, is run instead as "prog URL BODY"). */
 static void dn_poll(uint32_t now_ms)
 {
     int i;
@@ -177,6 +186,13 @@ static int any_lan(void)
     for (i = 0; i < n_ports; i++) if (lan_wanted(i) && la[i].ip) return 1;
     return 0;
 }
+/* A console as a host on the network (dreamcast_lan): the caller of that
+ * port gets an address of the network itself. The address comes from a
+ * command that prints it (on the box, udhcpc asking the network's DHCP
+ * server for a second lease under a client name of its own; the script it
+ * is given prints the address and changes nothing). It is asked again every
+ * half hour, which also keeps the lease. Without an answer the port stays
+ * as the settings have it, behind this box's address. */
 static void la_poll(uint32_t now_ms)
 {
     int i, st;
@@ -267,6 +283,11 @@ static void upnp_child(int add, uint32_t ip)
     else logf_(CFG_LOG_INFO, "game ports: %d taken back from the router", r);
     _exit(0);
 }
+/* Game ports from the router (dreamcast_upnp): a child process asks the
+ * network's router to pass the ports of dclist.h on, to the console itself
+ * when it is a host on the network and to this box otherwise (which passes
+ * them on). Asked again whenever the addresses change and every half hour;
+ * taken back when the switch goes off and when the daemon stops. */
 static void up_poll(uint32_t now_ms)
 {
     uint32_t want = 0; int i;
@@ -285,6 +306,12 @@ static void up_poll(uint32_t now_ms)
     up_ip = want;
 }
 #define VPN_DEV "v90vpn"
+/* ---- the VPN for the IWANGO games (dreamcast_iwango). The games' servers
+ * of today stand in a private network behind an OpenVPN server; the owner
+ * of the box has a client profile for it and gives it to the Dreamcast
+ * page (cfg/vpn.h checks it). OpenVPN itself is not ours: the image carries
+ * the program as it is (DESIGN.md, the owner's decision), and this code
+ * only keeps it running while a dreamcast port wants it. ---- */
 static const char *vp_prog = "/usr/sbin/openvpn";      /* -O; "" = none */
 static const char *vp_path = "/tmp/v90d.vpn";          /* -V: the profile */
 static pid_t    vp_pid; static uint32_t vp_next; static int vp_dirty, vp_stopping, vp_said, vp_on;

@@ -1,12 +1,12 @@
 # v90d on the Obihai OBi200
 
 The OBi200 (one telephone port) runs v90d on **our own Linux 6.6 kernel**,
-with drivers for this box written for v90d (`fw/kernel`), and the community
-firmware's file system around it. Only the box's `/obi` part of the flash
-(the maker's application) is replaced: U-Boot, the maker's kernel in the
-flash, the root file system and the recovery mode stay as they are. At every
-start the maker's kernel boots first and `/obi/obi` then starts ours from RAM
-(see "Two kernels" below). If ours does not come up, the box stays on the
+with drivers for this box written for v90d (`fw/kernel`), on a root file
+system of our own (see "Our own root file system" below). The box's root
+file system and `/obi` parts of the flash are replaced: U-Boot, the maker's
+kernel in the flash and the recovery mode stay as they are. At every start
+the maker's kernel boots first and `/obi/obi` then starts ours from RAM (see
+"Two kernels" below). If ours does not come up, the box stays on the
 maker's kernel, where the same v90d runs too.
 
 Each release carries **`v90d-obi200.fw`**, ready to install. It is built by
@@ -66,21 +66,22 @@ DHCP, with v90d's pages (user `admin`, password `admin` until you change it
 on the Settings page). The telephone port is v90d's line; the settings live in
 the box's writable flash (`/scratch/v90d`) and survive updates.
 
-There is no SSH under our kernel, as on the HT80x: the status and settings
-pages are the way in. (Under the maker's kernel the community firmware's own
-start script still starts its dropbear.)
+There is no SSH, as on the HT80x: the status and settings pages are the way
+in, and the rescue address 169.254.90.1 when the LAN has none. (Our root
+file system starts no dropbear or telnetd under either kernel.)
 
 ## Update
 
 On v90d's **Firmware** page, upload a newer `v90d-obi200.fw` (from a
 release, or built the same way). The page checks the whole file, writes only what differs from the flash
-(normally `/obi` alone), and restarts the box.
+(normally `/obi` and the root file system), and restarts the box.
 
 ## Going back
 
 Upload the community firmware file itself (BASE) on v90d's Firmware page. It
-differs from the flash in `/obi` only, so that is all that is written, and the
-box restarts into the maker's application with its old settings.
+differs from the flash in `/obi` and the root file system, so those are
+written, and the box restarts into the maker's application with its old
+settings.
 
 If the power goes while the flash is written, or something else leaves the box
 unable to start, it comes up in the maker's **recovery mode**: a plain page
@@ -119,7 +120,7 @@ say what is verified and what is inferred.
 ## Our own root file system
 
 `v90d-obi200.fw` carries v90d's own root file system (`mkrootfs.py`) in
-place of the maker's, in its 7.5 MiB part at 0x480000, so the box has what
+place of the maker's, in its 6.75 MiB part at 0x480000, so the box has what
 the HT802 has: the archive gateway, OpenVPN (the IWANGO games' VPN, its
 profile kept in `/scratch/v90d`), the daily update check and the Install
 button (`fwupdate.sh`, through obinv), the Dreamcast console's own address
@@ -196,7 +197,7 @@ Read off the unit (the maker's binaries were studied, not used in ours).
 kernel 0x50000, recovery kernel 0x2D0000, **header of the last firmware file
 written 0x470000** (the boot checks the partitions against it: a firmware
 file that does not carry every part leaves the box in recovery mode), root
-file system 0x480000, `/scratch` (jffs2) 0xC0000, `/obi` 0xC00000 (0x240000),
+file system 0x480000 (0x6C0000), `/scratch` (jffs2) 0xB40000 (0xC0000), `/obi` 0xC00000 (0x240000),
 recovery root file system 0xE40000.
 
 **Firmware file:** see `mkobifw.py`. The update page checks a keyed MD5 over
