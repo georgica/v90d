@@ -116,6 +116,13 @@ typedef struct {
     /* with raw_rx: 1 = error control and compression stay as v42 says (a
      * terminal program calling a bulletin board, srv/bbs.h); 0 = none */
     int      raw_ec;
+    /* with raw_rx: 1 = a caller whose first octets begin a PPP frame (7E FF
+     * 03, or 7E FF 7D 23 as Dial-Up Networking sends its first LCP) is
+     * taken to PPP at once, those octets included, as dce_start_ppp() does;
+     * any other start goes to raw_rx as it is. Nothing is dropped or sent
+     * back while it decides: at most four octets wait, and a lone 7E no
+     * longer than DCE_DETECT_MS. */
+    int      ppp_detect;
     /* bench: the box calls (the modem on the port was told ATA): the
      * modem in the calling role (V.34, V.32bis, V.22bis, V.22, V.21 so far) and V.42
      * as the originator */
@@ -172,9 +179,11 @@ typedef struct {
     /* data path counters */
     uint64_t line_bits_tx, line_bits_rx;       /* data-mode bits to / from the modem */
     unsigned long octets_down, octets_up;      /* PPP octets handed to / taken from V.42 */
+    int raw;                   /* a raw_rx call still in its octet mode (not PPP yet) */
 } dce_status_t;
 
 #define DCE_RAW_QUEUE 2048
+#define DCE_DETECT_MS 2000
 
 /* The call object. Contents are private; it is defined here so the caller
  * can allocate it. */
@@ -203,6 +212,11 @@ typedef struct dce {
     unsigned long octets_down, octets_up;
     uint8_t     raw_q[DCE_RAW_QUEUE];  /* raw_rx set: octets waiting for the line */
     size_t      raw_head, raw_n;
+    int         raw;           /* online, octets to and from raw_rx (not PPP) */
+    int         to_ppp;        /* dce_start_ppp asked: PPP once raw_q is out */
+    uint8_t     det[4];        /* ppp_detect: the first octets, held while it decides */
+    int         det_n, det_done;
+    uint32_t    det_ms;
     union { v90m_align a; uint8_t b[V90M_MEM_SIZE]; } modem_mem;
     union { v90m_align a; uint8_t b[V90M_EC_MEM_SIZE]; } v42_mem;
 } dce_t;
@@ -244,8 +258,16 @@ int dce_tick(dce_t *d, int16_t rx, int16_t *tx);
 int dce_send_ip(dce_t *d, const uint8_t *pkt, size_t len);
 
 /* A call with raw_rx, once it is DCE_ONLINE: octets for the caller's modem.
- * Returns how many were taken (0..n): the rest later. */
+ * Returns how many were taken (0..n): the rest later. 0 once the call has
+ * gone over to PPP (or been asked to). */
 size_t dce_raw_write(dce_t *d, const uint8_t *oct, size_t n);
+/* A call with raw_rx, online in its octet mode: go over to PPP on the same
+ * connection (V.42 and its compression as they are), with cfg.ppp as
+ * configured, as if the call had been a PPP call from the start. What
+ * dce_raw_write queued still goes out first; from then on nothing goes to
+ * raw_rx, and dce_send_ip and the PPP callbacks work as for any call.
+ * Returns 0, or -1 when the call is not in its octet mode. */
+int dce_start_ppp(dce_t *d);
 /* End the call from our side, in order: PPP Terminate, LAPM release, then
  * DCE_ENDED with DCE_END_LOCAL. Takes effect in the following ticks. */
 void dce_hangup(dce_t *d);

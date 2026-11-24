@@ -170,6 +170,66 @@ void dce_init(dce_t *d, const dce_cfg_t *cfg)
 }
 
 /* --------------------------------------------------------- the data pump */
+/* PPP comes up on the error-controlled (or start-stop) link */
+static void ppp_begin(dce_t *d)
+{
+    d->ppp_dead = 0;
+    d->ppp_up = 1;
+    /* Without error control a damaged frame is a lost one, and a lost
+     * compressed packet takes those queued behind it along (ppp.h). Not
+     * more than two seconds of line in that queue, and room for a packet or
+     * two at the slow rates. */
+    if (v90m_ec_state(d->v42) == V90M_EC_ASYNC) {
+        size_t q = (size_t)(d->bitrate > 0 ? d->bitrate : 0) / 5;
+        ppp_set_comp_queue(&d->ppp, q < 600 ? 600 : q);
+    }
+    ppp_lower_up(&d->ppp);
+}
+
+/* an octet-mode call goes over to PPP (dce_start_ppp, ppp_detect) */
+static void go_ppp(dce_t *d)
+{
+    d->raw = 0;
+    d->to_ppp = 0;
+    d->det_done = 1;
+    d->raw_head = d->raw_n = 0;
+    ppp_begin(d);
+}
+
+/* how the octets held so far compare with the start of a PPP frame:
+ * 2 = they are one, 1 = they may become one, 0 = they are not */
+static int det_match(const uint8_t *b, int n)
+{
+    static const uint8_t a[3] = { 0x7e, 0xff, 0x03 }, e[4] = { 0x7e, 0xff, 0x7d, 0x23 };
+    int pa = n <= 3 && memcmp(b, a, (size_t)n) == 0, pe = n <= 4 && memcmp(b, e, (size_t)n) == 0;
+    if ((pa && n == 3) || (pe && n == 4)) return 2;
+    return pa || pe;
+}
+
+/* octets from the caller of an octet-mode call */
+static void raw_in(dce_t *d, const uint8_t *b, size_t n)
+{
+    size_t i;
+    if (d->to_ppp) { ppp_input_bytes(&d->ppp, b, n); return; }   /* PPP is asked for: the caller's are its */
+    if (d->det_done) { d->cfg.raw_rx(d->cfg.ppp.ctx, b, n); return; }
+    for (i = 0; i < n; i++) {
+        int m;
+        d->det[d->det_n++] = b[i];
+        m = det_match(d->det, d->det_n);
+        if (m == 1) continue;
+        d->det_done = 1;
+        if (m == 2) {                       /* Dial-Up Networking: its first frame goes to PPP whole */
+            go_ppp(d);
+            ppp_input_bytes(&d->ppp, d->det, (size_t)d->det_n);
+            if (i + 1 < n) ppp_input_bytes(&d->ppp, b + i + 1, n - i - 1);
+        } else {                            /* someone at a terminal: all of it, as it came */
+            d->cfg.raw_rx(d->cfg.ppp.ctx, d->det, (size_t)d->det_n);
+            if (i + 1 < n) d->cfg.raw_rx(d->cfg.ppp.ctx, b + i + 1, n - i - 1);
+        }
+        return;
+    }
+}
+
 static void pump_up(dce_t *d)
 {
     uint8_t buf[256];
@@ -180,7 +240,7 @@ static void pump_up(dce_t *d)
      * the next milliseconds instead of all going through PPP in one */
     for (k = 0; k < 4 && (n = v90m_ec_read(d->v42, buf, sizeof buf)) > 0; k++) {
         d->octets_up += n;
-        if (d->cfg.raw_rx) d->cfg.raw_rx(d->cfg.ppp.ctx, buf, n);
+        if (d->raw) raw_in(d, buf, n);
         else ppp_input_bytes(&d->ppp, buf, n);
     }
 }
@@ -200,7 +260,7 @@ static void pump_down(dce_t *d)
         if (room > n) room = n;
         if (room > sizeof buf) room = sizeof buf;
         if (room == 0) break;
-        if (d->cfg.raw_rx) {
+        if (d->raw) {
             for (n = 0; n < room && d->raw_n; n++) {
                 buf[n] = d->raw_q[d->raw_head];
                 d->raw_head = (d->raw_head + 1) % DCE_RAW_QUEUE; d->raw_n--;
@@ -405,19 +465,11 @@ static void ms_step(dce_t *d, int retraining)
             begin_close(d, DCE_END_LOCAL, 1);
         } else if (d->cfg.raw_rx && (vs == V90M_EC_CONNECTED || vs == V90M_EC_ASYNC)) {
             d->raw_head = 0; d->raw_n = 0;
+            d->raw = 1;
+            d->det_n = 0; d->det_ms = 0; d->det_done = !d->cfg.ppp_detect;
             d->state = DCE_ONLINE;
         } else if (vs == V90M_EC_CONNECTED || vs == V90M_EC_ASYNC) {
-            d->ppp_dead = 0;
-            d->ppp_up = 1;
-            /* Without error control a damaged frame is a lost one, and a
-             * lost compressed packet takes those queued behind it along
-             * (ppp.h). Not more than two seconds of line in that queue,
-             * and room for a packet or two at the slow rates. */
-            if (vs == V90M_EC_ASYNC) {
-                size_t q = (size_t)(d->bitrate > 0 ? d->bitrate : 0) / 5;
-                ppp_set_comp_queue(&d->ppp, q < 600 ? 600 : q);
-            }
-            ppp_lower_up(&d->ppp);
+            ppp_begin(d);
             d->state = DCE_ONLINE;
         } else if (vs == V90M_EC_DISCONNECTED) {
             v42_lost(d);
@@ -426,10 +478,16 @@ static void ms_step(dce_t *d, int retraining)
     case DCE_ONLINE:
         d->online_ms++;
         pump_up(d);
-        if (d->cfg.raw_rx) {
+        if (d->raw) {
+            /* a lone 7E (a terminal user's "~") is not held for ever */
+            if (!d->det_done && d->det_n > 0 && ++d->det_ms >= DCE_DETECT_MS) {
+                d->det_done = 1;
+                d->cfg.raw_rx(d->cfg.ppp.ctx, d->det, (size_t)d->det_n);
+            }
             pump_down(d);
             if (v90m_ec_state(d->v42) == V90M_EC_DISCONNECTED) v42_lost(d);
             else if (d->hangup_req) { v90m_ec_release(d->v42); begin_close(d, DCE_END_LOCAL, 1); }
+            else if (d->to_ppp && d->raw_n == 0) go_ppp(d);    /* the text is out: PPP from here */
             break;
         }
         if (d->hangup_req == 1) {           /* ask PPP to terminate, once */
@@ -546,12 +604,23 @@ int dce_send_ip(dce_t *d, const uint8_t *pkt, size_t len)
 size_t dce_raw_write(dce_t *d, const uint8_t *oct, size_t n)
 {
     size_t i;
-    if (d->state != DCE_ONLINE || !d->cfg.raw_rx) return 0;
+    if (d->state != DCE_ONLINE || !d->raw || d->to_ppp) return 0;
     for (i = 0; i < n && d->raw_n < DCE_RAW_QUEUE; i++) {
         d->raw_q[(d->raw_head + d->raw_n) % DCE_RAW_QUEUE] = oct[i];
         d->raw_n++;
     }
     return i;
+}
+
+int dce_start_ppp(dce_t *d)
+{
+    if (d->state != DCE_ONLINE || !d->raw) return -1;
+    if (!d->det_done && d->det_n > 0)          /* typed before the switch: still the owner's */
+        d->cfg.raw_rx(d->cfg.ppp.ctx, d->det, (size_t)d->det_n);
+    d->det_done = 1;
+    d->to_ppp = 1;
+    if (d->raw_n == 0) go_ppp(d);             /* nothing of the text left to send */
+    return 0;
 }
 
 void dce_hangup(dce_t *d) { if (!d->hangup_req) d->hangup_req = 1; }
@@ -566,6 +635,7 @@ void dce_get_status(const dce_t *d, dce_status_t *st)
     st->end_reason = d->end_reason;
     st->call_ms = d->call_ms;
     st->online_ms = d->online_ms;
+    st->raw = d->raw;
 
     if (d->modem) {
         v90m_state ms;
