@@ -16,7 +16,7 @@ enum {
     F_LAN, F_ADDRESS, F_NETMASK, F_GATEWAY, F_DNS1, F_DNS2, F_PORT, F_SERVICE, F_V92, F_COMPRESSION,
     F_ENCRYPTION,
     F_DCNOW, F_DCLAN, F_DCUPNP, F_DCIWANGO, F_SATMATCH, F_UPDATE_CHECK, F_X2, F_K56,
-    F_SVCNET, F_ADD, F_SVCMENU, F_DNSRELAY,
+    F_SVCNET, F_ADD, F_SVCMENU, F_DNSRELAY, F_IPV6,
     F_COUNT,
     F_USER = 100, F_PASS = 200,     /* plus the row */
     F_SVC = 300                     /* plus 100 * the S_ column, plus the row */
@@ -40,7 +40,7 @@ static const struct { const char *name; const char *sec; } fields[F_COUNT] = {
     { "encryption", "ppp" },
     { "dreamcast_now", "line" }, { "dreamcast_lan", "line" }, { "dreamcast_upnp", "line" }, { "dreamcast_iwango", "line" }, { "saturn_matchmaking", "line" },
     { "update_check", "system" }, { "x2", "modem" }, { "k56", "modem" },
-    { "netstalgia", "services" }, { "add", "status" }, { "menu", "services" }, { "dns_relay", "network" },
+    { "netstalgia", "services" }, { "add", "status" }, { "menu", "services" }, { "dns_relay", "network" }, { "ipv6", "network" },
 };
 
 static const char *const n_tones[] = { "us", "eu" };
@@ -76,6 +76,8 @@ static const char *const t_mods[]  = { "V.90", "V.34", "V.32bis", "V.22bis", "V.
 static const char *const n_svcmode[] = { "raw", "telnet" };        /* CFG_SVC_* */
 static const char *const t_svcnet[] = { "Off: only the numbers above",
                                         "On: also Netstalgia's numbers, fetched once a day" };
+static const char *const t_ipv6[] = { "Off: IPv4 only",
+                                      "On: an address from your network's router, when it offers IPv6" };
 static const char *const t_dnsrelay[] = { "Off: the callers ask the servers below themselves",
                                           "On: the box answers the callers' names, asking the servers below" };
 static const char *const t_svcmenu[] = { "Off: every call on the Internet service is PPP",
@@ -467,6 +469,7 @@ int settings_render_page(const cfg_t *c, int page, int saved, const char *error,
     in_addr(&b, "Address", F_ADDRESS, c->lan_addr, "static only");
     in_addr(&b, "Netmask", F_NETMASK, c->lan_netmask, "static only");
     in_addr(&b, "Gateway", F_GATEWAY, c->lan_gateway, "static only; empty: none");
+    in_select(&b, "IPv6", F_IPV6, c->ipv6, n_v92, t_ipv6, 2);
     in_select(&b, "Callers' names", F_DNSRELAY, c->dns_relay, n_v92, t_dnsrelay, 2);
     in_addr(&b, "DNS server 1", F_DNS1, c->dns[0], "empty: none");
     in_addr(&b, "DNS server 2", F_DNS2, c->dns[1], "both empty, with the box answering: the network's own");
@@ -824,6 +827,7 @@ static void set_field(form_t *f, int fi, const char *v, size_t len)
     case F_SVCNET:  set_enum(f, fi, &c->svc_netstalgia, v, n_v92, 2, "on, off"); break;
     case F_SVCMENU: set_enum(f, fi, &c->svc_menu, v, n_v92, 2, "on, off"); break;
     case F_DNSRELAY: set_enum(f, fi, &c->dns_relay, v, n_v92, 2, "on, off"); break;
+    case F_IPV6:    set_enum(f, fi, &c->ipv6, v, n_v92, 2, "on, off"); break;
     case F_ADD:     f->add = 1; break;          /* the button's label, whatever it is */
     case F_ADDRESS: set_addr(f, fi, &c->lan_addr, v, 0); break;
     case F_NETMASK: set_addr(f, fi, &c->lan_netmask, v, 0); break;

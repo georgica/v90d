@@ -1288,6 +1288,65 @@ static void test_bbsdial(void)
     close(sv[0]); close(sv[1]);
 }
 
+/* IPv6 (#7): which addresses are no board or not the internet, and a board
+ * reached over IPv6 */
+static void ip6(uint8_t a[16], const char *txt) { CHECK_EQ_I(inet_pton(AF_INET6, txt, a), 1); }
+static void test_bbsdial6(void)
+{
+    static const struct { const char *a; int self, pub; } t[] = {
+        { "::", 1, 0 }, { "::1", 1, 0 }, { "::192.0.2.1", 1, 0 },             /* the old IPv4-compatible */
+        { "::ffff:127.0.0.1", 1, 0 }, { "::ffff:192.0.2.1", 0, 0 },
+        { "fe80::1", 1, 0 }, { "febf:ffff::1", 1, 0 }, { "ff02::1", 1, 0 }, { "ff0e::101", 1, 0 },
+        { "fc00::1", 0, 0 }, { "fd12:3456::1", 0, 0 },                         /* unique local */
+        { "fec0::1", 0, 0 },                                                    /* site-local */
+        { "2001:db8::1", 0, 0 }, { "3fff:123::1", 0, 0 },                       /* documentation */
+        { "2001::1", 0, 0 }, { "2001:2::1", 0, 0 }, { "2001:10::1", 0, 0 }, { "2001:20::1", 0, 0 },
+        { "2001:4860:4860::8888", 0, 1 }, { "2606:4700:4700::1111", 0, 1 }, { "2a00:1450:4001::1", 0, 1 },
+        { "3ffe::1", 0, 1 }, { "3fff:1000::1", 0, 1 }, { "3fff:0fff::1", 0, 0 },
+        { "2002:0808:0808::1", 0, 1 }, { "2002:0a00:0001::1", 0, 0 }, { "2002:7f00:0001::1", 0, 0 },   /* 6to4 by its IPv4 */
+        { "64:ff9b::8.8.8.8", 0, 1 }, { "64:ff9b::10.0.0.1", 0, 0 }, { "64:ff9b::192.168.1.1", 0, 0 },  /* NAT64 */
+        { "64:ff9b:1::8.8.8.8", 0, 0 },                                         /* NAT64's local-use */
+        { "4000::1", 0, 0 }, { "100::1", 0, 0 },                               /* not global unicast */
+    };
+    uint8_t a[16]; size_t i;
+    int ls, sv[2], c, st; pid_t pid; char port[8];
+    struct sockaddr_in6 sa; socklen_t sl = sizeof sa;
+    printf("bbs: IPv6 addresses, and a board over IPv6\n");
+    for (i = 0; i < sizeof t / sizeof t[0]; i++) {
+        ip6(a, t[i].a);
+        if (bbsdial_is_self6(a) != t[i].self || bbsdial_is_public6(a) != t[i].pub)
+            printf("  %s: self %d public %d\n", t[i].a, bbsdial_is_self6(a), bbsdial_is_public6(a));
+        CHECK_EQ_I(bbsdial_is_self6(a), t[i].self);
+        CHECK_EQ_I(bbsdial_is_public6(a), t[i].pub);
+    }
+    /* a board on ::1: reached by its address when allowed (the tests'
+     * listener), not when the box itself is not to be connected to */
+    ls = socket(AF_INET6, SOCK_STREAM, 0);
+    memset(&sa, 0, sizeof sa); sa.sin6_family = AF_INET6; sa.sin6_addr = in6addr_loopback;
+    if (ls < 0 || bind(ls, (struct sockaddr *)&sa, sizeof sa) != 0) { printf("  (no IPv6 here: the connection not tried)\n"); if (ls >= 0) close(ls); return; }
+    CHECK(listen(ls, 2) == 0);
+    CHECK_EQ_I(getsockname(ls, (struct sockaddr *)&sa, &sl), 0);
+    snprintf(port, sizeof port, "%u", (unsigned)ntohs(sa.sin6_port));
+    CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
+    pid = fork();
+    if (pid == 0) { close(sv[0]); close(ls); _exit(bbsdial_run("::1", port, sv[1], 5, 1)); }
+    close(sv[1]);
+    c = accept(ls, NULL, NULL);
+    CHECK(c >= 0);
+    CHECK_EQ_I((int)send(c, "over6", 5, 0), 5); CHECK(dial_wait(sv[0], "over6", 3000));
+    CHECK_EQ_I((int)send(sv[0], "typed", 5, 0), 5); CHECK(dial_wait(c, "typed", 3000));
+    close(c); close(sv[0]);
+    CHECK_EQ_I(waitpid(pid, &st, 0), pid); CHECK(WIFEXITED(st) && WEXITSTATUS(st) == 0);
+    CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
+    CHECK_EQ_I(bbsdial_run("::1", port, sv[1], 5, 0), 1);                 /* the box itself */
+    CHECK_EQ_I(bbsdial_run("::1", port, sv[1], 5, BBSDIAL_PUBLIC), 1);
+    {   /* nothing reached the listener */
+        struct pollfd p; p.fd = ls; p.events = POLLIN; p.revents = 0;
+        CHECK_EQ_I(poll(&p, 1, 300), 0);
+    }
+    close(sv[0]); close(sv[1]); close(ls);
+}
+
 /* which addresses are no board: the box itself and what is no host at all */
 static void test_bbsdial_self(void)
 {
@@ -2036,6 +2095,7 @@ int main(void)
     test_bbs_signature();
     test_bbsdial();
     test_bbsdial_self();
+    test_bbsdial6();
     test_v34_call();
     test_v32bis_call();
     test_heavy_guard();

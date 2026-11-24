@@ -73,6 +73,7 @@
 #include "termsvc.h"
 #include "actsvc.h"
 #include "dnsrelay.h"
+#include "ra6.h"
 #include "update.h"
 #include "netsvc.h"
 #include "vpn.h"
@@ -194,6 +195,30 @@ static void relay_want(const cfg_t *c)
 {
     const uint32_t peers[2] = { c->ppp_peer, c->port2.ppp_peer };
     dnsrelay_set(c->dns_relay, &c->ppp_local, 1, peers, 2, c->dns);
+    ra6_want(lan_if, c->ipv6);
+}
+
+/* what the network's IPv6 router says, in the log when it changes */
+static void ra6_log(void)
+{
+    static ra6_info last;
+    const ra6_info *r = ra6_now();
+    char d[RA6_DNS_MAX * 48 + 1] = "", p[64] = "none";
+    int i;
+    if (r->n_dns == last.n_dns && r->pref64_len == last.pref64_len
+        && memcmp(r->dns, last.dns, sizeof last.dns) == 0 && memcmp(r->pref64, last.pref64, sizeof last.pref64) == 0) return;
+    last = *r;
+    for (i = 0; i < r->n_dns; i++) {
+        char a[INET6_ADDRSTRLEN];
+        inet_ntop(AF_INET6, r->dns[i], a, sizeof a);
+        snprintf(d + strlen(d), sizeof d - strlen(d), "%s%s", i ? ", " : "", a);
+    }
+    if (r->pref64_len) {
+        char a[INET6_ADDRSTRLEN];
+        inet_ntop(AF_INET6, r->pref64, a, sizeof a);
+        snprintf(p, sizeof p, "%s/%d", a, r->pref64_len);
+    }
+    logf_(CFG_LOG_INFO, "ipv6: the router gives name servers %s; NAT64 prefix %s", r->n_dns ? d : "none", p);
 }
 
 static int menu_wanted(const cfg_t *c)
@@ -551,6 +576,7 @@ int main(int argc, char **argv)
         /* empty = none */
         printf("LAN_GATEWAY=%s\nLAN_DNS1=%s\nLAN_DNS2=%s\n", live.lan_gateway ? ip_str(live.lan_gateway, g) : "",
                live.dns[0] ? ip_str(live.dns[0], d1) : "", live.dns[1] ? ip_str(live.dns[1], d2) : "");
+        printf("LAN_IPV6=%s\n", live.ipv6 ? "on" : "off");
         return 0;
     }
     if (!n_ports) usage();
@@ -693,6 +719,8 @@ int main(int argc, char **argv)
             termsvc_poll(now_ms);
             actsvc_poll();
             dnsrelay_poll(now_ms);
+            ra6_poll(now_ms);
+            ra6_log();
             update_poll(now_ms);
             netsvc_poll(now_ms);
             if (fw_pid > 0 && blocks == 50 && waitpid(fw_pid, NULL, WNOHANG) == fw_pid) fw_pid = 0;   /* once a second (blocks counts to 100 and starts again) */

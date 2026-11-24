@@ -80,6 +80,12 @@ ifconfig lo 127.0.0.1 up
 eval "$(/usr/sbin/v90d -c $CONF -p)" || LAN_MODE=dhcp
 say "LAN $LAN_MODE"
 ifconfig $LAN up
+# [network] ipv6 = off: no IPv6 on the LAN port (the kernel would take an
+# address from any router advertisement). Under a kernel without IPv6 there
+# is nothing to turn off.
+if [ "$LAN_IPV6" = off ]; then
+    for k in all default $LAN; do echo 1 > /proc/sys/net/ipv6/conf/$k/disable_ipv6; done 2>/dev/null
+fi
 # IPv6 needs multicast in (neighbour discovery, router advertisements), and
 # this MAC's multicast hash filter drops it: unicast IPv6 answers, a
 # neighbour solicitation never arrives. Let all multicast in instead (little

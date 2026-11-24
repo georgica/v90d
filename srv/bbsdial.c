@@ -7,6 +7,7 @@
 #include <arpa/inet.h>
 #include <poll.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -80,24 +81,96 @@ int bbsdial_is_public(uint32_t a)
     return 1;
 }
 
+static uint32_t v4_at(const uint8_t *a, int at) { return (uint32_t)a[at] << 24 | (uint32_t)a[at + 1] << 16 | (uint32_t)a[at + 2] << 8 | a[at + 3]; }
+
+int bbsdial_is_self6(const uint8_t a[16])
+{
+    static const uint8_t zero[12] = { 0 }, mapped[12] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff };
+    struct sockaddr_in6 s; socklen_t sl = sizeof s; int u, own = 0;
+    if (memcmp(a, zero, 12) == 0) return 1;                     /* ::, ::1 and the old IPv4-compatible */
+    if (memcmp(a, mapped, 12) == 0) return bbsdial_is_self(v4_at(a, 12));
+    if (a[0] == 0xfe && (a[1] & 0xc0) == 0x80) return 1;       /* link-local */
+    if (a[0] == 0xff) return 1;                                 /* multicast */
+    u = socket(AF_INET6, SOCK_DGRAM, 0);                        /* one of ours? (as for IPv4) */
+    if (u < 0) return 0;
+    memset(&s, 0, sizeof s);
+    s.sin6_family = AF_INET6; s.sin6_port = htons(9); memcpy(&s.sin6_addr, a, 16);
+    if (connect(u, (const struct sockaddr *)&s, sizeof s) == 0 && getsockname(u, (struct sockaddr *)&s, &sl) == 0)
+        own = memcmp(&s.sin6_addr, a, 16) == 0;
+    close(u);
+    return own;
+}
+
+int bbsdial_is_public6(const uint8_t a[16])
+{
+    static const uint8_t nat64[12] = { 0, 0x64, 0xff, 0x9b, 0, 0, 0, 0, 0, 0, 0, 0 };
+    if (memcmp(a, nat64, 12) == 0) return bbsdial_is_public(v4_at(a, 12));    /* NAT64's well-known prefix */
+    if ((a[0] & 0xe0) != 0x20) return 0;                        /* global unicast is 2000::/3 */
+    if (a[0] == 0x20 && a[1] == 0x02) return bbsdial_is_public(v4_at(a, 2));   /* 6to4 */
+    if (a[0] == 0x20 && a[1] == 0x01) {
+        if (a[2] == 0x0d && a[3] == 0xb8) return 0;             /* documentation */
+        if (a[2] == 0 && a[3] == 0) return 0;                   /* Teredo */
+        if (a[2] == 0 && a[3] == 0x02 && a[4] == 0 && a[5] == 0) return 0;     /* benchmarking */
+        if (a[2] == 0 && (a[3] & 0xf0) == 0x10) return 0;      /* ORCHID */
+        if (a[2] == 0 && (a[3] & 0xf0) == 0x20) return 0;      /* ORCHIDv2 */
+    }
+    if (a[0] == 0x3f && a[1] == 0xff && (a[2] & 0xf0) == 0) return 0;  /* documentation 3fff::/20 */
+    return 1;
+}
+
+/* may this address of the name be connected to? */
+static int allowed(const struct addrinfo *ai, int self_ok)
+{
+    if (ai->ai_family == AF_INET) {
+        uint32_t addr = ntohl(((const struct sockaddr_in *)(const void *)ai->ai_addr)->sin_addr.s_addr);
+        if (self_ok != 1 && bbsdial_is_self(addr)) return 0;   /* the box itself, by whatever name */
+        if (self_ok == BBSDIAL_PUBLIC && !bbsdial_is_public(addr)) return 0;  /* a list entry: the internet only */
+        return 1;
+    }
+    if (ai->ai_family == AF_INET6) {
+        const uint8_t *a = ((const struct sockaddr_in6 *)(const void *)ai->ai_addr)->sin6_addr.s6_addr;
+        if (self_ok != 1 && bbsdial_is_self6(a)) return 0;
+        if (self_ok == BBSDIAL_PUBLIC && !bbsdial_is_public6(a)) return 0;
+        return 1;
+    }
+    return 0;
+}
+
+static long ms_now(void)
+{
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return (long)t.tv_sec * 1000 + t.tv_nsec / 1000000;
+}
+
 int bbsdial_run(const char *host, const char *port, int fd, unsigned connect_s, int self_ok)
 {
     struct addrinfo hint, *res = NULL, *ai; int s = -1; char buf[2048];
     struct pollfd p[2];
 
+    long end;
+    int left = 0;
+
     memset(&hint, 0, sizeof hint);
-    hint.ai_family = AF_INET; hint.ai_socktype = SOCK_STREAM;
+    hint.ai_family = AF_UNSPEC; hint.ai_socktype = SOCK_STREAM;   /* IPv4 and IPv6 */
     /* a name server that never answers: the alarm ends this process, which
      * is as good as "not reached" to the daemon */
+    end = ms_now() + (long)connect_s * 1000;
     (void)alarm(connect_s);
     if (getaddrinfo(host, port, &hint, &res) != 0) res = NULL;
     (void)alarm(0);
+    for (ai = res; ai; ai = ai->ai_next) if (allowed(ai, self_ok)) left++;
     for (ai = res; ai && s < 0; ai = ai->ai_next) {
-        uint32_t addr = ntohl(((const struct sockaddr_in *)(const void *)ai->ai_addr)->sin_addr.s_addr);
-        if (self_ok != 1 && bbsdial_is_self(addr)) continue;   /* the box itself, by whatever name */
-        if (self_ok == BBSDIAL_PUBLIC && !bbsdial_is_public(addr)) continue;  /* a list entry: the internet only */
+        long rest = end - ms_now(), share;
+        if (!allowed(ai, self_ok)) continue;
+        if (rest <= 0) break;
+        /* each address its share of what is left, at least 3 s: one that is
+         * routed but dead (IPv6 that goes nowhere) leaves the others time */
+        share = left > 1 ? rest / left : rest;
+        if (share < 3000) share = rest < 3000 ? rest : 3000;
+        left--;
         s = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
-        if (s >= 0 && connect_within(s, ai->ai_addr, ai->ai_addrlen, (int)connect_s * 1000) < 0) { close(s); s = -1; }
+        if (s >= 0 && connect_within(s, ai->ai_addr, ai->ai_addrlen, (int)share) < 0) { close(s); s = -1; }
     }
     if (res) freeaddrinfo(res);
     if (s < 0) return 1;

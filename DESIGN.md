@@ -477,7 +477,9 @@ address as its only name server, and `srv/dnsrelay.c` answers there.
   trying addresses it cannot reach, issue #7. Every other standard query
   with one question goes to the servers.
 - **The servers**: `[network] dns1` and `dns2`, or with both empty those of
-  `/etc/resolv.conf` (DHCP), read again every 30 s. A question without an
+  `/etc/resolv.conf` (DHCP), and then either way the IPv6 ones there (the
+  router's, 5h), read again every 5 s; a server that cannot be sent to (an
+  IPv4 one on a network with IPv6 alone) is passed over at once. A question without an
   answer in 2 s goes to the other one, three tries in all.
 - **Against forged answers**: each question goes out with a fresh id from
   `/dev/urandom` on a socket of its own, connected to the server asked (a
@@ -486,6 +488,40 @@ address as its only name server, and `srv/dnsrelay.c` answers there.
   caller's own id is put back.
 - Archive calls keep the archive's DNS (its prerouting redirect is ahead of
   local delivery); a Dreamcast port keeps the console's servers.
+
+### 5h. IPv6 on the box (#7)
+
+Both kernels have IPv6 (`CONFIG_IPV6`, its nftables family). The kernel
+takes the LAN port's address from router advertisements itself;
+`[network] ipv6 = off` has the start scripts set `disable_ipv6` on the
+port instead (`v90d -p` prints `LAN_IPV6`). The HT802's MAC drops IPv6
+multicast in its hash filter, so `rcS` lets all multicast in (`allmulti`),
+as the OBi's script already did.
+
+- **The router's other news** (`srv/ra6.c`): the name servers (RDNSS, RFC
+  8106) and the NAT64 prefix (PREF64, RFC 8781), which the kernel does not
+  take and an IPv6-only network gives no other way. A raw ICMPv6 socket on
+  the LAN port, filtered to advertisements, taken only at hop limit 255 from
+  a link-local source on that port (RFC 4861 6.1.2); a solicitation each
+  minute until a router has spoken. Lifetimes are kept, a lifetime of 0
+  withdraws. The name servers go into the box's resolv.conf (where
+  `/etc/resolv.conf` points, or `V90D_RESOLV`) below a marker line, after
+  DHCP's and up to the resolver's three, checked every 10 s (a DHCP
+  renewal rewrites the file). The log says when they change.
+- **The callers' relay** (5g) asks the settings' servers and then the IPv6
+  ones from resolv.conf, passing over any it cannot send to: on a network
+  with IPv6 alone the callers' names still resolve.
+- **The box's own connections** to boards and services (`bbsdial.c`) look
+  names up for both families and try each address in turn, each with its
+  share of the time (at least 3 s). The IPv6 guards match the IPv4 ones:
+  never the box itself (`::1`, link-local, multicast, its own addresses, an
+  IPv4-mapped one by its IPv4), and for a list's entries only global
+  unicast, without the documentation, Teredo, ORCHID and benchmarking
+  ranges, unique local addresses or NAT64's local-use prefix; 6to4 and
+  `64:ff9b::/96` by the IPv4 address inside.
+- The OBi's `/obi` had no room for the bigger kernel: `v90d`, `obiline` and
+  `obinv` are in `/usr/sbin` of the root file system, which both kernels
+  start from.
 
 ## 6. Firmware (Track A)
 
