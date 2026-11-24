@@ -20,6 +20,7 @@
 #include "ed25519.h"
 #include "telnet.h"
 #include "bbsdial.h"
+#include "svc.h"
 #include <signal.h>
 #include <poll.h>
 #include <sys/socket.h>
@@ -1586,6 +1587,24 @@ static void test_bbs_signature(void)
     for (zero = 1, i = 0; i < BBS_SIG_KEYS * 32; i++) if (bbs_sig_keys[i / 32][i % 32]) zero = 0;
     if (!zero) CHECK_EQ_I(bbs_sig_file("../lists/bbs.txt", bbs_sig_keys, BBS_SIG_KEYS, &ser), BBS_SIG_OK);
     if (!zero) CHECK(ser > 0);
+    /* so is the list of services' numbers, and every line of it is one this box takes */
+    if (!zero) CHECK_EQ_I(bbs_sig_file("../lists/services.txt", bbs_sig_keys, BBS_SIG_KEYS, &ser), BBS_SIG_OK);
+    if (!zero) CHECK(ser > 0);
+    {
+        char line[512]; FILE *f = fopen("../lists/services.txt", "r"); int head = 0, bad = 0, n = 0;
+        cfg_service_t e;
+        CHECK(f != NULL);
+        while (f && fgets(line, sizeof line, f)) {
+            size_t l = strlen(line); int k;
+            if (l && line[l - 1] == '\n') line[--l] = 0;
+            k = svc_line(line, l, &e);
+            if (k == SVC_LINE_HEAD) head++;
+            else if (k == SVC_LINE_SVC) n++;
+            else if (k != SVC_LINE_NONE) bad++;
+        }
+        if (f) fclose(f);
+        CHECK_EQ_I(head, 1); CHECK_EQ_I(bad, 0); CHECK(n <= SVC_LIST_MAX);
+    }
 }
 
 static void test_v92_call(void)
@@ -1934,9 +1953,62 @@ static void test_heavy_guard(void)
     hang_up();
 }
 
+/* the list of services' numbers (svc.h) and what a list entry may call */
+static void test_svc_list(void)
+{
+    cfg_service_t e;
+#define L(z) svc_line(z, strlen(z), &e)
+    CHECK_EQ_I(L(""), SVC_LINE_NONE);
+    CHECK_EQ_I(L("# serial 3"), SVC_LINE_NONE);
+    CHECK_EQ_I(L("v90d-svc 1"), SVC_LINE_HEAD);
+    CHECK_EQ_I(L("v90d-svc 1\r"), SVC_LINE_HEAD);
+    CHECK_EQ_I(L("v90d-svc 2"), SVC_LINE_OTHER);
+    CHECK_EQ_I(L("svc 13855961775 nwnrevival.com:5000 raw AOL Neverwinter Nights"), SVC_LINE_SVC);
+    CHECK(strcmp(e.number, "13855961775") == 0 && strcmp(e.host, "nwnrevival.com") == 0 && e.port == 5000);
+    CHECK(e.mode == CFG_SVC_RAW && strcmp(e.name, "AOL Neverwinter Nights") == 0);
+    CHECK_EQ_I(L("svc 5551234 text.example:23 telnet Text\r"), SVC_LINE_SVC);
+    CHECK(e.mode == CFG_SVC_TELNET && strcmp(e.name, "Text") == 0);
+    CHECK_EQ_I(L("menu 1 2 3"), SVC_LINE_OTHER);                    /* a kind added later */
+    CHECK_EQ_I(L("svcx 5551234 h:1 raw x"), SVC_LINE_OTHER);
+    CHECK_EQ_I(L("svc 5551234 h:1 ssh x"), SVC_LINE_BAD);
+    CHECK_EQ_I(L("svc 18002273425 h:1 raw x"), SVC_LINE_BAD);       /* the box's own */
+    CHECK_EQ_I(L("svc 2278353422 h:1 raw x"), SVC_LINE_BAD);
+    CHECK_EQ_I(L("svc 5551234 localhost:1 raw x"), SVC_LINE_BAD);
+    CHECK_EQ_I(L("svc 5551234 LocalHost.:1 raw x"), SVC_LINE_BAD);
+    CHECK_EQ_I(L("svc 5551234 a.localhost:1 raw x"), SVC_LINE_BAD);
+    CHECK_EQ_I(L("svc 5551234 127.0.0.1:1 raw x"), SVC_LINE_BAD);
+    CHECK_EQ_I(L("svc 5551234 192.168.1.1:80 raw x"), SVC_LINE_BAD);
+    CHECK_EQ_I(L("svc 5551234 10.1.2.3:80 raw x"), SVC_LINE_BAD);
+    CHECK_EQ_I(L("svc 5551234 0x7f.0.0.1:80 raw x"), SVC_LINE_BAD);
+    CHECK_EQ_I(L("svc 5551234 a.0x7f:80 raw x"), SVC_LINE_BAD);
+    CHECK_EQ_I(L("svc 5551234 0177.0.0.1:80 raw x"), SVC_LINE_BAD);
+    CHECK_EQ_I(L("svc 5551234 2130706433:80 raw x"), SVC_LINE_BAD);
+    CHECK_EQ_I(L("svc 5551234 8.8.8.8:80 raw x"), SVC_LINE_SVC);
+    CHECK_EQ_I(L("svc 5551234 1e100.net:80 raw x"), SVC_LINE_SVC);
+#undef L
+    CHECK(svc_host_ok("nwnrevival.com") && svc_host_ok("93.184.216.34"));
+    CHECK(!svc_host_ok("100.64.0.1") && !svc_host_ok("169.254.169.254") && !svc_host_ok("172.16.0.1"));
+    CHECK(svc_host_ok("172.32.0.1") && !svc_host_ok("172.31.255.255"));
+    CHECK(!svc_host_ok("224.0.0.1") && !svc_host_ok("255.255.255.255") && !svc_host_ok("0.1.2.3"));
+    CHECK(!svc_host_ok("192.0.2.1") && !svc_host_ok("198.51.100.1") && !svc_host_ok("203.0.113.1") && !svc_host_ok("198.19.0.1"));
+    CHECK(bbsdial_is_public(0x08080808u) && bbsdial_is_public(0x64800000u));    /* 8.8.8.8, 100.128.0.0 */
+    CHECK(!bbsdial_is_public(0x647fffffu) && !bbsdial_is_public(0xc0a80101u) && !bbsdial_is_public(0x7f000001u));
+    /* while digits come in */
+    CHECK_EQ_I(cfg_svc_number_begins("13855961775", "1385"), 1);
+    CHECK_EQ_I(cfg_svc_number_begins("13855961775", "3855"), 1);
+    CHECK_EQ_I(cfg_svc_number_begins("13855961775", "3855961775"), 2);
+    CHECK_EQ_I(cfg_svc_number_begins("13855961775", "13855961775"), 2);
+    CHECK_EQ_I(cfg_svc_number_begins("13855961775", "1385596177"), 1);
+    CHECK_EQ_I(cfg_svc_number_begins("3855961775", "1385596177"), 1);
+    CHECK_EQ_I(cfg_svc_number_begins("3855961775", "13855961775"), 2);
+    CHECK_EQ_I(cfg_svc_number_begins("3855961775", "4"), 0);
+    CHECK_EQ_I(cfg_svc_number_begins("555", "5556"), 0);
+}
+
 int main(void)
 {
     test_lin_scale();
+    test_svc_list();
     test_line_dev();
     test_level();
     test_v22bis_call();

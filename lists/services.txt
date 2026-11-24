@@ -1,0 +1,6 @@
+# Netstalgia Online: numbers that connect straight to a service
+# serial 2026112401
+v90d-svc 1
+
+svc 13855961775 nwnrevival.com:5000 raw Neverwinter Nights
+# sig ed25519 fd629feae853dad36c0ecafdd6f8994086143258a72fc451b6861fdf7937e76930f654faabc54a63065ec0fbe60ed02aa7de57418d62674e264888147eaf1406

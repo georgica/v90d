@@ -58,6 +58,29 @@ static void raw_from_caller(void *ctx, const uint8_t *oct, size_t n)
 
 void srv_set_raw(srv_t *s, srv_raw_fn raw_out) { s->raw_out = raw_out; }
 const char *srv_dialed(const srv_t *s) { return s->tel.dialed; }
+void srv_set_svc_lookup(srv_t *s, srv_svc_fn known) { s->svc_known = known; }
+
+int srv_svc_number(const srv_t *s, const char *dialed)
+{
+    const cfg_t *c = &s->cfg;
+    int i;
+    if (!dialed[0]) return 0;
+    for (i = 0; i < c->n_services && i < CFG_MAX_SERVICES; i++)
+        if (cfg_svc_number_match(c->services[i].number, dialed)) return SRV_SVC_OWN;
+    if (c->svc_netstalgia && s->svc_known && s->svc_known(dialed) == 2) return SRV_SVC_LIST;
+    return 0;
+}
+
+/* the telephony layer's question while digits come in (tel_cfg.more) */
+static int tel_more(void *ctx, const char *dialed)
+{
+    const srv_t *s = ctx; const cfg_t *c = &s->cfg;
+    int i, best = 0, m;
+    for (i = 0; i < c->n_services && i < CFG_MAX_SERVICES; i++)
+        if ((m = cfg_svc_number_begins(c->services[i].number, dialed)) > best) best = m;
+    if (best < 2 && c->svc_netstalgia && s->svc_known && (m = s->svc_known(dialed)) > best) best = m;
+    return best;
+}
 
 int srv_link(const srv_t *s, uint32_t *addr, int *online)
 {
@@ -115,6 +138,7 @@ static void tel_settings(const srv_t *s, tel_cfg *t)
     t->tone_level = srv_level_rms(-13) * 181 / 128;     /* each component -13 dBm0, as a peak */
     t->seed = s->seed;
     t->originate = s->originate;
+    t->more = tel_more; t->more_ctx = (void *)s;
 }
 
 static void adopt(srv_t *s, const cfg_t *cfg)
@@ -196,12 +220,15 @@ static void call_start(srv_t *s)
 {
     dce_cfg_t d;
     const cfg_t *c = &s->cfg;
-    int bbs, enc; char board[BBS_NUMBER_LEN + 1];
+    int bbs, svc, enc; char board[BBS_NUMBER_LEN + 1];
     s->link = SATURN_NONE;
     s->call_start = s->clock; s->call_s = 0;
     /* a terminal program for a bulletin board (bbs.h), unless the number is the port's own */
     bbs = strcmp(s->tel.dialed, c->line_number) != 0 && bbs_number(s->tel.dialed, board) != BBS_NUM_NONE;
+    /* a number that connects straight to a service ([services]), the same way */
+    svc = !bbs && strcmp(s->tel.dialed, c->line_number) != 0 && srv_svc_number(s, s->tel.dialed);
     if (bbs) s->link = SRV_LINK_BBS;
+    else if (svc) s->link = SRV_LINK_SVC;
     else if (for_link(c)) {
         s->link = saturn_number(s->tel.dialed, &s->link_addr, s->link_game);
         if ((s->link == SATURN_MATCH_WAIT || s->link == SATURN_MATCH_CALL) && !c->sat_match) s->link = SATURN_NONE;
@@ -215,6 +242,7 @@ static void call_start(srv_t *s)
             return;
         }
     }
+    bbs |= svc;             /* from here on: a call that carries octets */
     dce_cfg_default(&d);
     d.tx_level = srv_level_rms(c->tx_level);
     d.modulations = 0;

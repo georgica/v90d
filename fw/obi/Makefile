@@ -44,7 +44,7 @@ $(BUILD)/kernel.xz: $(BUILD)/oinit FORCE | $(BUILD)
 ../../srv/build/v90d-obi: FORCE
 	$(MAKE) -C ../../srv v90d-obi
 FORCE:
-image: $(BUILD)/obiline $(BUILD)/obinv $(BUILD)/kernel.xz ../../srv/build/v90d-obi obi kinit udhcpc.script ../v90d.conf ../VERSION ../bbsfetch.sh ../../lists/bbs.txt mkobifw.py
+image: $(BUILD)/obiline $(BUILD)/obinv $(BUILD)/kernel.xz ../../srv/build/v90d-obi obi kinit udhcpc.script ../v90d.conf ../VERSION ../bbsfetch.sh ../../lists/bbs.txt ../../lists/services.txt mkobifw.py
 	@test -n "$(BASE)" || { echo "make image BASE=your-OBi-firmware.fw"; exit 1; }
 	@rm -rf $(BUILD)/image && mkdir -p $(BUILD)/image
 	cp obi kinit udhcpc.script $(BUILD)/obiline $(BUILD)/obinv $(BUILD)/kernel.xz ../v90d.conf $(BUILD)/image/
@@ -54,6 +54,7 @@ image: $(BUILD)/obiline $(BUILD)/obinv $(BUILD)/kernel.xz ../../srv/build/v90d-o
 	cp ../VERSION $(BUILD)/image/VERSION
 	cp ../bbsfetch.sh $(BUILD)/image/bbsfetch.sh
 	cp ../../lists/bbs.txt $(BUILD)/image/bbs.txt
+	cp ../../lists/services.txt $(BUILD)/image/services.txt
 	python3 mkobifw.py --full --files $(BUILD)/image "$(BASE)" $(BUILD)/v90d-obi200.fw
 # obinv and the builder on the host, against a stand-in flash (needs BASE and the image)
 $(BUILD)/obinv.host: obinv.c ../../ppp/ppp_md5.c ../../cfg/page.h ../../cfg/sbuf.h | $(BUILD)

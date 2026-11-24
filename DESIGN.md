@@ -338,6 +338,52 @@ front. A port whose own number looks like one of them keeps its number.
   The host is looked at once more before it becomes an argument, and the
   fetched file is created anew, never through a link.
 
+### 5c. Numbers to services
+
+A number can also lead straight to one service on the internet: a game
+server with a protocol of its own (the AOL Neverwinter Nights client at
+nwnrevival.com:5000), or a board or text service that is not in the list
+of boards. Format and rules: `[services]` in `cfg/config.h` and
+`srv/svc.h`.
+
+- **Whose.** The owner's numbers are in the settings (`[services] service =
+  NUMBER HOST:PORT raw|telnet NAME`, up to 16, the Services tab). Netstalgia
+  keeps more in a second signed list,
+  `http://api.netstalgia.online/v1/services.txt`, `v90d-svc 1`, with a serial
+  of its own, fetched and checked exactly like the list of boards (the same
+  keys, the same child, `lister_t` in `bbslink.c`) once a day while
+  `[services] netstalgia = on` (the default; off, the box never asks for
+  it). The image carries it as it was at the release, `lists/services.txt`
+  as `/etc/v90d.svc` (`/obi/services.txt`), and an empty list is a list. A
+  fetched list that passes is loaded into a table in memory (512 entries at
+  most), the next table filled while the list is checked and then swapped
+  in, so the call path never reads a file. The owner's number wins over
+  Netstalgia's.
+- **Answering.** The telephony layer asks the server about each digit
+  (`tel_cfg.more`): 2 when what was dialled is a service number, 1 while it
+  still begins one. Like the board numbers, a number of a service answers on
+  any port whatever its service, unless it is the port's own; the board
+  numbers come first and a service line may not name one. An 11-digit
+  number with a 1 in front also answers without the 1, and a 10-digit one
+  with it. The call is in octet mode with error control as `[modem]` says,
+  like a board call (`SRV_LINK_SVC`), and `bbslink.c` serves it with the
+  same connection child.
+- **Raw**: nothing is said, the connection starts the moment the modems are
+  online, and what the caller sends meanwhile waits (4 KiB at most) and
+  goes first. Octets go both ways as they are. **Telnet**: a second and a
+  half, `Calling NAME ...`, then telnet as for a board, with no prompt.
+  Either way, no answer or the service hanging up ends the call.
+- **What a list entry may reach.** Netstalgia refuses private and other
+  non-public addresses when a number is added. The box holds its list to
+  the same: a line whose host is `localhost` (or under it), an address
+  that is not public, or a number written in another base (`0x7f.0.0.1`,
+  `2130706433`) is left out, and so is one with a number the box answers
+  itself. When such a number is called, the connection child looks the
+  name up once and connects only to a public IPv4 address it gave
+  (`bbsdial_is_public`), so a name that later points into the owner's
+  network leads nowhere. The owner's own entries may name a host on the
+  LAN.
+
 ## 6. Firmware (Track A)
 
 A mainline-derived Linux kernel with board support for the DVF9918 SoC written

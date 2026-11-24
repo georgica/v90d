@@ -1346,5 +1346,172 @@ int main(int argc, char **argv)
         CHECK_EQ_I(waitpid(pid, &st, 0), pid);
         CHECK(WIFEXITED(st) && WEXITSTATUS(st) == 0);
     }
+    /* 14. numbers that connect straight to a service ([services]): the
+     * owner's, raw and telnet, on a port whose service is the internet, and
+     * Netstalgia's list, the image's and then a fetched one (signed with the
+     * test key). Raw: nothing said, what the caller sent before the service
+     * answered goes first, the line drops when the service is done. Telnet:
+     * "Calling NAME ...". Netstalgia's numbers stop with the switch off. */
+    {
+        static char lanlog[300], board[300], builtin[300], fetched[300], live[300], fcmd[700], resp[32768], post[1024];
+        static const char body[] = "netstalgia=off";
+        FILE *f;
+        snprintf(board, sizeof board, "%s/ns_svc.sh", argv[2]);
+        snprintf(builtin, sizeof builtin, "%s/ns_svc.builtin", argv[2]);
+        snprintf(fetched, sizeof fetched, "%s/ns_svc.remote", argv[2]);
+        snprintf(live, sizeof live, "%s/ns_svc.live", argv[2]);
+        snprintf(fcmd, sizeof fcmd, "cat %s", fetched);
+        f = fopen(board, "w");
+        if (f) {
+            fprintf(f, "#!/bin/sh\ncase \"$1\" in\n"
+                       "lan.example|nwn.example) x=$(dd bs=1 count=5 2>/dev/null); printf 'RAW[%%s:%%s]' \"$2\" \"$x\"; exit 0;;\n"
+                       "esac\n"
+                       "printf '\\377\\373\\001Welcome to %%s port %%s\\r\\n' \"$1\" \"$2\"\n"
+                       "x=$(dd bs=1 count=5 2>/dev/null | tail -c 2)\nprintf 'you said %%s\\r\\n' \"$x\"\n");
+            fclose(f); chmod(board, 0755);
+        }
+        f = fopen(builtin, "w");
+        if (f) { fprintf(f, "# serial 1\nv90d-svc 1\nsvc 13855961775 nwn.example:5000 raw NWN\n"); fclose(f); }
+        f = fopen(fetched, "w");
+        if (f) {
+            fprintf(f, "# serial 2\nv90d-svc 1\nsvc 13855961775 nwn.example:5000 raw NWN\nsvc 15550003 echo.example:7 telnet Echo\n"
+                       "future 1 2 3\nsvc 2278353422 x.example:1 raw Taken\nsvc 15550004 192.168.1.9:23 raw Private\n"
+                       "# sig ed25519 2cf41924dda8ce78d2f6fd8ac33dc0867cc102c471d338083ee9ea2e212ab0971b9fc79d1b0979d41bfbc2aa102cc27e46f738c0a070da1825ae03e928cea20d\n");
+            fclose(f);
+        }
+        unlink(live);
+        cfg_default(&c);
+        strcpy(c.line_number, "5551234"); c.rings = 1; c.status_port = 8080;
+        c.n_services = 2;
+        strcpy(c.services[0].number, "5550001"); strcpy(c.services[0].host, "lan.example"); c.services[0].port = 4000;
+        c.services[0].mode = CFG_SVC_RAW; strcpy(c.services[0].name, "Game");
+        strcpy(c.services[1].number, "5550002"); strcpy(c.services[1].host, "t.example"); c.services[1].port = 23;
+        c.services[1].mode = CFG_SVC_TELNET; strcpy(c.services[1].name, "Talker");
+        CHECK_EQ_I(cfg_save(&c, conf, err, sizeof err), CFG_OK);
+        CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
+        snprintf(lanlog, sizeof lanlog, "%s/ns_svc.log", argv[2]);
+        unlink(lanlog);
+        pid = fork();
+        if (pid == 0) {
+            int a = fcntl(sv[1], F_DUPFD, 20), lfd = open(lanlog, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            dup2(a, 3); if (lfd >= 0) dup2(lfd, 2);
+            for (i = 4; i < 64; i++) close(i);
+            execl(argv[1], "v90d", "-c", conf, "-l", "fd:3", "-i", "lo", "-t", "ppp0", "-A", "",
+                  "-b", "", "-F", builtin, "-f", "exit 1", "-K", live, "-T", board, (char *)NULL);
+            _exit(127);
+        }
+        close(sv[1]);
+        line_fd = sv[0]; idle_fd = -1;
+        dead = quiet_exit = 0; hook = modem_on = 0; blk_n = 0; c_tx = 0; c_rx_pw = 0;
+        channel_init(&CH, &cc);
+        memset(prev_tx, 0xFF, sizeof prev_tx);
+        run_ms(2000);
+        /* (a) the owner's raw number: what the caller sends at once waits for the service */
+        CHECK_EQ_I(bt_call("5550001"), 1);
+        bt_type("hello");
+        CHECK(bt_wait("RAW[4000:hello]", 5000));
+        CHECK(!bt_saw("Calling") && !bt_saw("gateway"));
+        for (i = 0; i < 60 && !file_has(lanlog, "svc: the service hung up"); i++) { run_ms(100); usleep(20000); }
+        CHECK(file_has(lanlog, "port 1: svc: calling lan.example:4000 (raw)"));
+        CHECK(file_has(lanlog, "svc: the service hung up"));
+        {
+            int gone = 0;
+            for (i = 0; i < 100 && !gone; i++) {
+                run_ms(100);
+                gone = http("GET /status.json HTTP/1.0\r\n\r\n", resp, sizeof resp) > 0 && !strstr(resp, "\"line\":\"connected\"");
+            }
+            CHECK(gone);
+        }
+        hang_up();
+        /* (b) the owner's telnet number */
+        CHECK_EQ_I(bt_call("5550002"), 1);
+        CHECK(bt_wait("Calling Talker ...", 5000));
+        CHECK(bt_wait("Welcome to t.example port 23", 3000));
+        CHECK(!bt_saw("BBS: ") && memchr(bt_got, 0xFF, bt_got_n) == NULL);
+        bt_type("hi");
+        CHECK(bt_wait("you said hi", 3000));
+        hang_up();
+        /* (c) Netstalgia's, from the image's list, with and without the 1 */
+        CHECK_EQ_I(bt_call("3855961775"), 1);
+        bt_type("nwn01");
+        CHECK(bt_wait("RAW[5000:nwn01]", 5000));
+        hang_up();
+        /* (d) the fetch failed: the image's list stays; nobody's number does not answer */
+        for (i = 0; i < 100 && !file_has(lanlog, "svc: the list could not be fetched"); i++) { run_ms(100); usleep(10000); }
+        CHECK(file_has(lanlog, "svc: the list could not be fetched; trying again in 1 minute"));
+        CHECK_EQ_I(bt_call("15550003"), 0);
+        hang_up();
+        /* (e) the page: the owner's rows and Netstalgia's list */
+        CHECK(http("GET /services HTTP/1.0\r\n\r\n", resp, sizeof resp) > 0);
+        CHECK(strstr(resp, "name=\"snum1\" size=\"16\" maxlength=\"15\" value=\"5550002\"") != NULL);
+        CHECK(strstr(resp, "<tr><td>13855961775</td><td>NWN</td><td>raw</td><td>nwn.example:5000</td></tr>") != NULL);
+        /* (f) the switch off: Netstalgia's numbers no longer answer, the owner's do */
+        snprintf(post, sizeof post, "POST /services HTTP/1.0\r\nHost: 127.0.0.1:8080\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: %d\r\n\r\n%s",
+                 (int)strlen(body), body);
+        CHECK(http(post, resp, sizeof resp) > 0);
+        CHECK(strstr(resp, " 303 ") != NULL || strstr(resp, "Settings saved") != NULL);
+        run_ms(500);
+        CHECK_EQ_I(bt_call("13855961775"), 0);
+        hang_up();
+        CHECK_EQ_I(bt_call("5550002"), 1);
+        CHECK(bt_wait("Calling Talker ...", 5000));
+        hang_up();
+        quiet_exit = 1;
+        kill(pid, SIGTERM);
+        for (i = 0; i < 400 && !dead; i++) step(0);
+        close(line_fd);
+        CHECK_EQ_I(waitpid(pid, &st, 0), pid);
+        CHECK(WIFEXITED(st) && WEXITSTATUS(st) == 0);
+    }
+    /* 15. a fetched list of services, signed: taken, its lines that break
+     * the rules (a box's own number, a private address) and a kind of line
+     * this box does not know are left out */
+    {
+        static char lanlog[300], builtin[300], fetched[300], live[300], fcmd[700], board[300];
+        snprintf(board, sizeof board, "%s/ns_svc.sh", argv[2]);
+        snprintf(builtin, sizeof builtin, "%s/ns_svc.builtin", argv[2]);
+        snprintf(fetched, sizeof fetched, "%s/ns_svc.remote", argv[2]);
+        snprintf(live, sizeof live, "%s/ns_svc.live", argv[2]);
+        snprintf(fcmd, sizeof fcmd, "cat %s", fetched);
+        unlink(live);
+        cfg_default(&c);
+        strcpy(c.line_number, "5551234"); c.rings = 1; c.status_port = 8080;
+        CHECK_EQ_I(cfg_save(&c, conf, err, sizeof err), CFG_OK);
+        CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
+        snprintf(lanlog, sizeof lanlog, "%s/ns_svc2.log", argv[2]);
+        unlink(lanlog);                                 /* not a word of an earlier run */
+        pid = fork();
+        if (pid == 0) {
+            int a = fcntl(sv[1], F_DUPFD, 20), lfd = open(lanlog, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            dup2(a, 3); if (lfd >= 0) dup2(lfd, 2);
+            for (i = 4; i < 64; i++) close(i);
+            execl(argv[1], "v90d", "-c", conf, "-l", "fd:3", "-i", "lo", "-t", "ppp0", "-A", "",
+                  "-b", "", "-F", builtin, "-f", fcmd, "-K", live, "-T", board, (char *)NULL);
+            _exit(127);
+        }
+        close(sv[1]);
+        line_fd = sv[0]; idle_fd = -1;
+        dead = quiet_exit = 0; hook = modem_on = 0; blk_n = 0; c_tx = 0; c_rx_pw = 0;
+        channel_init(&CH, &cc);
+        memset(prev_tx, 0xFF, sizeof prev_tx);
+        for (i = 0; i < 100 && !file_has(lanlog, "svc: fetched list"); i++) { run_ms(100); usleep(10000); }
+        CHECK(file_has(lanlog, "svc: fetched list with 2 numbers (some lines not understood)"));
+        CHECK(file_has(live, "echo.example"));
+        CHECK_EQ_I(bt_call("15550003"), 1);
+        CHECK(bt_wait("Calling Echo ...", 5000));
+        CHECK(bt_wait("Welcome to echo.example port 7", 3000));
+        hang_up();
+        CHECK_EQ_I(bt_call("15550004"), 0);                     /* the private one was left out */
+        hang_up();
+        CHECK_EQ_I(bt_call("2278353422"), 1);                   /* a board's number stays the board's */
+        CHECK(bt_wait("bulletin board gateway", 5000));
+        hang_up();
+        quiet_exit = 1;
+        kill(pid, SIGTERM);
+        for (i = 0; i < 400 && !dead; i++) step(0);
+        close(line_fd);
+        CHECK_EQ_I(waitpid(pid, &st, 0), pid);
+        CHECK(WIFEXITED(st) && WEXITSTATUS(st) == 0);
+    }
     T_REPORT("ns_call");
 }

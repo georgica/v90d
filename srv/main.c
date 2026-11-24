@@ -351,6 +351,7 @@ static void adopt(const cfg_t *n)
         srv_reconfigure(&S[i], &view);
     }
     update_config(n->update_check, V90D_VERSION);
+    bbslink_svc_want(n->svc_netstalgia);
 }
 
 static int store(const cfg_t *n)
@@ -471,7 +472,8 @@ static void log_last_call(int port)
 static void raw_from_modem(void *ctx, const uint8_t *oct, size_t n)
 {
     uint32_t addr; int on;
-    if (srv_link((srv_t *)ctx, &addr, &on) == SRV_LINK_BBS) bbslink_from_modem(ctx, oct, n);
+    int kind = srv_link((srv_t *)ctx, &addr, &on);
+    if (kind == SRV_LINK_BBS || kind == SRV_LINK_SVC) bbslink_from_modem(ctx, oct, n);
     else satlink_from_modem(ctx, oct, n);
 }
 
@@ -501,7 +503,7 @@ int main(int argc, char **argv)
     /* the telephone lights: <prefix><port>/brightness, lit while the port is off hook */
     const char *led_prefix = "/sys/class/leds/ht802:phone"; int led_fd[PORTS] = { -1, -1 }, led_on[PORTS] = { -1, -1 };
 
-    while ((opt = getopt(argc, argv, "c:l:d:i:t:vpow:W:L:A:N:R:P:D:G:E:O:V:M:S:XB:b:J:T:u:U:Y:")) != -1) {
+    while ((opt = getopt(argc, argv, "c:l:d:i:t:vpow:W:L:A:N:R:P:D:G:E:O:V:M:S:XB:b:J:T:u:U:Y:F:f:K:")) != -1) {
         switch (opt) {
         case 'c': cfg_path = optarg; break;
         case 'l': if (n_ports >= PORTS) usage(); line_spec[n_ports++] = optarg; break;
@@ -533,6 +535,9 @@ int main(int argc, char **argv)
         case 'B': bbslink_set_builtin(optarg); break; /* the bbs list in the image */
         case 'b': bbslink_set_fetch(optarg); break;   /* the command that prints the bbs list; "" = never fetch */
         case 'J': bbslink_set_live(optarg); break;    /* where a fetched bbs list is kept */
+        case 'F': bbslink_svc_set_builtin(optarg); break; /* the list of services' numbers in the image */
+        case 'f': bbslink_svc_set_fetch(optarg); break;   /* the command that prints it; "" = never fetch */
+        case 'K': bbslink_svc_set_live(optarg); break;    /* where a fetched one is kept */
         case 'T': bbslink_set_prog(optarg); break;    /* run instead of nc to reach a board: PROG HOST PORT */
         case 'u': update_set_cmd(optarg); break;      /* the command that prints the latest release version; "" = never check */
         case 'U': fw_update_cmd = optarg; break;      /* run as CMD VERSION to install an update (instead of fwupdate.sh) */
@@ -579,6 +584,7 @@ int main(int argc, char **argv)
         if (line_set_law(&line[p], line_law[p]) < 0) logf_(CFG_LOG_WARN, "line %s: cannot set the law: %s", line_spec[p], strerror(errno));
         srv_init(&S[p], &view, seed + 0x9E3779B9u * (uint32_t)p, ip_to_kernel, &S[p]);
         srv_set_raw(&S[p], raw_from_modem);
+        srv_set_svc_lookup(&S[p], bbslink_svc_known);
         srv_set_echo_delay(&S[p], echo_delay);
         srv_set_max_tx_code(&S[p], max_tx_code);
         srv_set_originate(&S[p], originate);
@@ -606,6 +612,8 @@ int main(int argc, char **argv)
         httpd_on_firmware(&H, &fw);
     }
     update_config(live.update_check, V90D_VERSION);
+    bbslink_svc_want(live.svc_netstalgia);
+    settings_set_svc_rows(bbslink_svc_rows);
 
     /* The line gives us 10 ms blocks and wants each answered in time; a late
      * one costs the caller's modem its training. So: ahead of everything

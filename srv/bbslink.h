@@ -31,4 +31,18 @@ void bbslink_set_live(const char *path);
 void bbslink_set_fetch(const char *cmd);
 void bbslink_set_prog(const char *prog);
 
+/* The numbers of services (srv/svc.h): calls to them (SRV_LINK_SVC) are
+ * served here too, raw or over telnet; Netstalgia's list of them is kept
+ * like the list of boards, in builtin [/etc/v90d.svc] and live
+ * [/tmp/v90d.svc], fetched by cmd [sh /etc/bbsfetch.sh <the API> 'v90d-svc
+ * 1'] once a day while wanted (bbslink_svc_want: [services] netstalgia).
+ * known: the srv_svc_fn of srv_set_svc_lookup. rows: the Services page's
+ * list (settings_set_svc_rows). */
+void bbslink_svc_set_builtin(const char *path);
+void bbslink_svc_set_live(const char *path);
+void bbslink_svc_set_fetch(const char *cmd);
+void bbslink_svc_want(int on);
+int  bbslink_svc_known(const char *dialed);
+size_t bbslink_svc_rows(char *buf, size_t cap, int *shown, int *left);
+
 #endif

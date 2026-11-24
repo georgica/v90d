@@ -7,13 +7,13 @@
  *
  *   # comment            a line whose first non-blank character is # or ;
  *   [section]            opens a section: network, ppp, modem, modem2, line,
- *                        line2, status, log
+ *                        line2, status, log, system, services
  *   key = value          sets a key of the open section
  *
  * Blanks around section names, keys and values are ignored. There are no
  * trailing comments: everything after the = belongs to the value. Every key
- * may appear once, except `user`, which may appear up to CFG_MAX_USERS
- * times. Unknown sections, unknown keys, repeated keys and malformed values
+ * may appear once, except `user` and `service`, which may appear up to CFG_MAX_USERS
+ * and CFG_MAX_SERVICES times. Unknown sections, unknown keys, repeated keys and malformed values
  * are errors; nothing is silently ignored. A key that is absent keeps its
  * default (shown below).
  *
@@ -113,6 +113,28 @@
  *   [log]
  *   level = info              error | warn | info | debug
  *
+ *   [services]
+ *   Numbers that connect a caller straight to a service on the internet,
+ *   on a port of any service: no PPP, the call carries octets.
+ *   netstalgia = on           on | off: also answer the numbers of
+ *                             Netstalgia's signed list of services, which
+ *                             the box fetches once a day (srv/svc.h)
+ *   service = NUMBER HOST:PORT MODE NAME
+ *                             one line per number, up to CFG_MAX_SERVICES:
+ *                             NUMBER is 3..15 digits as dialled (an 11-digit
+ *                             one with a 1 in front also answers without
+ *                             it, and the other way round); HOST is 1..63
+ *                             of letters, digits, '.' and '-', not starting
+ *                             with '-'; PORT 1..65535; MODE raw (the octets
+ *                             both ways as they are) or telnet (the box
+ *                             says "Calling NAME ..." and speaks telnet);
+ *                             NAME is the rest of the line, 1..47 printable
+ *                             ASCII characters. A number may not be one of
+ *                             the box's own (1 800 227 3425, the 227 board
+ *                             numbers) or a port's number, and is listed
+ *                             once. The owner's numbers come before
+ *                             Netstalgia's. The host may be on the LAN.
+ *
  * Numbers are plain decimal without leading zeros. Addresses are dotted
  * quads without leading zeros.
  *
@@ -130,14 +152,19 @@
 #define CFG_SECRET_MAX  64     /* longest secret (same as PPP_SECRET_MAX) and
                                   longest admin password */
 #define CFG_NUMBER_MAX  20     /* longest phone number */
+#define CFG_MAX_SERVICES 16    /* [services] service lines */
+#define CFG_SVC_NUMBER_MIN 3   /* a service's number: digits only */
+#define CFG_SVC_NUMBER_MAX 15
+#define CFG_SVC_HOST_MAX 63
+#define CFG_SVC_NAME_MAX 47
 #define CFG_PATH_MAX    255    /* longest path cfg_save takes */
 #define CFG_LINE_MAX    640    /* longest line, without the line end */
 #define CFG_FILE_MAX    16384  /* largest file cfg_load reads */
 #define CFG_ERR_MAX     200    /* an error buffer of this size never truncates
                                   for file names up to 60 characters */
 /* cfg_write output never exceeds these (including the NUL) */
-#define CFG_TEXT_MAX          10752  /* with secrets */
-#define CFG_TEXT_REDACTED_MAX 6656   /* secrets redacted */
+#define CFG_TEXT_MAX          13312  /* with secrets */
+#define CFG_TEXT_REDACTED_MAX 9216   /* secrets redacted */
 
 /* return values */
 #define CFG_OK        0
@@ -177,6 +204,16 @@ enum { CFG_SERVICE_INTERNET = 0, CFG_SERVICE_ARCHIVE = 1, CFG_SERVICE_DREAMCAST 
        CFG_SERVICE_COUNT = 4 };
 enum { CFG_LISTEN_OFF = 0, CFG_LISTEN_LAN = 1 };
 enum { CFG_LOG_ERROR = 0, CFG_LOG_WARN = 1, CFG_LOG_INFO = 2, CFG_LOG_DEBUG = 3 };
+
+/* a number that connects straight to a service ([services], srv/svc.h) */
+enum { CFG_SVC_RAW = 0, CFG_SVC_TELNET = 1 };
+typedef struct {
+    char     number[CFG_SVC_NUMBER_MAX + 1];
+    char     host[CFG_SVC_HOST_MAX + 1];
+    char     name[CFG_SVC_NAME_MAX + 1];
+    uint16_t port;
+    uint8_t  mode;              /* CFG_SVC_* */
+} cfg_service_t;
 
 typedef struct {
     char name[CFG_NAME_MAX + 1];      /* NUL terminated, never empty */
@@ -249,6 +286,10 @@ typedef struct {
     char       admin_password[CFG_SECRET_MAX + 1];  /* "" = settings open */
     /* [log] */
     int        log_level;       /* CFG_LOG_* */
+    /* [services] */
+    int        svc_netstalgia;  /* 1 = answer the numbers of Netstalgia's list too */
+    int        n_services;
+    cfg_service_t services[CFG_MAX_SERVICES];
     /* [system] */
     int        update_check;    /* 1 = check GitHub daily for a newer release and offer it on the Firmware page; off = never phone home */
     /* port 2; the [modem] and [line] fields above and ppp_peer are port 1 */
@@ -298,6 +339,21 @@ int cfg_save(const cfg_t *c, const char *path, char *err, size_t errsz);
  * ppp_peer2 and encryption2 values in the fields of [modem], [line],
  * ppp_peer and encryption. */
 void cfg_for_port(const cfg_t *c, int port, cfg_t *out);
+
+/* One service, as the value of a service line ("NUMBER HOST:PORT MODE
+ * NAME", blanks between the words, the name the rest), into *e. 0, or -1
+ * and why in *why (a short phrase). Checks the form only, not the
+ * numbers the box keeps for itself (cfg_svc_number_taken). */
+int cfg_svc_parse(const char *v, size_t n, cfg_service_t *e, const char **why);
+/* Does dialled call the service number listed? The same digits, or one of
+ * them 11 digits with a 1 in front and the other the 10 behind it. */
+int cfg_svc_number_match(const char *listed, const char *dialed);
+/* Dialling so far: 2 = dialed calls listed (cfg_svc_number_match), 1 =
+ * dialed begins a number that would, 0 = neither. */
+int cfg_svc_number_begins(const char *listed, const char *dialed);
+/* 1 if number is one the box answers by itself: 1 800 227 3425 and the
+ * board numbers 227 + seven digits (srv/bbs.h), with or without a 1 */
+int cfg_svc_number_taken(const char *number);
 
 /* One dotted IPv4 address, nothing around it, into host byte order.
  * Returns 0, or -1 if v is not one. */

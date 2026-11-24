@@ -36,6 +36,7 @@ file /etc/udhcpc.script $fw/udhcpc.script 755 0 0
 file /etc/dclease.script $fw/dclease.script 755 0 0
 file /etc/v90d.conf $fw/v90d.conf 600 0 0
 file /etc/v90d.bbs $top/lists/bbs.txt 644 0 0
+file /etc/v90d.svc $top/lists/services.txt 644 0 0
 file /etc/bbsfetch.sh $fw/bbsfetch.sh 755 0 0
 file /etc/updatecheck.sh $fw/updatecheck.sh 755 0 0
 file /etc/fwupdate.sh $fw/fwupdate.sh 755 0 0

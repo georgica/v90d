@@ -189,6 +189,11 @@ static int dialed_is(const tel_t *t)
         if ((size_t)t->ndialed == want) return 2;
         best = 1;
     }
+    if (t->cfg.more) {
+        int m = t->cfg.more(t->cfg.more_ctx, t->dialed);
+        if (m == 2) return 2;
+        if (m == 1) best = 1;
+    }
     return best;
 }
 

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""The bulletin board list in the image (lists/bbs.txt): Netstalgia's signed
-list as it is today, checked against the keys the daemon is built with
-(srv/bbskeys.h) before it is written.
+"""The lists in the image (lists/bbs.txt, lists/services.txt): Netstalgia's
+signed lists as they are today, checked against the keys the daemon is built
+with (srv/bbskeys.h) before they are written.
 
   bbssnap.py                     fetch, check, write lists/bbs.txt
+  bbssnap.py --list services     the same for lists/services.txt
   bbssnap.py --file F            check F (no network) and write it
   bbssnap.py --set-keys HEX [HEX]  put Netstalgia's public keys (64 hex
                                  digits each) into srv/bbskeys.h
@@ -13,8 +14,10 @@ import argparse, os, re, sys, urllib.request
 
 TOP = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 KEYS = os.path.join(TOP, "srv", "bbskeys.h")
-LIST = os.path.join(TOP, "lists", "bbs.txt")
-URL = "http://api.netstalgia.online/v1/bbs.txt"
+LISTS = {   # name: (file, place, first line, entry word, what an entry is)
+    "bbs": ("bbs.txt", "http://api.netstalgia.online/v1/bbs.txt", b"v90d-bbs 2", b"bbs ", "boards"),
+    "services": ("services.txt", "http://api.netstalgia.online/v1/services.txt", b"v90d-svc 1", b"svc ", "numbers"),
+}
 TAG = b"# sig ed25519 "
 HEAD = """/* Netstalgia's public keys for the bulletin board list (bbssig.h), as the
  * rows of bbs_sig_keys; written by fw/tools/bbssnap.py --set-keys. All
@@ -42,7 +45,7 @@ def set_keys(hexes):
     open(KEYS, "w").write(HEAD + "".join(rows))
 
 
-def check(data):
+def check(data, kind="bbs"):
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
     from cryptography.exceptions import InvalidSignature
     body = data[:-1] if data.endswith(b"\n") else data
@@ -66,31 +69,34 @@ def check(data):
     if len(serials) != 1 or int(serials[0]) == 0:
         sys.exit("the signed list has no serial line (or more than one): boxes would refuse it")
     lines = [l for l in data[:start].split(b"\n") if l and not l.startswith(b"#")]
-    if not lines or lines[0].rstrip(b"\r") != b"v90d-bbs 2":
+    _, _, first, word, _ = LISTS[kind]
+    if not lines or lines[0].rstrip(b"\r") != first:
         sys.exit("signed, but not a list")
-    return sum(1 for l in lines if l.startswith(b"bbs ")), int(serials[0])
+    return sum(1 for l in lines if l.startswith(word)), int(serials[0])
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("--list", choices=sorted(LISTS), default="bbs")
     ap.add_argument("--file")
-    ap.add_argument("--url", default=URL)
+    ap.add_argument("--url")
     ap.add_argument("--set-keys", nargs="+")
     a = ap.parse_args()
     if a.set_keys:
         set_keys(a.set_keys)
         print("srv/bbskeys.h: %d key(s)" % len(a.set_keys))
         return
+    name, url, _, _, what = LISTS[a.list]
     if a.file:
         data = open(a.file, "rb").read()
     else:
-        req = urllib.request.Request(a.url, headers={"User-Agent": "Wget/1.21 (v90d bbssnap)"})
+        req = urllib.request.Request(a.url or url, headers={"User-Agent": "Wget/1.21 (v90d bbssnap)"})
         data = urllib.request.urlopen(req, timeout=30).read(512 * 1024 + 1)
     if len(data) > 256 * 1024:
         sys.exit("the list is larger than a box takes")
-    n, serial = check(data)
-    open(LIST, "wb").write(data)
-    print("lists/bbs.txt: %d boards, signed, serial %d" % (n, serial))
+    n, serial = check(data, a.list)
+    open(os.path.join(TOP, "lists", name), "wb").write(data)
+    print("lists/%s: %d %s, signed, serial %d" % (name, n, what, serial))
 
 
 if __name__ == "__main__":

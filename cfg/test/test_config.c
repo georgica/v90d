@@ -491,7 +491,7 @@ static const struct { const char *text; int line; const char *what; } bad[] = {
     { "[line]\nidle_timeout = -5\n", 2, "idle_timeout: -5 is out of range 0..10080" },
     { "[line]\nrings = 2\n", 2, "unknown key 'rings' in [line]" },
     { "[modem]\nnumber = 5\n", 2, "unknown key 'number' in [modem]" },
-    { "[lines]\n", 1, "unknown section [lines] (sections: network ppp modem modem2 line line2 status log system)" },
+    { "[lines]\n", 1, "unknown section [lines] (sections: network ppp modem modem2 line line2 status log system services)" },
     /* the admin password */
     { "[status]\nadmin_password = <redacted>\n", 2, "admin_password: password is <redacted>" },
     { "[status]\nadmin_password = two words\n", 2, "admin_password: unexpected text after the password" },
@@ -705,6 +705,14 @@ static void worst(cfg_t *c)
     c->busy_chance = 100;
     c->drop_mean_min = c->session_limit_min = c->idle_timeout_min = 10080;
     memset(c->admin_password, 0xff, CFG_SECRET_MAX);
+    c->n_services = CFG_MAX_SERVICES;
+    for (i = 0; i < CFG_MAX_SERVICES; i++) {
+        cfg_service_t *e = &c->services[i];
+        memset(e->number, '5', CFG_SVC_NUMBER_MAX); e->number[0] = (char)('a' - 'a' + '1'); e->number[1] = (char)('0' + i / 10); e->number[2] = (char)('0' + i % 10);
+        memset(e->host, 'h', CFG_SVC_HOST_MAX);
+        memset(e->name, '~', CFG_SVC_NAME_MAX);
+        e->port = 65535; e->mode = CFG_SVC_TELNET;
+    }
 }
 
 static void test_write(void)
@@ -1054,6 +1062,88 @@ static void test_service(void)
     CHECK(strstr(err, "[line2] service") != NULL);
 }
 
+static void test_services(void)
+{
+    cfg_t c; cfg_service_t e; const char *why = "";
+    static char a[CFG_TEXT_MAX];
+    /* the value of a service line */
+#define SP(v) cfg_svc_parse(v, strlen(v), &e, &why)
+    CHECK_EQ_I(SP("13855961775 nwnrevival.com:5000 raw AOL Neverwinter Nights"), 0);
+    CHECK_EQ_S(e.number, "13855961775"); CHECK_EQ_S(e.host, "nwnrevival.com");
+    CHECK_EQ_I(e.port, 5000); CHECK_EQ_I(e.mode, CFG_SVC_RAW);
+    CHECK_EQ_S(e.name, "AOL Neverwinter Nights");
+    CHECK_EQ_I(SP("  555   bbs.example.org:23\ttelnet   A  B  "), 0);
+    CHECK_EQ_S(e.name, "A  B"); CHECK_EQ_I(e.mode, CFG_SVC_TELNET); CHECK_EQ_I(e.port, 23);
+    CHECK_EQ_I(SP("192.168.1.5"), -1);
+    CHECK_EQ_I(SP("55 h:1 raw x"), -1);                          /* number too short */
+    CHECK_EQ_I(SP("1234567890123456 h:1 raw x"), -1);            /* too long */
+    CHECK_EQ_I(SP("12a h:1 raw x"), -1);
+    CHECK_EQ_I(SP("123 h raw x"), -1);                           /* no port */
+    CHECK_EQ_I(SP("123 :23 raw x"), -1);                         /* no host */
+    CHECK_EQ_I(SP("123 -h:23 raw x"), -1);
+    CHECK_EQ_I(SP("123 h_x:23 raw x"), -1);
+    CHECK_EQ_I(SP("123 h:0 raw x"), -1);
+    CHECK_EQ_I(SP("123 h:023 raw x"), -1);
+    CHECK_EQ_I(SP("123 h:65536 raw x"), -1);
+    CHECK_EQ_I(SP("123 h:65535 raw x"), 0);
+    CHECK_EQ_I(SP("123 h:23 ssh x"), -1);
+    CHECK_EQ_I(SP("123 h:23 raw"), -1);                          /* no name */
+    CHECK_EQ_I(SP("123 h:23 raw 123456789012345678901234567890123456789012345678"), -1);
+    CHECK_EQ_I(SP("123 h:23 raw 12345678901234567890123456789012345678901234567"), 0);
+    CHECK_EQ_I(SP("123 h:23 raw caf\xc3\xa9"), -1);
+    CHECK_EQ_I(SP("123 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:23 raw x"), -1);
+#undef SP
+    /* numbers */
+    CHECK(cfg_svc_number_match("13855961775", "13855961775"));
+    CHECK(cfg_svc_number_match("13855961775", "3855961775"));
+    CHECK(cfg_svc_number_match("3855961775", "13855961775"));
+    CHECK(!cfg_svc_number_match("23855961775", "3855961775"));
+    CHECK(!cfg_svc_number_match("13855961775", "855961775"));
+    CHECK(!cfg_svc_number_match("555", "5555"));
+    CHECK(cfg_svc_number_taken("8002273425") && cfg_svc_number_taken("18002273425"));
+    CHECK(cfg_svc_number_taken("2278353422") && cfg_svc_number_taken("12278353422"));
+    CHECK(!cfg_svc_number_taken("13855961775") && !cfg_svc_number_taken("227"));
+
+    /* in a file */
+    CHECK_EQ_I(parse(&c, "[services]\nnetstalgia = off\nservice = 13855961775 nwnrevival.com:5000 raw AOL NWN\n"
+                         "service = 5551234 192.168.1.20:23 telnet My board\n"), CFG_OK);
+    CHECK_EQ_I(c.svc_netstalgia, 0); CHECK_EQ_I(c.n_services, 2);
+    CHECK_EQ_S(c.services[1].host, "192.168.1.20"); CHECK_EQ_S(c.services[1].name, "My board");
+    CHECK(cfg_write(&c, 1, a, sizeof a) > 0);
+    CHECK(strstr(a, "\n[services]\nnetstalgia = off\nservice = 13855961775 nwnrevival.com:5000 raw AOL NWN\n"
+                    "service = 5551234 192.168.1.20:23 telnet My board\n") != NULL);
+    { cfg_t d; CHECK_EQ_I(parse(&d, a), CFG_OK); CHECK(memcmp(&c, &d, sizeof c) == 0); }
+    cfg_default(&c); CHECK_EQ_I(c.svc_netstalgia, 1); CHECK_EQ_I(c.n_services, 0);
+    CHECK_EQ_I(parse(&c, "[services]\nservice = 555 h:1 raw\n"), CFG_ERR);
+    CHECK(strstr(err, "t.conf:2: [services] service: missing name") != NULL);
+    CHECK_EQ_I(parse(&c, "[services]\nservice = 2278353422 h:1 raw x\n"), CFG_ERR);
+    CHECK(strstr(err, "the box answers itself") != NULL);
+    CHECK_EQ_I(parse(&c, "[services]\nservice = 13855961775 h:1 raw x\nservice = 3855961775 h:2 raw y\n"), CFG_ERR);
+    CHECK(strstr(err, "listed twice") != NULL);
+    CHECK_EQ_I(parse(&c, "[line]\nnumber = 5551234\n[services]\nservice = 5551234 h:1 raw x\n"), CFG_ERR);
+    CHECK(strstr(err, "the number of port 1") != NULL);
+    CHECK_EQ_I(parse(&c, "[line2]\nnumber = 5551234\n[services]\nservice = 5551234 h:1 raw x\n"), CFG_ERR);
+    CHECK(strstr(err, "the number of port 2") != NULL);
+    {
+        char f[4096]; size_t n = 0; int i;
+        n += (size_t)snprintf(f + n, sizeof f - n, "[services]\n");
+        for (i = 0; i <= CFG_MAX_SERVICES; i++) n += (size_t)snprintf(f + n, sizeof f - n, "service = %d h:1 raw x\n", 100 + i);
+        CHECK_EQ_I(parse(&c, f), CFG_ERR);
+        CHECK(strstr(err, "more than 16 services") != NULL);
+    }
+    /* a struct the form made: same rules */
+    cfg_default(&c); c.n_services = 1;
+    strcpy(c.services[0].number, "555"); strcpy(c.services[0].host, "h"); strcpy(c.services[0].name, " x");
+    c.services[0].port = 1;
+    CHECK_EQ_I(cfg_validate(&c, err, sizeof err), CFG_ERR);
+    strcpy(c.services[0].name, "x"); c.services[0].port = 0;
+    CHECK_EQ_I(cfg_validate(&c, err, sizeof err), CFG_ERR);
+    c.services[0].port = 7; c.services[0].mode = 2;
+    CHECK_EQ_I(cfg_validate(&c, err, sizeof err), CFG_ERR);
+    c.services[0].mode = CFG_SVC_TELNET;
+    CHECK_EQ_I(cfg_validate(&c, err, sizeof err), CFG_OK);
+}
+
 int main(void)
 {
     test_defaults();
@@ -1061,6 +1151,7 @@ int main(void)
     test_more_mods();
     test_port2();
     test_service();
+    test_services();
     test_console_switches();
     test_full();
     test_errors();

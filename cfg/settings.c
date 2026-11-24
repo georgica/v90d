@@ -15,9 +15,14 @@ enum {
     F_LAN, F_ADDRESS, F_NETMASK, F_GATEWAY, F_DNS1, F_DNS2, F_PORT, F_SERVICE, F_V92, F_COMPRESSION,
     F_ENCRYPTION,
     F_DCNOW, F_DCLAN, F_DCUPNP, F_DCIWANGO, F_SATMATCH, F_UPDATE_CHECK, F_X2, F_K56,
+    F_SVCNET,
     F_COUNT,
-    F_USER = 100, F_PASS = 200      /* plus the row */
+    F_USER = 100, F_PASS = 200,     /* plus the row */
+    F_SVC = 300                     /* plus 100 * the S_ column, plus the row */
 };
+/* the columns of the service rows */
+enum { S_NUM, S_HOST, S_PORT, S_MODE, S_NAME, S_COLS };
+static const char *const svc_col[S_COLS] = { "snum", "shost", "sport", "smode", "sname" };
 /* name on the wire, and the config section for messages */
 typedef char fields_fit_the_seen_bits[F_COUNT <= 64 ? 1 : -1];
 static const struct { const char *name; const char *sec; } fields[F_COUNT] = {
@@ -34,6 +39,7 @@ static const struct { const char *name; const char *sec; } fields[F_COUNT] = {
     { "encryption", "ppp" },
     { "dreamcast_now", "line" }, { "dreamcast_lan", "line" }, { "dreamcast_upnp", "line" }, { "dreamcast_iwango", "line" }, { "saturn_matchmaking", "line" },
     { "update_check", "system" }, { "x2", "modem" }, { "k56", "modem" },
+    { "netstalgia", "services" },
 };
 
 static const char *const n_tones[] = { "us", "eu" };
@@ -66,6 +72,9 @@ static const char *const t_comp[]  = { "Off: no PPP compression",
 static const char *const t_enc[]   = { "Off: no encryption required",
                                        "On: require 128-bit MPPE (forces MS-CHAPv2; a user is needed, and plain compression is dropped)" };
 static const char *const t_mods[]  = { "V.90", "V.34", "V.32bis", "V.22bis", "V.22", "V.21" };     /* bit i */
+static const char *const n_svcmode[] = { "raw", "telnet" };        /* CFG_SVC_* */
+static const char *const t_svcnet[] = { "Off: only the numbers above",
+                                        "On: also Netstalgia's numbers, fetched once a day" };
 
 /* ---- the page -------------------------------------------------------------- */
 
@@ -175,6 +184,7 @@ static const struct { const char *path, *title; } pages[SETTINGS_PAGES] = {
     { "/network", "network" }, { "/system", "system" },
     { "/line2", "line, port 2" }, { "/modem2", "modem, port 2" },
     { "/dreamcast", "Consoles" }, { "/dreamcast2", "Consoles, port 2" },
+    { "/services", "services" },
 };
 
 const char *settings_page_path(int page)
@@ -195,6 +205,9 @@ int settings_page_of(const char *path, size_t len)
         }
     return -1;
 }
+
+static settings_svc_rows_fn svc_rows;
+void settings_set_svc_rows(settings_svc_rows_fn fn) { svc_rows = fn; }
 
 static char vpn_remote[48]; static int vpn_stored;
 void settings_set_vpn(const char *remote)
@@ -227,7 +240,8 @@ int settings_render_page(const cfg_t *c, int page, int saved, const char *error,
              : SETTINGS_CONSOLES;
     }
     page_top(&b, pages[own].title, "",
-             page == SETTINGS_CONSOLES ? PAGE_TAB_CONSOLES : page ? page : -1, NULL);
+             page == SETTINGS_CONSOLES ? PAGE_TAB_CONSOLES : page == SETTINGS_SERVICES ? PAGE_TAB_SERVICES
+             : page ? page : -1, NULL);
     if (error) {
         sb_puts(&b, "<p><b>Not saved:</b> ");
         sb_html(&b, error, SETTINGS_MSG_MAX, 0);
@@ -400,6 +414,40 @@ int settings_render_page(const cfg_t *c, int page, int saved, const char *error,
     row_close(&b, "");
     sb_puts(&b, "</table></section>\n");
     }
+    if (page == SETTINGS_SERVICES) {
+    sb_puts(&b, "<section><h2>Numbers to services</h2>\n<div class=\"x\"><table>\n"
+                "<tr><th>#</th><th>Number</th><th>Host</th><th>Port</th><th>Mode</th><th>Name</th></tr>\n");
+    n = c->n_services < 0 ? 0 : c->n_services > CFG_MAX_SERVICES ? CFG_MAX_SERVICES : c->n_services;
+    for (i = 0; i < CFG_MAX_SERVICES; i++) {
+        const cfg_service_t *e = &c->services[i];
+        int used = i < n, m;
+        sb_puts(&b, "<tr><td>"); sb_u64(&b, (uint64_t)i + 1u); sb_puts(&b, "</td><td>");
+        in_open(&b, "text", svc_col[S_NUM], i, 16, CFG_SVC_NUMBER_MAX);
+        sb_puts(&b, " value=\""); if (used) sb_html(&b, e->number, sizeof e->number, 0); sb_puts(&b, "\"></td><td>");
+        in_open(&b, "text", svc_col[S_HOST], i, 22, CFG_SVC_HOST_MAX);
+        sb_puts(&b, " value=\""); if (used) sb_html(&b, e->host, sizeof e->host, 0); sb_puts(&b, "\"></td><td>");
+        in_open(&b, "text", svc_col[S_PORT], i, 6, 5);
+        sb_puts(&b, " value=\""); if (used) sb_u64(&b, e->port); sb_puts(&b, "\"></td><td>");
+        sb_puts(&b, "<select name=\"smode"); sb_u64(&b, (uint64_t)i); sb_puts(&b, "\">");
+        for (m = 0; m < 2; m++) {
+            sb_puts(&b, "<option value=\""); sb_puts(&b, n_svcmode[m]);
+            sb_puts(&b, used && e->mode == m ? "\" selected>" : "\">"); sb_puts(&b, n_svcmode[m]); sb_puts(&b, "</option>");
+        }
+        sb_puts(&b, "</select></td><td>");
+        in_open(&b, "text", svc_col[S_NAME], i, 24, CFG_SVC_NAME_MAX);
+        sb_puts(&b, " value=\""); if (used) sb_html(&b, e->name, sizeof e->name, 0); sb_puts(&b, "\"></td></tr>\n");
+    }
+    sb_puts(&b, "</table></div>\n<table>\n");
+    in_select(&b, "Netstalgia's numbers", F_SVCNET, c->svc_netstalgia, n_v92, t_svcnet, 2);
+    sb_puts(&b, "</table>\n<p>A caller who dials one of these numbers, on either port and whatever its"
+                " service, is connected straight to the host: no PPP, the call carries what the modems"
+                " send. Raw passes the octets both ways as they are, for a game or program with a protocol"
+                " of its own. Telnet says <code>Calling</code> and the name, then speaks telnet, for a"
+                " board or text service. The call ends when the host hangs up or does not answer."
+                " A number is 3 to 15 digits as the caller dials it (an 11-digit number with a 1 in front also"
+                " answers without the 1); it may not be a port's own number or a BBS number. The host may be"
+                " on your network. A row without a number is not used.</p></section>\n");
+    }
     sb_puts(&b, "<p><input type=\"submit\" value=\"Save\"></p>\n</form>\n");
     if (page == SETTINGS_CONSOLES) {
         /* one profile for the box, whichever port's page this is; posted as
@@ -417,6 +465,23 @@ int settings_render_page(const cfg_t *c, int page, int saved, const char *error,
             sb_puts(&b, "<form method=\"post\" action=\"/dreamcast/vpn\" enctype=\"text/plain\">\n"
                         "<p><input type=\"hidden\" name=\"remove\" value=\"1\">"
                         "<input type=\"submit\" value=\"Remove the stored profile\"></p>\n</form>\n");
+    }
+    if (page == SETTINGS_SERVICES) {
+        static const char tail[] = "</table></div>\n<p>... and 00000 more.</p><p>The list is Netstalgia's,"
+            " signed by it; the box fetches it once a day while the switch above is on. Your own numbers"
+            " come first when a number is on both.</p></section>\n" PAGE_END;
+        sb_puts(&b, "<section><h2>Netstalgia's numbers</h2>\n");
+        if (!c->svc_netstalgia) sb_puts(&b, "<p>Off: the box does not answer these.</p>\n");
+        if (svc_rows && b.cap > b.len + sizeof tail + 128) {
+            int shown = 0, left = 0;
+            sb_puts(&b, "<div class=\"x\"><table>\n<tr><th>Number</th><th>Name</th><th>Mode</th><th>Host</th></tr>\n");
+            b.len += svc_rows(b.p + b.len, b.cap - b.len - sizeof tail, &shown, &left);
+            if (!shown) sb_puts(&b, "<tr><td colspan=\"4\">None yet.</td></tr>\n");
+            sb_puts(&b, "</table></div>\n");
+            if (left) { sb_puts(&b, "<p>... and "); sb_u64(&b, (uint64_t)left); sb_puts(&b, " more.</p>"); }
+        } else if (!svc_rows) sb_puts(&b, "<p>No list.</p>\n");
+        sb_puts(&b, "<p>The list is Netstalgia's, signed by it; the box fetches it once a day while the switch"
+                    " above is on. Your own numbers come first when a number is on both.</p></section>\n");
     }
     if (ON(SETTINGS_SYSTEM))
         sb_puts(&b, "<form method=\"post\" action=\"/restart\">\n"
@@ -436,6 +501,8 @@ typedef struct {
     uint64_t    seen;                       /* bit per fixed field (F_COUNT of them: at most 64) */
     unsigned    user_seen, pass_seen;       /* bit per row */
     cfg_user_t  row[CFG_MAX_USERS];         /* names and passwords as posted */
+    unsigned    svc_seen[S_COLS];           /* bit per service row */
+    char        svc[S_COLS][CFG_MAX_SERVICES][VAL_MAX + 1];   /* the service rows as posted */
     int         sw[F_COUNT];                /* the 0/1 fields: -1 = not posted */
     char        admin_pw[CFG_SECRET_MAX + 1];
     int         invalid;
@@ -519,12 +586,30 @@ static int decode(const char *p, size_t n, char out[VAL_MAX + 1], size_t *len)
     return 0;
 }
 
-/* F_ index of the field name p[0..n), F_USER + row, F_PASS + row, or -1 */
+/* the row of a name that is prefix and a row number 0..max-1, no leading zero; -1 if none */
+static int row_of(const char *p, size_t n, const char *prefix, int max)
+{
+    size_t pl = strlen(prefix);
+    int row;
+    if (n <= pl || n > pl + 2 || memcmp(p, prefix, pl) != 0) return -1;
+    if (p[pl] < '0' || p[pl] > '9') return -1;
+    row = p[pl] - '0';
+    if (n == pl + 2) {
+        if (row == 0 || p[pl + 1] < '0' || p[pl + 1] > '9') return -1;
+        row = row * 10 + (p[pl + 1] - '0');
+    }
+    return row < max ? row : -1;
+}
+
+/* F_ index of the field name p[0..n), F_USER + row, F_PASS + row,
+ * F_SVC + 100 * column + row, or -1 */
 static int field_of(const char *p, size_t n)
 {
-    int f;
+    int f, k;
     for (f = 0; f < F_COUNT; f++)
         if (strlen(fields[f].name) == n && memcmp(fields[f].name, p, n) == 0) return f;
+    for (k = 0; k < S_COLS; k++)
+        if ((f = row_of(p, n, svc_col[k], CFG_MAX_SERVICES)) >= 0) return F_SVC + 100 * k + f;
     if (n >= 5 && n <= 6 && (memcmp(p, "user", 4) == 0 || memcmp(p, "pass", 4) == 0)) {
         int row = p[4] - '0';
         if (row < 0 || row > 9) return -1;
@@ -595,6 +680,12 @@ static void set_field(form_t *f, int fi, const char *v, size_t len)
     cfg_t *c = f->out;
     char sv[41];
 
+    if (fi >= F_SVC) {
+        int k = (fi - F_SVC) / 100, row = (fi - F_SVC) % 100;
+        memcpy(f->svc[k][row], v, (len > VAL_MAX ? VAL_MAX : len) + 1);
+        if (len > VAL_MAX) fail(f, "[services] service %d: %s is too long", row + 1, svc_col[k]);
+        return;
+    }
     if (fi >= F_PASS) {
         if (len > CFG_SECRET_MAX)
             fail(f, "[ppp] user %d: password is longer than %d octets", fi - F_PASS + 1, CFG_SECRET_MAX);
@@ -633,6 +724,7 @@ static void set_field(form_t *f, int fi, const char *v, size_t len)
     case F_COMPRESSION: set_enum(f, fi, &c->compression, v, n_comp, 2, "on, off"); break;
     case F_ENCRYPTION: set_enum(f, fi, &c->encryption, v, n_comp, 2, "on, off"); break;
     case F_UPDATE_CHECK: set_enum(f, fi, &c->update_check, v, n_v92, 2, "on, off"); break;
+    case F_SVCNET:  set_enum(f, fi, &c->svc_netstalgia, v, n_v92, 2, "on, off"); break;
     case F_ADDRESS: set_addr(f, fi, &c->lan_addr, v, 0); break;
     case F_NETMASK: set_addr(f, fi, &c->lan_netmask, v, 0); break;
     case F_GATEWAY: set_addr(f, fi, &c->lan_gateway, v, 1); break;
@@ -691,6 +783,56 @@ static void build_users(form_t *f, const cfg_t *cur)
     c->n_users = n;
 }
 
+/* a value without the blanks at its ends, into out[VAL_MAX + 1] */
+static const char *trimmed(const char *v, char out[VAL_MAX + 1])
+{
+    size_t n;
+    while (*v == ' ') v++;
+    n = strlen(v);
+    while (n && v[n - 1] == ' ') n--;
+    memcpy(out, v, n); out[n] = '\0';
+    return out;
+}
+
+/* the service table of the candidate, when any service field was posted */
+static void build_services(form_t *f, const cfg_t *cur)
+{
+    cfg_t *c = f->out;
+    int ncur = cur->n_services < 0 ? 0 : cur->n_services > CFG_MAX_SERVICES ? CFG_MAX_SERVICES : cur->n_services;
+    int i, k, n = 0, any = 0;
+
+    for (k = 0; k < S_COLS; k++) any |= f->svc_seen[k] != 0;
+    if (!any) return;
+    memset(c->services, 0, sizeof c->services);
+    for (i = 0; i < CFG_MAX_SERVICES; i++) {
+        char col[S_COLS][VAL_MAX + 1], port[8], line[VAL_MAX * 4 + 8];
+        const cfg_service_t *e = i < ncur ? &cur->services[i] : NULL;
+        const char *why = "";
+        for (k = 0; k < S_COLS; k++) {
+            if ((f->svc_seen[k] >> i) & 1u) { trimmed(f->svc[k][i], col[k]); continue; }
+            col[k][0] = '\0';
+            if (!e) continue;
+            if (k == S_NUM) strcpy(col[k], e->number);
+            else if (k == S_HOST) strcpy(col[k], e->host);
+            else if (k == S_PORT) { snprintf(port, sizeof port, "%u", (unsigned)e->port); strcpy(col[k], port); }
+            else if (k == S_MODE) strcpy(col[k], n_svcmode[e->mode == CFG_SVC_TELNET]);
+            else strcpy(col[k], e->name);
+        }
+        if (!col[S_NUM][0]) {
+            if (col[S_HOST][0] || col[S_PORT][0] || col[S_NAME][0]) fail(f, "[services] service %d: a number is needed", i + 1);
+            continue;
+        }
+        if (!col[S_MODE][0]) strcpy(col[S_MODE], "raw");
+        snprintf(line, sizeof line, "%s %s:%s %s %s", col[S_NUM], col[S_HOST], col[S_PORT], col[S_MODE], col[S_NAME]);
+        if (strchr(col[S_NUM], ' ') || strchr(col[S_HOST], ' ') || strchr(col[S_PORT], ' ') || strchr(col[S_MODE], ' '))
+            fail(f, "[services] service %d: a blank inside the number, host, port or mode", i + 1);
+        else if (cfg_svc_parse(line, strlen(line), &c->services[n], &why))
+            fail(f, "[services] service %d: %s", i + 1, why);
+        else n++;
+    }
+    c->n_services = n;
+}
+
 int settings_apply(const cfg_t *cur, const char *body, size_t len, cfg_t *out,
                    char *err, size_t errsz)
 {
@@ -730,7 +872,11 @@ int settings_apply(const cfg_t *cur, const char *body, size_t len, cfg_t *out,
         if (!eq) goto bad;
         fi = field_of(pair, (size_t)(eq - pair));
         if (fi < 0) goto bad;
-        if (fi >= F_PASS) {
+        if (fi >= F_SVC) {
+            int k = (fi - F_SVC) / 100, row = (fi - F_SVC) % 100;
+            if ((f.svc_seen[k] >> row) & 1u) goto bad;
+            f.svc_seen[k] |= 1u << row;
+        } else if (fi >= F_PASS) {
             if ((f.pass_seen >> (fi - F_PASS)) & 1u) goto bad;
             f.pass_seen |= 1u << (fi - F_PASS);
         } else if (fi >= F_USER) {
@@ -761,6 +907,7 @@ int settings_apply(const cfg_t *cur, const char *body, size_t len, cfg_t *out,
         memcpy(out->admin_password, f.admin_pw, sizeof f.admin_pw);
 
     build_users(&f, cur);
+    build_services(&f, cur);
 
     if (f.port2) { cfg_t view = *out; cfg_for_port(&view, 1, out); }
     if (!f.invalid && cfg_validate(out, f.msg, sizeof f.msg) != CFG_OK) f.invalid = 1;

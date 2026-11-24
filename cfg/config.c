@@ -10,8 +10,8 @@
 
 #define MSG_MAX 128     /* message without the "file:line: " prefix */
 
-enum { S_NETWORK, S_PPP, S_MODEM, S_LINE, S_STATUS, S_LOG, S_MODEM2, S_LINE2, S_SYSTEM, S_COUNT };
-static const char *const sec_names[S_COUNT] = { "network", "ppp", "modem", "line", "status", "log", "modem2", "line2", "system" };
+enum { S_NETWORK, S_PPP, S_MODEM, S_LINE, S_STATUS, S_LOG, S_MODEM2, S_LINE2, S_SYSTEM, S_SERVICES, S_COUNT };
+static const char *const sec_names[S_COUNT] = { "network", "ppp", "modem", "line", "status", "log", "modem2", "line2", "system", "services" };
 
 enum {
     K_LAN, K_ADDRESS, K_NETMASK, K_GATEWAY, K_PPP_LOCAL, K_PPP_PEER, K_DNS1, K_DNS2, K_NAT,
@@ -21,6 +21,7 @@ enum {
     K_LISTEN, K_PORT, K_ADMINPW,
     K_LEVEL,
     K_PPP_PEER2, K_ARCHIVE, K_COMPRESSION, K_ENCRYPTION, K_ENCRYPTION2, K_UPDATE_CHECK,
+    K_SVC_NETSTALGIA, K_SVC,
     /* port 2: the keys of [modem] and [line] again, in the same order */
     K2_MODS, K2_MAXDOWN, K2_MAXUP, K2_TXLEVEL, K2_V42, K2_V42BIS, K2_V92, K2_X2, K2_K56, K2_RINGS, K2_LAW,
     K2_NUMBER, K2_TONES, K2_BUSY, K2_DROP, K2_SESSION, K2_IDLE, K2_SERVICE, K2_DCNOW, K2_DCLAN, K2_DCUPNP, K2_DCIWANGO, K2_SATMATCH,
@@ -41,6 +42,7 @@ static const struct { int sec; const char *name; } keydefs[K_COUNT] = {
     { S_STATUS, "listen" }, { S_STATUS, "port" }, { S_STATUS, "admin_password" },
     { S_LOG, "level" },
     { S_NETWORK, "ppp_peer2" }, { S_NETWORK, "archive" }, { S_PPP, "compression" }, { S_PPP, "encryption" }, { S_PPP, "encryption2" }, { S_SYSTEM, "update_check" },
+    { S_SERVICES, "netstalgia" }, { S_SERVICES, "service" },
     { S_MODEM2, "modulations" }, { S_MODEM2, "max_downstream" }, { S_MODEM2, "max_upstream" },
     { S_MODEM2, "tx_level" }, { S_MODEM2, "v42" }, { S_MODEM2, "v42bis" }, { S_MODEM2, "v92" }, { S_MODEM2, "x2" }, { S_MODEM2, "k56" },
     { S_MODEM2, "rings" }, { S_MODEM2, "law" },
@@ -139,6 +141,7 @@ void cfg_default(cfg_t *c)
     c->status_listen = CFG_LISTEN_LAN;
     c->status_port   = 80;
     c->log_level     = CFG_LOG_INFO;
+    c->svc_netstalgia = 1;
     port_take(&c->port2, c);            /* the same modem and line settings */
     c->port2.ppp_peer = 0x0A404003u;    /* 10.64.64.3 */
 }
@@ -207,6 +210,85 @@ static int number_ok(const char *z)
 {
     size_t n = strspn(z, "0123456789*#");
     return n >= 1 && n <= CFG_NUMBER_MAX && z[n] == '\0';
+}
+
+
+/* ---- the numbers of services ([services], srv/svc.h) --------------------- */
+
+static int all_digits(const char *z, size_t n)
+{
+    size_t i;
+    for (i = 0; i < n; i++) if (z[i] < '0' || z[i] > '9') return 0;
+    return 1;
+}
+
+int cfg_svc_parse(const char *v, size_t n, cfg_service_t *e, const char **why)
+{
+    static const char hostch[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-";
+    size_t i = 0, b, colon, k;
+    long port = 0;
+    memset(e, 0, sizeof *e);
+#define WORD() do { while (i < n && (v[i] == ' ' || v[i] == '\t')) i++; b = i; while (i < n && v[i] != ' ' && v[i] != '\t') i++; } while (0)
+    WORD();
+    if (i == b) { *why = "missing number"; return -1; }
+    if (i - b < CFG_SVC_NUMBER_MIN || i - b > CFG_SVC_NUMBER_MAX || !all_digits(v + b, i - b)) {
+        *why = "the number is not 3 to 15 digits"; return -1;
+    }
+    memcpy(e->number, v + b, i - b);
+    WORD();
+    if (i == b) { *why = "missing HOST:PORT"; return -1; }
+    for (colon = i; colon > b && v[colon - 1] != ':'; colon--) { }
+    if (colon == b) { *why = "missing :PORT after the host"; return -1; }
+    colon--;                                            /* at the ':' */
+    if (colon == b || colon - b > CFG_SVC_HOST_MAX || v[b] == '-') { *why = "the host is not 1 to 63 characters"; return -1; }
+    for (k = b; k < colon; k++) if (!memchr(hostch, v[k], sizeof hostch - 1)) { *why = "the host has a character other than letters, digits, '.' and '-'"; return -1; }
+    if (i - colon - 1 < 1 || i - colon - 1 > 5 || !all_digits(v + colon + 1, i - colon - 1) || v[colon + 1] == '0') {
+        *why = "the port is not a number from 1 to 65535"; return -1;
+    }
+    for (k = colon + 1; k < i; k++) port = port * 10 + (v[k] - '0');
+    if (port < 1 || port > 65535) { *why = "the port is not a number from 1 to 65535"; return -1; }
+    memcpy(e->host, v + b, colon - b);
+    e->port = (uint16_t)port;
+    WORD();
+    if (i - b == 3 && memcmp(v + b, "raw", 3) == 0) e->mode = CFG_SVC_RAW;
+    else if (i - b == 6 && memcmp(v + b, "telnet", 6) == 0) e->mode = CFG_SVC_TELNET;
+    else { *why = i == b ? "missing mode (raw or telnet)" : "the mode is not raw or telnet"; return -1; }
+#undef WORD
+    while (i < n && (v[i] == ' ' || v[i] == '\t')) i++;
+    while (n > i && (v[n - 1] == ' ' || v[n - 1] == '\t')) n--;
+    if (n == i) { *why = "missing name"; return -1; }
+    if (n - i > CFG_SVC_NAME_MAX) { *why = "the name is longer than 47 characters"; return -1; }
+    for (k = i; k < n; k++) if (v[k] < 0x20 || v[k] > 0x7e) { *why = "the name is not printable ASCII"; return -1; }
+    memcpy(e->name, v + i, n - i);
+    for (k = 0; e->name[k]; k++) if (e->name[k] == '\t') e->name[k] = ' ';
+    return 0;
+}
+
+int cfg_svc_number_match(const char *listed, const char *dialed)
+{
+    size_t a = strlen(listed), d = strlen(dialed);
+    if (a == d) return strcmp(listed, dialed) == 0;
+    if (a == 11 && d == 10 && listed[0] == '1') return strcmp(listed + 1, dialed) == 0;
+    if (d == 11 && a == 10 && dialed[0] == '1') return strcmp(listed, dialed + 1) == 0;
+    return 0;
+}
+
+int cfg_svc_number_begins(const char *listed, const char *dialed)
+{
+    size_t a = strlen(listed), d = strlen(dialed);
+    if (cfg_svc_number_match(listed, dialed)) return 2;
+    if (d < a && memcmp(listed, dialed, d) == 0) return 1;
+    if (a == 11 && listed[0] == '1' && d < 10 && memcmp(listed + 1, dialed, d) == 0) return 1;
+    if (a == 10 && d < 11 && d > 0 && dialed[0] == '1' && memcmp(listed, dialed + 1, d - 1) == 0) return 1;
+    return 0;
+}
+
+int cfg_svc_number_taken(const char *z)
+{
+    size_t n = strlen(z);
+    if (n == 11 && z[0] == '1') { z++; n--; }
+    if (n != 10 || !all_digits(z, n)) return 0;
+    return strcmp(z, "8002273425") == 0 || memcmp(z, "227", 3) == 0;
 }
 
 /* the [modem] and [line] fields of *c; o = 0, or K2_OFF when they hold
@@ -320,6 +402,38 @@ static int validate(const cfg_t *c, char *msg, int *k1, int *k2)
         for (j = 0; j < i; j++)
             if (strcmp(c->users[j].name, u->name) == 0)
                 return kerr(msg, K_USER, "name '%s' already defined", safe(u->name, sn));
+    }
+
+
+    /* services */
+    *k1 = K_SVC_NETSTALGIA; if (en(msg, K_SVC_NETSTALGIA, c->svc_netstalgia, 2)) return -1;
+    *k1 = K_SVC;
+    if (c->n_services < 0 || c->n_services > CFG_MAX_SERVICES)
+        return kerr(msg, K_SVC, "more than %d services", CFG_MAX_SERVICES);
+    for (i = 0; i < c->n_services; i++) {
+        const cfg_service_t *e = &c->services[i];
+        char t[CFG_SVC_NUMBER_MAX + CFG_SVC_HOST_MAX + CFG_SVC_NAME_MAX + 20];
+        cfg_service_t back; const char *why = "";
+        int tl;
+        if (!memchr(e->number, '\0', sizeof e->number) || !memchr(e->host, '\0', sizeof e->host)
+            || !memchr(e->name, '\0', sizeof e->name))
+            return kerr(msg, K_SVC, "a field is too long");
+        /* the same rules as the file: the entry written out reads back */
+        tl = snprintf(t, sizeof t, "%s %s:%u %s %s", e->number, e->host, (unsigned)e->port,
+                      e->mode == CFG_SVC_TELNET ? "telnet" : e->mode == CFG_SVC_RAW ? "raw" : "?", e->name);
+        if (tl < 0 || (size_t)tl >= sizeof t || cfg_svc_parse(t, (size_t)tl, &back, &why))
+            return kerr(msg, K_SVC, "%s: %s", safe(e->number, sn), why);
+        if (strcmp(back.name, e->name) != 0)
+            return kerr(msg, K_SVC, "%s: the name has blanks at an end or a tab", safe(e->number, sn));
+        if (cfg_svc_number_taken(e->number))
+            return kerr(msg, K_SVC, "%s is a number the box answers itself (the BBS numbers)", safe(e->number, sn));
+        for (j = 0; j < i; j++)
+            if (cfg_svc_number_match(c->services[j].number, e->number))
+                return kerr(msg, K_SVC, "%s is listed twice", safe(e->number, sn));
+        if (c->line_number[0] && cfg_svc_number_match(e->number, c->line_number))
+            return kerr(msg, K_SVC, "%s is the number of port 1", safe(e->number, sn));
+        if (c->port2.line_number[0] && cfg_svc_number_match(e->number, c->port2.line_number))
+            return kerr(msg, K_SVC, "%s is the number of port 2", safe(e->number, sn));
     }
 
     /* rules across fields */
@@ -563,6 +677,15 @@ static int set_user(cfg_t *c, pctx_t *px, int line, const char *v, char *msg)
     return 0;
 }
 
+static int set_service(cfg_t *c, const char *v, char *msg)
+{
+    cfg_service_t e; const char *why = "";
+    if (cfg_svc_parse(v, strlen(v), &e, &why)) return kerr(msg, K_SVC, "%s (service = NUMBER HOST:PORT raw|telnet NAME)", why);
+    if (c->n_services >= CFG_MAX_SERVICES) return kerr(msg, K_SVC, "more than %d services", CFG_MAX_SERVICES);
+    c->services[c->n_services++] = e;
+    return 0;
+}
+
 /* one word like a user secret; nothing at all is the empty password */
 static int set_password(cfg_t *c, const char *v, char *msg)
 {
@@ -678,6 +801,8 @@ static int set_value(cfg_t *c, pctx_t *px, int k, int mk, int line, const char *
     case K_ENCRYPTION: return set_enum(&c->encryption, mk, v, n_onoff, 2, l_onoff, msg);
     case K_ENCRYPTION2: return set_enum(&px->two.encryption, mk, v, n_onoff, 2, l_onoff, msg);
     case K_USER:      return set_user(c, px, line, v, msg);
+    case K_SVC:       return set_service(c, v, msg);
+    case K_SVC_NETSTALGIA: return set_enum(&c->svc_netstalgia, mk, v, n_onoff, 2, l_onoff, msg);
     case K_MODS:      return set_mods(c, mk, v, msg);
     case K_MAXDOWN:   return set_int(&c->max_down, mk, v, msg);
     case K_MAXUP:     return set_int(&c->max_up, mk, v, msg);
@@ -745,8 +870,8 @@ static int do_line(cfg_t *c, pctx_t *px, int *sec, int lineno, char *line, char 
         key = trim(l + 1, l + n - 1);
         *sec = pick(key, strlen(key), sec_names, S_COUNT);
         if (*sec < 0) {
-            snprintf(msg, MSG_MAX, "unknown section [%.40s] (sections: network ppp modem modem2"
-                     " line line2 status log system)", key);
+            snprintf(msg, MSG_MAX, "unknown section [%.32s] (sections: network ppp modem modem2"
+                     " line line2 status log system services)", key);
             return -1;
         }
         return 0;
@@ -766,7 +891,7 @@ static int do_line(cfg_t *c, pctx_t *px, int *sec, int lineno, char *line, char 
         snprintf(msg, MSG_MAX, "unknown key '%.40s' in [%s]", key, sec_names[*sec]);
         return -1;
     }
-    if (k != K_USER && px->line_of[k]) {
+    if (k != K_USER && k != K_SVC && px->line_of[k]) {
         snprintf(msg, MSG_MAX, "duplicate key '%s' (first set on line %d)", key, px->line_of[k]);
         return -1;
     }
@@ -1019,6 +1144,18 @@ int cfg_write(const cfg_t *c, int with_secrets, char *buf, size_t cap)
 
     sb_puts(&s, "\n[system]\n");
     w_str(&s, K_UPDATE_CHECK, nm(n_onoff, 2, c->update_check));
+
+    sb_puts(&s, "\n[services]\n");
+    w_str(&s, K_SVC_NETSTALGIA, nm(n_onoff, 2, c->svc_netstalgia));
+    n = c->n_services < 0 ? 0 : c->n_services > CFG_MAX_SERVICES ? CFG_MAX_SERVICES : c->n_services;
+    for (i = 0; i < n; i++) {
+        const cfg_service_t *e = &c->services[i];
+        w_key(&s, K_SVC);
+        sb_puts(&s, e->number);
+        sb_putc(&s, ' '); sb_puts(&s, e->host); sb_putc(&s, ':'); sb_u64(&s, e->port);
+        sb_puts(&s, e->mode == CFG_SVC_TELNET ? " telnet " : " raw ");
+        sb_puts(&s, e->name); sb_putc(&s, '\n');
+    }
     return sb_end(&s);
 }
 

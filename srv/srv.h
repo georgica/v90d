@@ -27,6 +27,11 @@ typedef void (*srv_ip_fn)(void *ctx, const uint8_t *pkt, size_t len);
 typedef void (*srv_raw_fn)(void *ctx, const uint8_t *oct, size_t n);
 /* srv_link(): a call to the bulletin board number (bbs.h), beside the SATURN_* kinds */
 #define SRV_LINK_BBS 16
+/* srv_link(): a call to a number of a service ([services], srv/svc.h) */
+#define SRV_LINK_SVC 17
+/* dialed against Netstalgia's list of services (the daemon's): 2 = it is
+ * one of its numbers, 1 = it begins one, 0 = neither (cfg_svc_number_begins) */
+typedef int (*srv_svc_fn)(const char *dialed);
 
 typedef struct {
     cfg_t      cfg;             /* in force for the current / next call */
@@ -56,6 +61,7 @@ typedef struct {
     int        link; uint32_t link_addr;   /* the call in progress there: SATURN_*, whom to call */
     char       link_game[3];                /* matchmaking: the two-character game id */
     console_t  console;         /* service = dreamcast: the packets on their way out */
+    srv_svc_fn svc_known;       /* Netstalgia's numbers of services, NULL = none */
     uint8_t    pkt[1500];
 } srv_t;
 
@@ -118,6 +124,16 @@ void    srv_hangup(srv_t *s);
  * SRV_LINK_BBS for it; srv_dialed() is what was dialled in the call in
  * progress (which of the numbers). */
 const char *srv_dialed(const srv_t *s);
+/* The numbers of services ([services] in config.h) answer like the bulletin
+ * board numbers, on a port of any service, unless the number is the port's
+ * own: the call carries octets (srv_set_raw, srv_send_raw, srv_hangup) and
+ * srv_link() reports SRV_LINK_SVC. The owner's numbers are in the
+ * configuration; Netstalgia's come from the daemon through known (NULL:
+ * none), asked only while [services] netstalgia = on. srv_svc_number()
+ * says whose a number is: SRV_SVC_OWN, SRV_SVC_LIST, or 0 for none. */
+enum { SRV_SVC_OWN = 1, SRV_SVC_LIST = 2 };
+void    srv_set_svc_lookup(srv_t *s, srv_svc_fn known);
+int     srv_svc_number(const srv_t *s, const char *dialed);
 /* 1 while a caller has IP up (packets can be sent to it) */
 int     srv_ip_up(const srv_t *s);
 

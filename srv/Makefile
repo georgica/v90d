@@ -21,7 +21,7 @@ PPP_SRC := $(addprefix ../ppp/,ppp_md5.c ppp_crypto.c ppp_hdlc.c ppp_fsm.c ppp_d
 CFG_SRC := ../cfg/config.c ../cfg/status.c
 # everything portable that goes into the daemon
 # (the modem and V.42: libv90modem)
-CORE_SRC := srv.c console.c dclist.c dcnow.c upnp.c saturn.c stun.c bbs.c bbssig.c ed25519.c telnet.c bbsdial.c line.c ../tel/tel.c ../dce/dce.c $(PPP_SRC) $(CFG_SRC)
+CORE_SRC := srv.c console.c dclist.c dcnow.c upnp.c saturn.c stun.c bbs.c svc.c bbssig.c ed25519.c telnet.c bbsdial.c line.c ../tel/tel.c ../dce/dce.c $(PPP_SRC) $(CFG_SRC)
 # test side: the calling DCE and PPP client; the simulated line and caller
 # are in the library's dev archive (linked last, after the sources)
 SIM_SRC := ../dce/test/caller.c ../ppp/test/pppc.c $(LIBV90M_DEV)
@@ -34,8 +34,8 @@ VERSION := $(shell cat ../fw/VERSION 2>/dev/null || echo dev)
 DAEMON_DEF := -DV90D_VERSION='"$(VERSION)"'
 NS_SRC := test/ns_call.c tun.c $(filter-out srv.c ../tel/tel.c ../dce/dce.c,$(CORE_SRC)) $(SIM_SRC)
 
-RIG_SRC := ../rig/pppcall.c $(filter-out srv.c ../tel/tel.c $(CFG_SRC),$(CORE_SRC)) $(SIM_SRC)
-RIG_SRC_ARM := ../rig/pppcall.c $(filter-out srv.c ../tel/tel.c $(CFG_SRC),$(CORE_SRC)) $(SIM_SRC_ARM)
+RIG_SRC := ../rig/pppcall.c $(filter-out srv.c svc.c ../tel/tel.c $(CFG_SRC),$(CORE_SRC)) $(SIM_SRC)
+RIG_SRC_ARM := ../rig/pppcall.c $(filter-out srv.c svc.c ../tel/tel.c $(CFG_SRC),$(CORE_SRC)) $(SIM_SRC_ARM)
 $(BUILD)/test_rig: test/test_rig.c $(RIG_SRC) $(HDRS) ../rig/pppcall.h
 	@mkdir -p $(BUILD)
 	$(CC) $(CFLAGS) $(INC) -I../rig -o $@ test/test_rig.c $(RIG_SRC) $(LDLIBS)

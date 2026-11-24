@@ -38,4 +38,22 @@ if run > "$d/out" 2>/dev/null; then echo "  FAIL nothing fetched, yet success"; 
 # nothing else is ever asked for
 check "only Netstalgia, ever" "$(sort -u "$d/asked")" "http://api.netstalgia.online/v1/bbs.txt"
 
+# the numbers of services: the same, with the place and the first line given
+svc='# serial 3
+v90d-svc 1
+svc 13855961775 nwnrevival.com:5000 raw AOL Neverwinter Nights
+# sig ed25519 00'
+printf '%s\n' "$svc" > "$d/site/services.txt"
+: > "$d/asked"
+runs() { PATH="$d/bin:$PATH" BBS_TMP="$d/tmp" sh "$fw/bbsfetch.sh" http://api.netstalgia.online/v1/services.txt 'v90d-svc 1'; }
+runs > "$d/out" || { echo "  FAIL the services list is there, yet failure"; fail=1; }
+check "the services list as it is" "$(cat "$d/out")" "$svc"
+check "asked for the services list" "$(cat "$d/asked")" "http://api.netstalgia.online/v1/services.txt"
+# a list of boards where the services list should be is not one
+cp "$d/site/services.txt" "$d/keep"; printf '%s\n' "$list" > "$d/site/services.txt"
+if runs > "$d/out" 2>/dev/null; then echo "  FAIL a list of boards taken for the services list"; fail=1; fi
+# and the image's daemon asks for exactly this (srv/bbslink.c)
+grep -q "sh /etc/bbsfetch.sh http://api.netstalgia.online/v1/services.txt 'v90d-svc 1'" "$fw/../srv/bbslink.c" \
+    || { echo "  FAIL srv/bbslink.c asks for something else"; fail=1; }
+
 [ $fail = 0 ] && echo "bbsfetch: all checks pass" || { echo "bbsfetch: FAILED"; exit 1; }

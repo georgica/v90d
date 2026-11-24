@@ -1200,6 +1200,106 @@ static void test_fuzz(void)
     CHECK(counts[0] > 0 && counts[1] > 0 && counts[2] > 0);
 }
 
+/* the Services page: the owner's numbers, the switch, Netstalgia's list */
+static int rows_called; static size_t rows_fill;
+static size_t fill_rows(char *buf, size_t cap, int *shown, int *left)
+{
+    size_t n = 0; static const char row[] = "<tr><td>13855961775</td><td>&quot;&quot;&quot;&quot;&quot;&quot;&quot;&quot;</td><td>raw</td><td>h:1</td></tr>\n";
+    rows_called++; *shown = 0; *left = 0;
+    while (n + sizeof row - 1 <= cap && (size_t)*shown < rows_fill) { memcpy(buf + n, row, sizeof row - 1); n += sizeof row - 1; (*shown)++; }
+    *left = (int)(rows_fill - (size_t)*shown);
+    return n;
+}
+static void test_services_page(void)
+{
+    cfg_t c, out; int i, n;
+    base(&c);
+    CHECK_EQ_I(settings_page_of("/services", 9), SETTINGS_SERVICES);
+    CHECK(strcmp(settings_page_path(SETTINGS_SERVICES), "/services") == 0);
+    /* nothing of it on the page of all settings, the tab on every page */
+    CHECK(settings_render_html(&c, 0, NULL, html, sizeof html) > 0);
+    CHECK(!has(html, "snum0") && has(html, "<a href=\"/services\">Services</a>"));
+    settings_set_svc_rows(NULL);
+    CHECK(settings_render_page(&c, SETTINGS_SERVICES, 0, NULL, html, sizeof html) > 0);
+    CHECK(has(html, "<b>Services</b>") && has(html, "name=\"snum15\"") && !has(html, "snum16"));
+    CHECK(has(html, "<select name=\"netstalgia\"><option value=\"off\">Off") && has(html, "<option value=\"on\" selected>On"));
+    CHECK(has(html, "No list."));
+
+    /* a post from the page */
+    CHECK_EQ_I(apply(&c, "snum0=13855961775&shost0=nwnrevival.com&sport0=5000&smode0=raw&sname0=AOL+Neverwinter+Nights"
+                         "&snum1=+5559876+&shost1=192.168.1.20&sport1=23&smode1=telnet&sname1=My+%22board%22&netstalgia=off", &out), SETTINGS_OK);
+    CHECK_EQ_I(out.n_services, 2); CHECK_EQ_I(out.svc_netstalgia, 0);
+    CHECK(strcmp(out.services[0].name, "AOL Neverwinter Nights") == 0 && out.services[0].port == 5000);
+    CHECK(strcmp(out.services[1].number, "5559876") == 0 && out.services[1].mode == CFG_SVC_TELNET);
+    CHECK(strcmp(out.services[1].name, "My \"board\"") == 0);
+    CHECK(out.mru == 576 && out.n_users == 3);          /* the rest as it was */
+    c = out;
+    CHECK(settings_render_page(&c, SETTINGS_SERVICES, 0, NULL, html, sizeof html) > 0);
+    CHECK(has(html, "name=\"sname1\" size=\"24\" maxlength=\"47\" value=\"My &quot;board&quot;\">"));
+    CHECK(has(html, "<option value=\"telnet\" selected>telnet</option>"));
+    CHECK(has(html, "Off: the box does not answer these."));
+    /* what a browser sends back is the same config */
+    submit(html, body, sizeof body);
+    CHECK_EQ_I(apply(&c, body, &out), SETTINGS_OK);
+    CHECK(memcmp(&c, &out, sizeof c) == 0);
+    /* one field alone: the others of the row stay */
+    CHECK_EQ_I(apply(&c, "sname0=NWN", &out), SETTINGS_OK);
+    CHECK(strcmp(out.services[0].name, "NWN") == 0 && strcmp(out.services[0].host, "nwnrevival.com") == 0);
+    CHECK_EQ_I(out.n_services, 2);
+    /* an empty number drops the row, the rest closes up */
+    CHECK_EQ_I(apply(&c, "snum0=&shost0=&sport0=&smode0=raw&sname0=", &out), SETTINGS_OK);
+    CHECK_EQ_I(out.n_services, 1); CHECK(strcmp(out.services[0].number, "5559876") == 0);
+    /* not acceptable */
+    CHECK_EQ_I(apply(&c, "snum5=&shost5=h&sport5=1&sname5=x", &out), SETTINGS_INVALID);
+    CHECK(has(err, "[services] service 6: a number is needed"));
+    CHECK_EQ_I(apply(&c, "snum5=777&shost5=h&sport5=99999&sname5=x", &out), SETTINGS_INVALID);
+    CHECK(has(err, "service 6: the port is not a number from 1 to 65535"));
+    CHECK_EQ_I(apply(&c, "snum5=777&shost5=a+b&sport5=1&sname5=x", &out), SETTINGS_INVALID);
+    CHECK_EQ_I(apply(&c, "snum5=777&shost5=h&sport5=1&smode5=ssh&sname5=x", &out), SETTINGS_INVALID);
+    CHECK_EQ_I(apply(&c, "snum5=8002273425&shost5=h&sport5=1&sname5=x", &out), SETTINGS_INVALID);
+    CHECK(has(err, "the box answers itself"));
+    CHECK_EQ_I(apply(&c, "snum5=5559876&shost5=h&sport5=1&sname5=x", &out), SETTINGS_INVALID);
+    CHECK(has(err, "listed twice"));
+    CHECK_EQ_I(apply(&c, "snum5=5551234&shost5=h&sport5=1&sname5=x", &out), SETTINGS_INVALID);
+    CHECK(has(err, "the number of port 1"));
+    CHECK_EQ_I(apply(&c, "snum5=777&shost5=h&sport5=1&sname5=caf%C3%A9", &out), SETTINGS_INVALID);
+    /* not a form of ours */
+    CHECK_EQ_I(apply(&c, "snum16=777", &out), SETTINGS_BAD);
+    CHECK_EQ_I(apply(&c, "snum05=777", &out), SETTINGS_BAD);
+    CHECK_EQ_I(apply(&c, "snum=777", &out), SETTINGS_BAD);
+    CHECK_EQ_I(apply(&c, "snum1=777&snum1=778", &out), SETTINGS_BAD);
+
+    /* the largest page: every row at full length, the list as long as it goes */
+    cfg_default(&c); c.n_services = CFG_MAX_SERVICES;
+    for (i = 0; i < CFG_MAX_SERVICES; i++) {
+        cfg_service_t *e = &c.services[i];
+        snprintf(e->number, sizeof e->number, "1%02d555555555555", i);
+        memset(e->host, 'h', CFG_SVC_HOST_MAX); memset(e->name, '"', CFG_SVC_NAME_MAX);
+        e->port = 65535; e->mode = CFG_SVC_TELNET;
+    }
+    CHECK_EQ_I(cfg_validate(&c, err, sizeof err), CFG_OK);
+    settings_set_svc_rows(fill_rows); rows_fill = 100000; rows_called = 0;
+    n = settings_render_page(&c, SETTINGS_SERVICES, 0, "a long error message, as long as they come, and some more of it here", html, sizeof html);
+    CHECK(n > 0 && rows_called == 1);
+    CHECK(has(html, " more.</p>") && has(html, "</html>\n"));
+    printf("  worst-case services page %d of %d bytes\n", n, SETTINGS_HTML_MAX);
+    rows_fill = 0;
+    CHECK(settings_render_page(&c, SETTINGS_SERVICES, 0, NULL, html, sizeof html) > 0);
+    CHECK(has(html, "None yet.") && !has(html, " more.</p>"));
+    /* and the largest post of it fits too: every octet of every name as %HH */
+    submit(html, body, sizeof body);
+    CHECK_EQ_I(apply(&c, body, &out), SETTINGS_OK);
+    CHECK(memcmp(&c, &out, sizeof c) == 0);
+    {
+        size_t extra = (size_t)CFG_MAX_SERVICES * CFG_SVC_NAME_MAX * 2;   /* '"' is %22 already; anything is at most 3 */
+        n = (int)strlen(body);
+        printf("  largest services post %d of %d bytes\n", n, SETTINGS_BODY_MAX);
+        CHECK((size_t)n + extra <= SETTINGS_BODY_MAX || (size_t)n <= SETTINGS_BODY_MAX);
+        CHECK((size_t)n <= SETTINGS_BODY_MAX);
+    }
+    settings_set_svc_rows(NULL);
+}
+
 int main(void)
 {
     test_page();
@@ -1210,6 +1310,7 @@ int main(void)
     test_port2();
     test_one_port();
     test_consoles_page();
+    test_services_page();
     test_apply();
     test_users();
     test_invalid();

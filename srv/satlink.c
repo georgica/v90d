@@ -249,7 +249,7 @@ void satlink_poll(uint32_t now_ms)
         struct sat_link *l = &sl[k]; uint32_t addr = 0; int on = 0, kind = srv_link(&S[k], &addr, &on);
         struct sockaddr_in sa; socklen_t sl_n; ssize_t r; int i; char a[16];
 
-        if (kind == SATURN_NONE || kind == SRV_LINK_BBS) {      /* a bulletin board call is bbslink.c's */ if (l->st != SL_IDLE) { sl_close(l); l->st = SL_IDLE; } continue; }
+        if (kind == SATURN_NONE || kind == SRV_LINK_BBS || kind == SRV_LINK_SVC) {      /* a bulletin board or service call is bbslink.c's */ if (l->st != SL_IDLE) { sl_close(l); l->st = SL_IDLE; } continue; }
         switch (l->st) {
         case SL_IDLE:
             if (!on) break;                         /* the modem first */

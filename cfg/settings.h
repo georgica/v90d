@@ -31,6 +31,16 @@
  *   compression       on | off (PPP compression, [ppp])
  *   admin_password    new password of this page, empty = keep
  *   admin_clear       1 = remove the password of this page
+ *   netstalgia        on | off: answer the numbers of Netstalgia's list of
+ *                     services too ([services])
+ *   snum0 .. snum15   the owner's service numbers, empty = row not used
+ *   shost0 .. shost15, sport0 .. sport15, smode0 .. smode15 (raw | telnet),
+ *   sname0 .. sname15 the rest of each: see [services] in config.h
+ *
+ * The service rows: when any s field is posted, the table is made anew
+ * from the rows, a row that is not posted keeping what it had and a row
+ * with an empty number dropped (the others closed up); a row with a host
+ * or a name but no number is an error.
  *
  * A field that is absent keeps the current value, so a client may post
  * just `busy_chance=50`. (The browser always sends them all, except
@@ -92,7 +102,12 @@ enum { SETTINGS_ALL, SETTINGS_LINE, SETTINGS_MODEM, SETTINGS_USERS, SETTINGS_NET
         * dreamcast service, per port */
        /* the Consoles tab (/dreamcast, /dreamcast2): the dreamcast switches
         * and the saturn matchmaking switch, per port */
-       SETTINGS_CONSOLES, SETTINGS_CONSOLES2, SETTINGS_PAGES };
+       SETTINGS_CONSOLES, SETTINGS_CONSOLES2,
+       /* the Services tab (/services): the owner's numbers that connect
+        * straight to a service, the switch for Netstalgia's, and
+        * Netstalgia's list as it is (settings_set_svc_rows). Not on the
+        * page of all settings. */
+       SETTINGS_SERVICES, SETTINGS_PAGES };
 int settings_render_page(const cfg_t *c, int page, int saved, const char *error, char *buf, size_t cap);
 /* What the Dreamcast page says about the VPN profile (vpn.h) that the
  * owner keeps: "host port" of its server, or NULL when none is stored. The
@@ -103,6 +118,12 @@ void settings_set_vpn(const char *remote);
  * no Port 2 switch, the port-2 paths (/line2, /modem2, /dreamcast2) do not
  * resolve, and a port=2 post is refused. The default is two. */
 void settings_set_two_ports(int two);
+/* Netstalgia's numbers for the Services page: fn writes them as <tr> rows
+ * of four cells (number, name, mode, host:port) into buf[0..cap) and
+ * returns how many octets, *left the number of entries that did not fit
+ * or were not shown. NULL (the default): no list. */
+typedef size_t (*settings_svc_rows_fn)(char *buf, size_t cap, int *shown, int *left);
+void settings_set_svc_rows(settings_svc_rows_fn fn);
 const char *settings_page_path(int page);
 /* the page whose path is path[0..len), -1 if it is none */
 int settings_page_of(const char *path, size_t len);
