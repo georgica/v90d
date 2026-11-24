@@ -189,6 +189,24 @@ static void chap_answer(const frame_t *ch, const char *user, const char *secret)
 /* an MS-CHAPv2 Response to the server's Challenge ch (RFC 2759): a fixed
  * peer challenge, then the NT-Response over the server's authenticator
  * challenge, then the user name */
+/* as Windows answers when it puts its logon domain in front of the name:
+ * the name sent is DOMAIN\user, the hash is over the user alone */
+static void mschap2_answer_as(const frame_t *ch, const char *sent, const char *user, const char *secret)
+{
+    static const uint8_t peer[16] = { 0x10,0x32,0x54,0x76,0x98,0xba,0xdc,0xfe,
+                                      0x01,0x23,0x45,0x67,0x89,0xab,0xcd,0xef };
+    uint8_t rsp[1 + 49 + 64];
+    size_t sl = strlen(sent);
+    rsp[0] = 49;
+    memcpy(rsp + 1, peer, 16);
+    memset(rsp + 1 + 16, 0, 8);
+    ppp_mschap2_nt_response(ch->d + 5, peer, (const uint8_t *)user, strlen(user),
+                            (const uint8_t *)secret, strlen(secret), rsp + 1 + 24);
+    rsp[1 + 48] = 0;
+    memcpy(rsp + 50, sent, sl);
+    push_cp(PPP_PROTO_CHAP, 2, ch->d[1], rsp, 50 + sl);
+}
+
 static void mschap2_answer(const frame_t *ch, const char *user, const char *secret)
 {
     static const uint8_t peer[16] = { 0x10,0x32,0x54,0x76,0x98,0xba,0xdc,0xfe,
@@ -653,6 +671,18 @@ static void test_mschap2(void)
     mschap2_answer(ch, "alice", "wonderland");
     pull();
     CHECK(find(PPP_PROTO_CHAP, 3) != NULL);
+
+    /* Windows with its logon domain in front: WORKGROUP\alice is alice */
+    ppp_lower_down(&S);
+    ppp_lower_up(&S);
+    lcp_up(peer_lcp, sizeof peer_lcp);
+    ch = find(PPP_PROTO_CHAP, 1);
+    CHECK(ch != NULL);
+    if (!ch) return;
+    mschap2_answer_as(ch, "WORKGROUP\\alice", "alice", "wonderland");
+    pull();
+    CHECK(find(PPP_PROTO_CHAP, 3) != NULL);
+    CHECK_EQ_I(status()->phase, PPP_PHASE_NETWORK);
 
     /* wrong secret: Failure "E=...", link terminated */
     ppp_lower_down(&S);

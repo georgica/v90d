@@ -25,6 +25,9 @@
 
 typedef void (*srv_ip_fn)(void *ctx, const uint8_t *pkt, size_t len);
 typedef void (*srv_raw_fn)(void *ctx, const uint8_t *oct, size_t n);
+/* a PPP caller is hung up when its network is not up this long after the
+ * answer (the modem's training, LCP, the login and IPCP all fit well) */
+#define SRV_LOGIN_MAX_S 90
 /* srv_link(): a call to the bulletin board number (bbs.h), beside the SATURN_* kinds */
 #define SRV_LINK_BBS 16
 /* srv_link(): a call to a number of a service ([services], srv/svc.h) */
@@ -59,6 +62,7 @@ typedef struct {
     uint32_t   clock;           /* UTC seconds, 0 = not set */
     uint32_t   call_start;      /* clock when the line was answered */
     uint32_t   call_s;          /* seconds since the answer */
+    int        ppp_up_once;     /* this call's PPP has had its network up (the login deadline is over) */
     dce_status_t ds;            /* scratch */
     srv_raw_fn raw_out;         /* service = saturn: octets from the caller's modem */
     int        link; uint32_t link_addr;   /* the call in progress there: SATURN_*, whom to call */
@@ -66,6 +70,7 @@ typedef struct {
     console_t  console;         /* service = dreamcast: the packets on their way out */
     srv_svc_fn svc_known;       /* Netstalgia's numbers of services, NULL = none */
     int        protoweb_ok;     /* the box has the archive gateway: SRV_PROTOWEB answers */
+    uint8_t    entropy[32]; size_t entropy_n;   /* srv_set_entropy: for the next call's PPP */
     int        protoweb;        /* the call in progress came in on SRV_PROTOWEB */
     uint8_t    pkt[1500];
 } srv_t;
@@ -146,6 +151,10 @@ int     srv_svc_number(const srv_t *s, const char *dialed);
  * alone). Only when the daemon says it has the archive gateway (on = 1).
  * srv_protoweb() is 1 while such a call is in progress. */
 void    srv_set_protoweb(srv_t *s, int on);
+/* Unpredictable octets (the daemon reads them from /dev/urandom) for the
+ * next call's PPP: its magic numbers and challenges. Give fresh ones after
+ * each call; the server keeps at most 32. */
+void    srv_set_entropy(srv_t *s, const uint8_t *b, size_t n);
 int     srv_protoweb(const srv_t *s);
 /* 1 while a caller has IP up (packets can be sent to it) */
 int     srv_ip_up(const srv_t *s);

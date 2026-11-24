@@ -72,6 +72,11 @@ int srv_svc_number(const srv_t *s, const char *dialed)
 }
 
 void srv_set_protoweb(srv_t *s, int on) { s->protoweb_ok = on != 0; }
+void srv_set_entropy(srv_t *s, const uint8_t *b, size_t n)
+{
+    if (n > sizeof s->entropy) n = sizeof s->entropy;
+    memcpy(s->entropy, b, n); s->entropy_n = n;
+}
 int  srv_protoweb(const srv_t *s) { return s->in_call && s->protoweb; }
 /* the PROTOWEB number answers on this port */
 static int protoweb_here(const srv_t *s)
@@ -231,7 +236,7 @@ static void call_start(srv_t *s)
     const cfg_t *c = &s->cfg;
     int bbs, svc, enc; char board[BBS_NUMBER_LEN + 1];
     s->link = SATURN_NONE;
-    s->call_start = s->clock; s->call_s = 0;
+    s->call_start = s->clock; s->call_s = 0; s->ppp_up_once = 0;
     /* a terminal program for a bulletin board (bbs.h), unless the number is the port's own */
     bbs = strcmp(s->tel.dialed, c->line_number) != 0 && bbs_number(s->tel.dialed, board) != BBS_NUM_NONE;
     /* a number that connects straight to a service ([services]), the same way */
@@ -336,6 +341,7 @@ static void call_start(srv_t *s)
     /* a different seed for every call */
     s->seed = s->seed * 1664525u + 1013904223u;
     d.ppp.seed = s->seed ^ s->clock;
+    if (s->entropy_n) { d.ppp.entropy = s->entropy; d.ppp.entropy_n = s->entropy_n; }
     d.ppp.ctx = s; d.ppp.ip_rx = ip_from_caller;
     if (for_link(c) || bbs) d.raw_rx = raw_from_caller;
     d.raw_ec = bbs;
@@ -501,7 +507,15 @@ uint8_t srv_tick_lin(srv_t *s, int offhook, int16_t lin)
         s->rx_pow_last = s->rx_pow / 8000; s->rx_pow = 0;
         s->status.uptime_s++;
         if (s->clock) s->clock++;
-        if (s->in_call) { s->call_s++; dce_get_status(&s->dce, &s->ds); }
+        if (s->in_call) {
+            s->call_s++; dce_get_status(&s->dce, &s->ds);
+            /* A PPP caller has SRV_LOGIN_MAX_S from the answer to be logged
+             * in and have its network up, once: renegotiating LCP or
+             * answering every request with a Nak does not hold a port. */
+            if (s->ds.ppp_phase == PPP_PHASE_NETWORK) s->ppp_up_once = 1;
+            if (s->link == SATURN_NONE && !s->originate && !s->ppp_up_once && s->call_s >= SRV_LOGIN_MAX_S)
+                srv_hangup(s);
+        }
         refresh(s);
     }
     return out;

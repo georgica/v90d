@@ -38,6 +38,8 @@ typedef struct {
     uint8_t  discard;       /* stateful receive: lost step, dropping until a
                                FLUSHED or flag packet (RFC 3078 8.2) */
     ppp_rc4_t rc4;          /* stateful: the running RC4 stream */
+    uint16_t credit;        /* stateless receive: key changes that may be spent catching up
+                               over lost packets (PPP_MPPE_CREDIT_*) */
 } ppp_mppe_dir_t;
 
 typedef struct {
@@ -60,6 +62,15 @@ typedef struct {
  * the Linux kernel. A count at or behind the last one, or further ahead, is
  * a replay or a late packet and is dropped. */
 #define PPP_MPPE_WINDOW 2047u
+/* A key change costs two SHA-1 blocks and an RC4 key set-up: a peer that
+ * jumps the count ahead in every packet would make the loop do thousands
+ * for each. Catching up over lost packets is paid for out of a credit that
+ * every packet adds PPP_MPPE_CREDIT_STEP to, up to PPP_MPPE_CREDIT_MAX: a
+ * burst of real loss after ordinary traffic is followed; a stream of jumps
+ * costs a few key changes a packet, and a jump the credit does not cover is
+ * dropped (keys kept). */
+#define PPP_MPPE_CREDIT_STEP 8u
+#define PPP_MPPE_CREDIT_MAX  512u
 
 /* Set both directions up from the server's master start keys (send/recv),
  * key length 8 or 16, with the short-key forcing (PPP_MPPE_FORCE_*). */

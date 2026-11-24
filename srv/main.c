@@ -468,6 +468,17 @@ static void log_last_call(int port)
     }
 }
 
+/* fresh randomness for port p's next call (its PPP challenges and magic
+ * numbers): /dev/urandom does not block once the system has started */
+static void feed_entropy(int p)
+{
+    static int fd = -2; uint8_t b[32]; ssize_t r;
+    if (fd == -2) fd = open("/dev/urandom", O_RDONLY | O_CLOEXEC | O_NONBLOCK);
+    if (fd < 0) return;
+    r = read(fd, b, sizeof b);
+    if (r > 0) srv_set_entropy(&S[p], b, (size_t)r);
+}
+
 /* the octets of a call without PPP: a bulletin board call, or the port's saturn service */
 static void raw_from_modem(void *ctx, const uint8_t *oct, size_t n)
 {
@@ -589,6 +600,7 @@ int main(int argc, char **argv)
         srv_set_raw(&S[p], raw_from_modem);
         srv_set_svc_lookup(&S[p], bbslink_svc_known);
         srv_set_protoweb(&S[p], netsvc_has_arch());
+        feed_entropy(p);
         srv_set_echo_delay(&S[p], echo_delay);
         srv_set_max_tx_code(&S[p], max_tx_code);
         srv_set_originate(&S[p], originate);
@@ -685,7 +697,7 @@ int main(int argc, char **argv)
                     pending_n[p] = 0;               /* sent, or nobody to send it to */
                 }
             }
-            if (S[p].status.calls_total != calls_seen[p]) { calls_seen[p] = S[p].status.calls_total; log_last_call(p); }
+            if (S[p].status.calls_total != calls_seen[p]) { calls_seen[p] = S[p].status.calls_total; log_last_call(p); feed_entropy(p); }
             /* the law of the settings in force (the port's own, taken on hook):
              * no copy of the whole configuration every block */
             if (S[p].tel.state == TEL_ONHOOK && line_law[p] != (S[p].cfg.law == CFG_LAW_ALAW)) {

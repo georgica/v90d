@@ -122,11 +122,32 @@ static void test_window(void)
     pair(&a, &b, 16, PPP_MPPE_FORCE_NONE);
     n = ppp_mppe_encrypt(&a, msg, 8, ct, sizeof ct);
     CHECK_EQ_I(ppp_mppe_decrypt(&b, ct, n, pt, sizeof pt), 8);
-    for (i = 0; i < PPP_MPPE_WINDOW - 1; i++)                   /* lost */
+    for (i = 0; i < PPP_MPPE_CREDIT_MAX; i++)                   /* lost: as many as the credit covers */
         (void)ppp_mppe_encrypt(&a, msg, 8, ct, sizeof ct);
-    n = ppp_mppe_encrypt(&a, msg, 8, ct, sizeof ct);             /* PPP_MPPE_WINDOW ahead */
+    n = ppp_mppe_encrypt(&a, msg, 8, ct, sizeof ct);
     CHECK_EQ_I(ppp_mppe_decrypt(&b, ct, n, pt, sizeof pt), 8);
     CHECK(eq(pt, msg, 8));
+    /* the credit is spent: a peer that jumps ahead in every packet is
+     * followed a few key changes a packet, and not further */
+    {
+        int dropped = 0, taken = 0;
+        for (i = 0; i < 40; i++) {
+            unsigned j;
+            for (j = 0; j < 20; j++) (void)ppp_mppe_encrypt(&a, msg, 8, ct, sizeof ct);   /* 20 lost each time */
+            n = ppp_mppe_encrypt(&a, msg, 8, ct, sizeof ct);
+            if (ppp_mppe_decrypt(&b, ct, n, pt, sizeof pt) == 8) taken++; else dropped++;
+        }
+        CHECK(dropped > 30 && taken < 10);
+    }
+    /* ordinary traffic earns it back: a burst of loss is followed again */
+    pair(&a, &b, 16, PPP_MPPE_FORCE_NONE);
+    for (i = 0; i < 100; i++) {
+        n = ppp_mppe_encrypt(&a, msg, 8, ct, sizeof ct);
+        CHECK_EQ_I(ppp_mppe_decrypt(&b, ct, n, pt, sizeof pt), 8);
+    }
+    for (i = 0; i < 300; i++) (void)ppp_mppe_encrypt(&a, msg, 8, ct, sizeof ct);
+    n = ppp_mppe_encrypt(&a, msg, 8, ct, sizeof ct);
+    CHECK_EQ_I(ppp_mppe_decrypt(&b, ct, n, pt, sizeof pt), 8);
 
     pair(&a, &b, 16, PPP_MPPE_FORCE_NONE);
     n = ppp_mppe_encrypt(&a, msg, 8, ct, sizeof ct);

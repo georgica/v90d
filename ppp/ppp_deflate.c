@@ -558,6 +558,7 @@ void ppp_deflate_dec_init(ppp_deflate_dec_t *d)
 {
     d->wpos = 0;
     d->whave = 0;
+    d->fixed = 0;
 }
 
 void ppp_deflate_dec_add(ppp_deflate_dec_t *d, const uint8_t *a, size_t an,
@@ -708,11 +709,14 @@ static int read_dynamic(ppp_deflate_dec_t *d, bitr_t *r)
     return 0;
 }
 
+#define DEFLATE_BLOCKS_MAX 16       /* compressed blocks in one packet (stored ones are cheap and not counted) */
+
 int ppp_deflate_decompress(ppp_deflate_dec_t *d, const uint8_t *in, size_t n,
                            uint8_t *out, size_t max)
 {
     bitr_t r;
     size_t o = 0;
+    unsigned blocks = 0;
 
     if (n == 0)
         return -1;
@@ -747,17 +751,28 @@ int ppp_deflate_decompress(ppp_deflate_dec_t *d, const uint8_t *in, size_t n,
             o += len;
             continue;
         }
-        if (type == BT_FIXED) {
-            uint8_t lens[288];
-            int i;
-
-            for (i = 0; i < 288; i++)
-                lens[i] = (uint8_t)(i < 144 ? 8 : i < 256 ? 9 : i < 280 ? 7 : 8);
-            code_build(&d->lc, d->lsym, lens, 288);
-            memset(lens, 5, 32);
-            code_build(&d->dc, d->dsym, lens, 32);
-        } else if (read_dynamic(d, &r) != 0) {
+        /* A sender gets a whole block for 10 bits: a packet of empty blocks
+         * would have us build codes hundreds of times in one go. A real
+         * RFC 1979 sender puts one block and the empty stored one in a
+         * packet; a few more are let through. */
+        if (++blocks > DEFLATE_BLOCKS_MAX)
             return -1;
+        if (type == BT_FIXED) {
+            if (!d->fixed) {                    /* built once, while no dynamic block takes their place */
+                uint8_t lens[288];
+                int i;
+
+                for (i = 0; i < 288; i++)
+                    lens[i] = (uint8_t)(i < 144 ? 8 : i < 256 ? 9 : i < 280 ? 7 : 8);
+                code_build(&d->lc, d->lsym, lens, 288);
+                memset(lens, 5, 32);
+                code_build(&d->dc, d->dsym, lens, 32);
+                d->fixed = 1;
+            }
+        } else {
+            d->fixed = 0;
+            if (read_dynamic(d, &r) != 0)
+                return -1;
         }
         for (;;) {
             int s = code_read(&r, &d->lc, d->lsym);

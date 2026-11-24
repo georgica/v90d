@@ -118,6 +118,7 @@ typedef struct {
     /* the codes of the block being read, symbols in code order */
     ppp_deflate_code_t lc, dc;
     uint16_t lsym[288], dsym[32];
+    int fixed;              /* lc and dc hold the fixed codes (3.2.6): not built again */
 } ppp_deflate_dec_t;
 
 void ppp_deflate_dec_init(ppp_deflate_dec_t *d);

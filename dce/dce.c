@@ -174,7 +174,11 @@ static void pump_up(dce_t *d)
 {
     uint8_t buf[256];
     size_t n;
-    while ((n = v90m_ec_read(d->v42, buf, sizeof buf)) > 0) {
+    int k;
+    /* at most 1 KiB a millisecond (a line with V.42bis brings some 30): a
+     * backlog, after a retransmission or an expanding burst, is spread over
+     * the next milliseconds instead of all going through PPP in one */
+    for (k = 0; k < 4 && (n = v90m_ec_read(d->v42, buf, sizeof buf)) > 0; k++) {
         d->octets_up += n;
         if (d->cfg.raw_rx) d->cfg.raw_rx(d->cfg.ppp.ctx, buf, n);
         else ppp_input_bytes(&d->ppp, buf, n);
