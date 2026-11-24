@@ -30,6 +30,8 @@ int main(void)
     info("d Spanish board.");
     info("sw Synchronet");                                     /* after a d line: the description moves */
     info("d Second line.");
+    info("d");
+    info("d A paragraph of its own.");
     info("board unknown");
     info("loc Nowhere");
     info("board alcatraz");
@@ -37,7 +39,8 @@ int main(void)
     CHECK_EQ_I(D.with_info, 2);
     CHECK(!strcmp(tdir_get(&D, 1, TD_LOC), "Madrid, Spain"));
     CHECK(!strcmp(tdir_get(&D, 1, TD_SW), "Synchronet"));
-    CHECK(!strcmp(tdir_get(&D, 1, TD_DESC), "Spanish board.\nSecond line."));
+    CHECK(!strcmp(tdir_get(&D, 1, TD_DESC) + 27, "\n\nA paragraph of its own."));
+    CHECK(!strncmp(tdir_get(&D, 1, TD_DESC), "Spanish board. Second line.", 27));   /* one paragraph, as wrapped for the list */
     CHECK(!strcmp(tdir_get(&D, 0, TD_NAME), "Alcatraz Prison BBS") && !strcmp(tdir_get(&D, 0, TD_NUMBER), "2272522872"));
     CHECK(!strcmp(tdir_get(&D, 2, TD_LOC), "") && !strcmp(tdir_get(&D, 9, TD_NAME), ""));
 

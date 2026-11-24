@@ -74,8 +74,13 @@ static void desc_add(gd_entry *e, const char *s, size_t n)
         if (have + 1 < sizeof e->desc) { e->desc[have] = '\n'; e->desc[have + 1] = '\0'; }
         return;
     }
-    /* after text a line break; after a blank line (a '\n' already) a second one */
-    if (have && have + 1 < sizeof e->desc) e->desc[have++] = '\n';
+    /* The guide wraps its text at about 74 columns: a line after text goes
+     * on its paragraph (a space); after a blank line (a '\n' already) a
+     * second '\n' leaves the blank line between the paragraphs */
+    if (have && have + 1 < sizeof e->desc) {
+        char sep = e->desc[have - 1] == '\n' ? '\n' : ' ';
+        e->desc[have++] = sep;
+    }
     if (have + n >= sizeof e->desc) n = sizeof e->desc - 1 - have;
     memcpy(e->desc + have, s, n);
     e->desc[have + n] = '\0';

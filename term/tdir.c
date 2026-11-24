@@ -107,12 +107,25 @@ void tdir_info_line(tdir_t *d, const char *s, size_t n)
             if (!to) return;
             b->f[TD_DESC] = at = to;
         }
-        if (!at) { b->f[TD_DESC] = keep(d, vn ? v : "\n", vn ? vn : 1); return; }
+        /* The lines are a paragraph wrapped for the list: joined again with
+         * a space, so that the page wraps it as it needs; an empty "d" line
+         * ends a paragraph, and a blank line stands between it and the next
+         * ("A\n\nB": gd_wrap's paragraphs) */
+        if (!at) { if (vn) b->f[TD_DESC] = keep(d, v, vn); return; }
+        if (vn == 0) {
+            if (have && d->pool[at + have - 1] != '\n' && d->used + 1 <= TDIR_POOL) {
+                d->pool[d->used - 1] = '\n'; d->pool[d->used] = '\0'; d->used++;
+            }
+            return;
+        }
         if (d->used + vn + 2 > TDIR_POOL) return;
-        d->pool[d->used - 1] = '\n';                        /* its NUL becomes the line break */
-        memcpy(d->pool + d->used, v, vn);
-        d->used += (uint32_t)vn + 1;
-        d->pool[d->used - 1] = '\0';
+        {
+            int after_break = have && d->pool[at + have - 1] == '\n';
+            d->pool[d->used - 1] = after_break ? '\n' : ' ';   /* its NUL becomes the joint */
+            memcpy(d->pool + d->used, v, vn);
+            d->used += (uint32_t)vn + 1;
+            d->pool[d->used - 1] = '\0';
+        }
         return;
     }
     for (i = 0; i < sizeof KEY / sizeof KEY[0]; i++)
