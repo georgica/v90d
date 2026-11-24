@@ -1,26 +1,1086 @@
-# v90d: bulletin boards behind 1 800 BBS DIAL, the short list in the image.
-#
-# A box that uses the number fetches the Telnet BBS Guide's list once a day
-# (fw/bbsfetch.sh: from Netstalgia, else from the guide) and uses that:
-# more than a thousand boards. These few serve until it has, or when it
-# has no way out. The format is in srv/bbs.h:
-#
-#   bbs LOGIN NUMBER HOST[:PORT] NAME   the name typed at the prompt (a-z,
-#       0-9), the telephone number (227 and the name on the keys of a
-#       telephone, zeros behind a short one), where the board is
-#       (telnet; port 23 if none), its name.
+# Netstalgia Online: the BBS list behind 1-800-BBS-DIAL
+# source: telnetbbsguide.com, updated Mon, 23 Nov 2026 05:22:43 GMT
 v90d-bbs 2
 
-bbs telehack 2278353422 telehack.com Telehack
-bbs phatstarteleporter 2277428782 198.71.48.13:7777 Phatstar Teleporter
-bbs level29 2275383529 bbs.fozztexx.com Level 29
-bbs vertrauen 2278378728 vert.synchro.net Vertrauen
-bbs blackflag 2272522535 blackflag.acid.org Black Flag BBS
+bbs 0xdecafbad 2270933223 bbs.decafbad.com:6523 0xDECAFBAD BBS
+bbs 13thfloor 2271384356 13th.hoyvision.com:6400 13th Floor BBS
+bbs 13thleader 2271384532 13leader.net:8023 13th Leader BBS
 bbs 20forbeers 2272036723 20forbeers.com:1337 20 For Beers BBS
-bbs particles 2277278425 particlesbbs.dyndns.org:6400 Particles! BBS
-bbs duraeuropos 2273872387 dura-bbs.net:6359 Dura-Europos
+bbs a1 2272100000 a1bbs.ddns.net A1 BBS
+bbs c128bbsddnsnet 2272128227 c128bbs.ddns.net:6301 C128bbs.ddns.net
+bbs cabinthe 2272224684 thecabinbbs.com:6400 Cabin BBS, The
+bbs backintime 2272225468 backintime.ddns.net:6510 Back In Time
+bbs backtothefuture 2272225868 bttfbbs.com Back to the Future
+bbs backwoodrealm 2272225966 bwrbbs.ddns.net Backwood Realm BBS
+bbs abandonedstardocktwgs 2272226366 abandonedstardock.ddns.net:2002 Abandoned StarDock TWGS
+bbs cb2micro 2272226427 email.qrp.gr:2323 CB2 Micro BBS
+bbs cbbstn 2272227860 cbbs.mitsaltair.com:8800 CBBS/TN
+bbs cbaxyztwgs 2272229998 tdod.org:2002 Cbaxyz TWGS
+bbs aceofspades 2272236377 chaotix.ddns.net:2323 Ace of Spades BBS
+bbs badpoetrybulletinboard 2272237638 centralontarioremote.net:2300 Bad Poetry Bulletin Board
+bbs bahamut 2272242688 bbs.gamer.com.tw Bahamut BBS
+bbs bcgbox 2272242690 bbbs.net BCG-Box
+bbs acidburn 2272243287 acidburn.ddns.net Acid Burn BBS
+bbs acidunderworld 2272243863 blackflag.acid.org:31337 Acid Underworld
+bbs caliche 2272254243 bbs.balaso.net:8888 Caliche BBS
+bbs canadaremotesystems 2272262327 photorm.net Canada Remote Systems
+bbs camelot 2272263568 camelotbbs.ddns.net:2323 Camelot BBS
+bbs canerduh 2272263738 bbs.canerduh.com:23905 Canerduh BBS
+bbs caminotwgs 2272264668 reich.familyds.net:203 Camino TWGS
+bbs casbah 2272272240 casbah.goip.de:5354 Casbah
+bbs barbariassh 2272272274 barbaria.norbus.com:22 Barbaria (SSH)
+bbs basement 2272273636 basementbbs.ddns.net:9000 Basement BBS
+bbs bcrgamesserver 2272274263 bcrgames.com:31337 BCR Games Server
+bbs absinthe 2272274684 absinthebbs.net:1940 Absinthe BBS
+bbs capitalstation 2272274825 csbbs.dyndns.org Capital Station BBS
 bbs capitolcityonline 2272274865 capitolcityonline.net Capitol City Online BBS
+bbs barkleysplace 2272275539 150.136.85.172:443 Barkley's Place
+bbs abrothertodragons 2272276843 abrotherto.dragons.systems A Brother to Dragons
+bbs bassplanet 2272277752 thebassplanet.com:64128 Bass Planet
+bbs captainsquarters 2272278246 cqbbs.ddns.net:6502 Captain's Quarters BBS
+bbs captainsquartersii 2272278247 cqbbs.ddns.net:6800 Captain's Quarters BBS II
+bbs castlerock 2272278537 63.230.156.110:2424 Castle Rock BBS
+bbs catch22daydream 2272282422 catch22bbs.org:26 Catch 22 BBS (Daydream)
+bbs catch22impulse 2272282423 catch22bbs.org:28 Catch 22 BBS (Impulse)
+bbs catch22renegade 2272282424 catch22bbs.org:24 Catch 22 BBS (Renegade)
+bbs catch22synchronet 2272282425 catch22bbs.org:30 Catch 22 BBS (Synchronet)
+bbs cave 2272283000 cavebbs.homeip.net Cave BBS
+bbs baudville 2272283845 amis86.ddns.net:9000 Baudville
+bbs catpit 2272287480 bbs.cis92.net Catpit BBS
+bbs ccx 2272290000 bbs.ccxbbs.net CCX BBS
+bbs bayou 2272296800 jayctheriot.com:6401 Bayou BBS
+bbs cecc 2272322000 cecc.everettjamalhall.com:8888 CECC
+bbs c3bbs 2272322700 c3bbs.retronetworking.org C3BBS
+bbs becomebananas 2272326632 bbbbs.synchronetbbs.org Become Bananas BBS
+bbs bearsden 2272327733 bbs.bearfather.net Bear's Den
+bbs beastie 2272327843 bbs.nxeed.com Beastie
+bbs beebs 2272332700 beebs.ddns.net:6502 BeeBS
+bbs cedarvalley 2272332782 63.230.156.110:2525 CedarValley BBS
+bbs cedarvalley2 2272332783 63.230.156.110:2626 CedarValley BBS 2
+bbs adept 2272337800 adeptbbs.com Adept BBS
+bbs adepttwgs 2272337889 eclipsebbs.com:2002 Adept TWGS
+bbs beiyouforum 2272349683 bbs.byr.cn Beiyou Forum
+bbs cellfish 2272355347 cloud.kanskje.com Cellfish BBS
+bbs cementcity 2272363682 scenewall.bbs.io:4000 Cement City
+bbs beoscity 2272367248 beos.retro-os.live BeOS City
+bbs beryl 2272379500 beryl.h-o-soft.com:2323 Beryl BBS
+bbs afterhours 2272383746 ah-bbs.com:2333 After Hours BBS
+bbs ciaamiga 2272422644 ciaamiga.org:6400 CIA Amiga BBS
+bbs chatter 2272428837 chatter.pw:2323 Chatter BBS
 bbs agency 2272436290 agency.bbs.nz Agency BBS
-bbs xibalba 2279422522 xibalba.l33t.codes:44510 Xibalba
-bbs 8bitboyz 2278248269 bbs.8bitboyz.com:6502 8-Bit Boyz BBS
+bbs chicknboneshumanniptrap 2272442562 game.human-interact.com Chick-N-Bone's HumanNip Trap
+bbs big5 2272445000 39.106.161.147 Big5 BBS
+bbs bigjimssecretemporium 2272445467 bbs.bigjim.ventures:6969 Big Jim's Secret Emporium
+bbs bigrabbit 2272447222 bunnybbs.tw Big Rabbit BBS
+bbs chippy 2272447790 bbs.thechippy.org:8888 Chippy BBS
+bbs bigtime 2272448463 bigtimebbs.net:2323 Big Time BBS
+bbs bikerbobsclubhouse 2272453726 bbsclubhouse.ddns.net:1040 Bikerbob's Clubhouse
+bbs aincrad 2272462723 67.205.168.255:2323 Aincrad BBS
+bbs choicecore1st 2272464232 1stchoicecore.co.nz Choice Core BBS (1st)
+bbs choicecore2nd 2272464233 2ndchoicecore.nz:1024 Choice Core BBS (2nd)
+bbs choicecore4th 2272464234 1stchoicecore.co.nz:1030 Choice Core BBS (4th)
+bbs choicecore6th 2272464235 1stchoicecore.co.nz:1028 Choice Core BBS (6th)
+bbs chookfest 2272466533 bbs.chookfest.net:6800 Chookfest BBS
+bbs chosenmanthe 2272467366 chosenman.duckdns.org Chosenman BBS, The
+bbs circls 2272472570 bbs.circl.lu CIRCL's BBS
+bbs birdenuf 2272473368 bbs.birdenuf.com:2003 BirdEnuf BBS
+bbs chris 2272474700 cloud.iiot-factory.com Chris BBS
+bbs christianfellowship 2272474784 cfbbs.no-ip.com:26 Christian Fellowship
+bbs birminghamdefcongroup 2272476464 34.203.6.182 Birmingham DEFCON Group
+bbs agster 2272478370 bbs.aghy.net Agster
+bbs airwave 2272479283 bbs.airandwave.net:2323 Air & Wave BBS
+bbs citadel64 2272482335 citadel64.thejlab.com:6400 Citadel 64 BBS
+bbs bitsbytes 2272487298 bbs.bnbbbs.net:2023 Bits & Bytes BBS
+bbs citrick 2272487425 citlmbbs.synchro.net:2300 Citrick BBS
+bbs cittadella 2272488233 bbs.cittadellabbs.it:4001 Cittadella BBS
+bbs cityofangels 2272489632 houseoftna.xyz City Of Angels BBS
+bbs bitwoodsrbbspc 2272489663 bitwoods.duckdns.org Bitwoods RBBS-PC
+bbs cityontheedgeofforever 2272489668 interzone.annexia.xyz:2002 City on the Edge of Forever
+bbs alcabbs 2272522227 bbs.alcatrash.org AlcaBBS
+bbs blackflag 2272522535 blackflag.acid.org Black Flag BBS
+bbs clackerworks 2272522537 cw.qc.to:9000 Clacker Works
+bbs blackice 2272522542 blackice.bbsindex.de BlackICE
+bbs blacklightunderground 2272522554 acentauribbs.no-ip.org:2424 Blacklight Underground
+bbs blacktower 2272522586 blackflag.acid.org:26 Black Tower BBS
+bbs alcatrazprison 2272522872 alcatrazbbs.ddns.net:9000 Alcatraz Prison BBS
+bbs blakezone 2272525396 bbs.theblakezone.net Blake Zone
+bbs alcoholidaymystic 2272526465 alcoholidaybbs.com Alcoholiday BBS (Mystic)
+bbs alcoholidayrenegade 2272526466 alcoholidaybbs.com:95 Alcoholiday BBS (Renegade)
+bbs alamo 2272526600 alamobbs.mywire.org:6400 Alamo BBS
+bbs classic 2272527742 board.classicbbs.net:9339 Classic BBS
+bbs classiccomputing 2272527743 bbs.classiccomputing.net Classic Computing BBS
+bbs classicmacs 2272527744 macos.retro-os.live Classic Macs BBS
+bbs claudes 2272528337 claudes.lovelybits.org:2323 Claude's BBS
+bbs alecoexperience 2272532639 bbs.alecoexp.cz Aleco Experience BBS
+bbs aleph 2272537400 alephbbs.com:2626 Aleph BBS
+bbs alienmindbenders 2272543664 the.alienmindbenders.net Alien Mindbenders BBS
+bbs aliensalcove 2272543672 newt.aliens.ph Aliens' Alcove!
+bbs alltsk 2272558750 fido.alltsk.ru Alltsk
+bbs cloak 2272562500 nox-irc.duckdns.org:2323 Cloak BBS
+bbs bloodbbs 2272566322 blood.bbsn.us:2323 BLOODBBS
+bbs bloodstone 2272566378 wwiv.bsbbs.com:2323 Blood Stone
+bbs closedsociety 2272567337 cs-bbs.com:5555 Closed Society
+bbs cloverlovechinese 2272568375 segaa.net Clover Love (Chinese)
+bbs alphacentauri 2272574223 acentauribbs.no-ip.org:2002 Alpha Centauri BBS
+bbs alphanet 2272574263 2.236.17.38:2888 AlphaNet
+bbs alsgeeklab 2272574335 bbs.alsgeeklab.com:2323 Al's Geek Lab BBS
+bbs cjsplace 2272577522 cjsplace.thruhere.net CJ's Place
+bbs clubedainsonia 2272582332 bbs.conf.eti.br Clube da Insonia BBS
+bbs altairiv 2272582474 altairiv.ddns.net:2323 Altair IV
+bbs altairmini 2272582476 altairminibbs.net Altair Mini BBS
+bbs altarofwares 2272582763 altarofwaresbbs.hopto.org:6464 Altar of Wares
+bbs bluehard 2272583427 bbs.bluehard.com Bluehard BBS
+bbs bluewave 2272583928 cloud.bullantcomm.com Blue Wave BBS
+bbs blurredvision 2272587733 bbs.novass.net:2323 Blurred Vision
+bbs clutch 2272588240 clutchbbs.com Clutch BBS
+bbs coalfields 2272625343 coalfields.synchronetbbs.org Coalfields BBS
+bbs coalmine 2272625646 bbs.cmine.nl Coal Mine BBS
+bbs analogwaffle 2272625649 waffle.c4bmore.com:2001 Analog Waffle
+bbs coconet 2272626638 coconet.ddns.net:6809 COCONet
+bbs boarsheadtavern 2272627743 byob.hopto.org:64128 Boar's Head Tavern
+bbs coe 2272630000 bbs.eow.lol:2377 COE BBS
+bbs boebertfeet 2272632378 66.228.38.176:52270 Boebertfeet
+bbs bodax 2272632900 bbs.beardy.se BodaX BBS
+bbs americanconnectionthe 2272637422 tacbbs.synchro.net American Connection BBS, The
+bbs anduin 2272638460 bbs.anduin.net Anduin BBS
+bbs anetonlinedroidmatrix 2272638665 droid.a-net.online:2323 A-Net Online (Droid Matrix)
+bbs anetonlinegameserver 2272638666 game.a-net-online.lol:513 A-Net Online (Game Server)
+bbs anetonlinemenu 2272638667 x.a-net.online:1337 A-Net Online (Menu)
+bbs anetonlinemystic 2272638668 mystic-anet.online A-Net Online (Mystic)
+bbs anetonlinespitfire 2272638669 sf.a-net.online:2323 A-Net Online (Spitfire)
+bbs anetonlinesynchronet 2272638670 a-net.online A-Net Online (Synchronet)
+bbs anetonlinetwgs 2272638671 game.a-net-online.lol:2002 A-Net Online (TWGS)
+bbs anetonlineanetbbs 2272638672 bbs.a-net.fyi:2233 A-Net Online ANetBBS
+bbs amigacbm 2272644222 amiganer.amms-bbs.de Amiga CBM BBS
+bbs amigacity 2272644224 amigacity.xyz Amiga City
+bbs amigaretrobrisbane 2272644273 www.amigaretro.com Amiga Retro Brisbane BBS
+bbs amigaretrov4sa 2272644274 amibbs.amigaretro.com:6880 Amiga Retro V4SA BBS
+bbs amigaunderground 2272644286 amigaunderground.com:2300 Amiga Underground
+bbs animationgamestationanimeyo 2272646284 54.238.90.108 Animation Game Station (Animeyo)
+bbs amisxe 2272647930 amis86.ddns.net:9000 Amis XE
+bbs c64ultimateclub 2272648584 c64u.club:6400 C64 Ultimate Club
+bbs coldfusion 2272653387 cfbbs.net Cold Fusion BBS
+bbs coldwinterknights 2272653946 bbs.coldwinterknights.net:8888 Cold Winter Knights
+bbs colossus 2272656778 bbs.qzwx.com Colossus BBS
+bbs boobtube 2272662882 bbs.wz5bbs.com BoobTube
+bbs confusioncorner 2272663874 confusioncornerbbs.ca:6400 Confusion Corner BBS
+bbs boneyardthe 2272663927 boneyard-bbs.com:8073 Boneyard BBS, The
+bbs commodore64 2272666636 commodore64bbs.com:6464 Commodore 64 BBS
+bbs commodorearchive 2272666637 bbs.commodorearchivebbs.com Commodore Archive BBS
+bbs commodoreimage 2272666638 cib.dyndns.org:6400 Commodore Image
+bbs commodoreimageii 2272666639 cib.dyndns.org:6401 Commodore Image II
+bbs commodoreimageiii 2272666640 cib.dyndns.org:6402 Commodore Image III
+bbs commsnuts 2272666768 workstation.ddmcomputers.com.au:2323 Comms Nuts BBS
+bbs compunetreborn 2272667863 vme.compunet.live:6401 Compunet Reborn
+bbs compuservesimulator 2272667873 compuserve-sim.duckdns.org:2323 Compuserve Simulator
+bbs constructivechaos 2272667878 conchaos.synchro.net Constructive Chaos BBS
+bbs constructivechaostwgs 2272667879 conchaos.synchro.net:2002 Constructive Chaos TWGS
+bbs computerconnectionthe 2272667883 tccbbs.com Computer Connection, The
+bbs computerexpress 2272667884 cebbs.costakis.org Computer Express
+bbs computergod 2272667885 cpugod.net Computer God
+bbs bootfactory2k 2272668322 bfbbs.no-ip.com:8888 Boot Factory 2K+
+bbs anotherdroid 2272668437 andr01d.zapto.org:9999 Another Droid BBS
+bbs anotherfing 2272668438 anotherbbs.dynu.net:1337 Another F-ing BBS
+bbs convolution 2272668658 convolution.us Convolution
+bbs borderline 2272673375 borderlinebbs.dyndns.org:6400 Borderline BBS
+bbs ansitex 2272674839 alterant.bbs.dege.au ANSITex
+bbs amplicon 2272675426 amplicon-bbs.org:8888 Amplicon BBS
+bbs amstrad 2272678723 amstrad.simulant.uk:464 AMSTRAD BBS
+bbs antiearthuniongovernmentchinese 2272684327 aeug.asuscomm.com:8888 Anti Earth Union Government (Chinese)
+bbs antidote 2272684368 antidote.triad.se:64128 Antidote
+bbs bottomlessabyss 2272688665 bbs.bottomlessabyss.net:2023 Bottomless Abyss BBS
+bbs cottonwood 2272688669 cottonwoodbbs.dyndns.org:6502 Cottonwood BBS
+bbs anybox 2272692690 anybox.freedyndns.de Anybox BBS
+bbs cr1mson 2272716766 45.134.226.117:23777 Cr1mson BBS
+bbs arcadia 2272722342 bbs.arcadiabbs.com Arcadia BBS
+bbs arcadiaonline 2272722343 bbs.at.com.au Arcadia Online!
+bbs crackintime 2272722546 crackintimebbs.ddns.net:2323 Crack In Time BBS
+bbs archaicbinary 2272724242 bbs.archaicbinary.net Archaic Binary
+bbs brainstormssh 2272724678 bsbbs.com.br:22 Brain Storm BBS (SSH)
+bbs crappiecrackeronline 2272727743 www.crappiecracker.com:2323 CrappieCracker Online BBS
+bbs arcticzoneonlineentertainment 2272728429 bbs.arcticzonebbs.net ArcticZone Online Entertainment
+bbs crawfordfamilyoffice 2272729367 diaspara.ca:2323 Crawford Family Office
+bbs crazyparadise 2272729972 cpbbs.de:2323 Crazy Paradise
+bbs crazyterminal 2272729983 crazytermbbs.duckdns.org:6411 Crazy Terminal
+bbs crazyworldgameserver 2272729996 crazyworldbbs.com:888 Crazy World BBS (Game Server)
+bbs crazyworldmystic 2272729997 crazyworldbbs.com:2324 Crazy World BBS (Mystic)
+bbs crazyworldsynchronet 2272729998 crazyworldbbs.com:2323 Crazy World BBS (Synchronet)
+bbs ardacom 2272732266 arda-bbs.com ARDA-BBS.com
+bbs area52 2272732520 area52.tk:5200 Area 52
+bbs arena 2272736200 netasylum.com:2323 Arena BBS
+bbs aperturescienceemployeemainframe 2272737887 rcfeed.concomcompany.com:31810 Aperture Science Employee Mainframe
+bbs brettbender 2272738823 207.90.251.241:2323 Brett Bender BBS
+bbs brewery 2272739379 thebrewery.servebeer.com:6400 Brewery BBS
+bbs ariacl 2272742250 ariabbs.com:1990 ARIA CL
+bbs briansblogtwgs 2272742672 tw2002.briancmoses.com Brian's Blog TWGS
+bbs ashenfields 2272743634 ashenfields.sytes.net Ashen Fields
+bbs brigandine 2272744263 brigandine.org:9390 Brigandine
+bbs crimsonprotocol 2272746766 cp-bbs.com Crimson Protocol BBS
+bbs crisisline 2272747475 crisisbbs.net Crisis/Line BBS
+bbs armageddon 2272762433 ArmageddonBBS.net:2300 Armageddon BBS
+bbs brokedownpalace 2272765336 palace.brokedownpalace.online:2323 Brokedown Palace BBS
+bbs brokenbitsyndicate 2272765362 brokenbit.us:2323 Broken Bit Syndicate
+bbs brokenbubble 2272765363 bbs.thebrokenbubble.com Broken Bubble
+bbs apostols 2272767865 bbs.apostols.org Apostols
+bbs brotherhoodofgroovyness 2272768437 bbs.b-o-g.org Brotherhood Of Groovyness
+bbs artnet 2272786380 artnet.studio:513 ARTNET
+bbs crustychickentwgs 2272787892 stream.thecrustychicken.com Crusty Chicken TWGS
+bbs crystalpalace 2272797825 cptalker.com:9900 Crystal Palace
+bbs crystalset 2272797826 zl4kj.nz Crystal Set
+bbs cvcfed 2272823330 168.138.77.143 CVCFED
+bbs at2kdesign 2272825337 bbs.at2k.org AT2K Design BBS
+bbs avalonisle 2272825664 atl.ddns.net:6400 Avalon Isle BBS
+bbs buckosden 2272825673 bdn.wrgnbr.com:6800 Bucko's Den
+bbs atarigateway 2272827442 ataribbs.ddns.net:6502 Atari BBS Gateway
+bbs avast 2272827800 avastbbs.servegame.com Avast! BBS
+bbs atavachron 2272828224 atavachronbbs.net Atavachron BBS
+bbs buema 2272836200 bbs.buema.ch:2300 BUEMA BBS
+bbs athelstan 2272843578 athelstan.org Athelstan BBS
+bbs atlantis 2272852684 atl.ddns.net:6401 Atlantis BBS
+bbs bumgunclub 2272864862 bumgun.club Bumgun Club BBS
+bbs atmospherentu 2272866774 bbs.as.ntu.edu.tw Atmosphere BBS (NTU)
+bbs burbsec 2272872732 104.131.160.109:4240 BurbSec BBS
+bbs curios 2272874670 curios.synchronetbbs.org Curios
+bbs attic1 2272884210 theattic.v1cd3m1z3r.net Attic BBS (1)
+bbs attic2 2272884220 bbs.millhill.org:2323 Attic BBS (2)
+bbs butterfly 2272888373 bbs.byr.cn Butterfly BBS
+bbs cyberdawg 2272923732 kuehlbox.wtf:1337 Cyberdawg BBS
+bbs cyberdelic 2272923733 cyberdelicbbs.com:2323 Cyberdelic BBS
+bbs cybersword 2272923779 bbs.excalibursheath.com Cyber Sword
+bbs axisundergroundcnc 2272947863 axisunderground.hopto.org:2322 Axis Underground CNC
+bbs cyrellia 2272973554 bbs.cyrellia.com Cyrellia BBS
+bbs 300fingbaud 2273003464 300baud.dynu.net:2525 300 F-ing Baud BBS
+bbs d0p3 2273073000 bbs.intersrv.net D0P3 BBS
+bbs 32bit 2273224800 x-bit.org:23230 32-Bit BBS
+bbs fadingblack 2273234642 23.95.146.28:8282 Fading Black
+bbs eaglesdare 2273245373 frad.org Eagle's Dare BBS
+bbs eaglewing 2273245394 eaglewing1962.freeddns.org:6400 Eaglewing BBS
+bbs echobase 2273246227 www.eifelaktiv.de EchoBase BBS
+bbs echochamber 2273246242 50.116.29.47:3640 Echo Chamber BBS
+bbs echoes 2273246370 echoes.120v.ac Echoes BBS
+bbs faithcollapsing 2273248426 bbs.faithcollapsing.com:2323 Faith Collapsing BBS
+bbs falcon 2273252660 bbs.falconbbs.nl Falcon BBS
+bbs eclipse 2273254773 eclipsebbs.com:2323 Eclipse BBS
+bbs dangerbay 2273264372 dangerbaybbs.dyndns.org:1337 Danger Bay BBS
+bbs family 2273264590 familybbs.ddns.net Family BBS
+bbs dankdomain 2273265366 play.ddgame.us Dank Domain
+bbs darkages 2273275243 darkagesbbs.com DarkAges BBS
+bbs darkendless 2273275363 darkendlessbbs.hopto.org:6510 Dark Endless
+bbs darkforcethe 2273275367 darkforce-bbs.dyndns.org:1040 DarkForce! BBS, The
+bbs darkgame 2273275426 darkgame.buanzo.org Dark Game BBS
+bbs darklevel 2273275538 darklevel.hopto.org:64128 Darklevel
+bbs darklord 2273275567 24.131.217.184 Dark Lord
+bbs darklord2 2273275568 darksix.org Darklord BBS
+bbs darkmatter 2273275628 darkmatt.synchro.net Dark Matter BBS
+bbs darkmatterstwgs 2273275629 twgs.geekm0nkey.com DarkMatter's TWGS
+bbs darknavet 2273275630 bbs.darknavet.vip DarkNavet
+bbs darkrealms 2273275732 bbs.darkrealms.ca Dark Realms
+bbs darkside 2273275743 thedarkside.ath.cx:64128 Darkside BBS
+bbs darkwellthe 2273275935 riverstyx.ddns.net:2324 DarkWell BBS, The
+bbs darkwood 2273275966 darkwood.ddns.net Darkwood BBS
+bbs fastline 2273278546 fastline.nu:1541 Fastline
+bbs fastreddys 2273278733 99.59.134.130:2222 Fast Reddy's BBS
+bbs fatalexecom 2273282539 fatalexe.com:8888 Fatalexe.com
+bbs datenzwergs 2273283699 cloud.datenzwerg.com:2323 Datenzwerg's BBS
+bbs daves 2273283700 davesbbs.com Dave's BBS
+bbs eatmyshorts 2273286974 ems-bbs.com Eat My Shorts! BBS
+bbs dayofthetentacle 2273296384 dott.synchro.net:2424 Day Of The Tentacle
+bbs dawnofdemisemajorbbs 2273296633 tdod.org:3000 Dawn of Demise (MajorBBS)
+bbs dawnofdemisesynchronet 2273296634 tdod.org:5000 Dawn of Demise (Synchronet)
+bbs dawnofdemiseworldgroup 2273296635 tdod.org Dawn of Demise (Worldgroup)
+bbs decades 2273322337 decades.freeddns.org:6401 Decades BBS
+bbs deadcarrier 2273323227 the-rotten-core.strangled.net:2323 Dead Carrier BBS
+bbs deadbeatz 2273323232 deadbeatz.org Deadbeatz BBS
+bbs deadinternetsociety 2273323468 deadinternet.synchronetbbs.org Dead Internet Society
+bbs deadlines 2273323546 deadlines.ddns.net:6510 Dead Lines
+bbs deadmodemsociety 2273323663 telnet.deadmodemsociety.com:1337 Dead Modem Society
+bbs deadsocket 2273323762 deadsocket.church Dead Socket BBS
+bbs deadzone 2273323966 dzbbs.hopto.org:64128 Dead Zone BBS
+bbs deathrow 2273328476 deathrow.servebbs.org:1001 Death Row BBS
+bbs fdd1 2273331000 fdd.one FDD1
+bbs efectolinux 2273332865 bbs.efectolinux.com Efectolinux
+bbs federationapocalypse 2273333728 fedapoc.tel:2301 Federation Apocalypse
+bbs deepskies 2273337754 bbs.deepskies.com:6400 DeepSkies BBS
+bbs deltacity 2273358224 deltacity.se Delta City BBS
+bbs demigoth 2273364468 bbs.demigoth.com Demigoth BBS
+bbs fenglin 2273364546 fenglin.info:2323 Fenglin BBS
+bbs fennec 2273366320 50.116.41.177 Fennec BBS
+bbs demonsnet 2273366676 demonsnet.com Demonsnet BBS
+bbs desertratssanctuarytwgs 2273373787 bbs.kn6q.org:2002 Desert Rats Sanctuary TWGS
+bbs development 2273383567 bbsdev.net BBS Development
+bbs devs42com 2273387422 devs42.com:2323 Devs42.com BBS
+bbs diamondmineonlinesynchronet 2273426663 sbbs.dmine.net:24 Diamond Mine Online (Synchronet)
+bbs diamondmineonlinewwiv 2273426664 wwiv.dmine.net:2323 Diamond Mine Online (WWIV)
+bbs fiendnet 2273436363 www.fiendzine.net:8008 Fiendnet
+bbs digicom 2273444266 bbs.digicombbs.com:2323 Digicom BBS
+bbs digitaldial 2273444825 digitaldial.homeunix.com:2300 Digital Dial BBS
+bbs digitaldistortion 2273444826 bbs.digitaldistortionbbs.com Digital Distortion
+bbs digitaldreams 2273444827 ddreams.synchro.net Digital Dreams
+bbs digitalhighway 2273444828 digitalhighway.com.se:1084 Digital Highway
+bbs digitalline 2273444829 vorpahl.online Digital Line BBS
+bbs digitalrainbow 2273444830 bbs.digitalrainbow.info Digital Rainbow
+bbs digitalreality 2273444831 bbs.digitalrealitybbs.com Digital Reality BBS
+bbs digitalshelter 2273444832 digitalshelter.net Digital Shelter BBS
+bbs digitalwarfare 2273444833 bbs.digital-warfare.net:1337 Digital Warfare
+bbs digitalzone 2273444834 5.150.245.20:2323 Digital Zone
+bbs digitalx 2273444835 digitalx.ddns.net:7411 Digital-X
+bbs filebank 2273453226 tfb-bbs.org File Bank BBS
+bbs files4fun 2273453743 bbs.f4fbbs.com:2323 Files 4 Fun BBS
+bbs dime 2273463000 alcoholidaybbs.com:94 Dime BBS
+bbs dimension7 2273463674 194.35.12.248:8888 Dimension 7
+bbs finzsshop 2273469774 finzshop.duckdns.org:6400 Finz's Shop
+bbs disconnectedbypeer 2273472666 bbs.disconnected-by-peer.at Disconnected by Peer BBS
+bbs disflux 2273473589 disfluxbbs.com Disflux BBS
+bbs fireside 2273473743 firesidebbs.com:23231 Fireside BBS
+bbs diskboxii 2273475269 tag.diskbox2.net Diskbox ][
+bbs diskhopperspalace 2273475467 diskhopp.synchro.net Diskhoppers Palace BBS
+bbs firstdivision 2273477834 fdiv.amielite.com:1987 First Division
+bbs distantempires 2273478268 bbs.distantempires.com:8023 Distant Empires BBS
+bbs distortion 2273478678 d1st.org Distortion
+bbs fivealarm 2273483252 bbs.k6jrn.net Five Alarm BBS
+bbs dhxy 2273499000 dhxy.info DHXY
+bbs djdave 2273532830 djdave.uk:8088 DJ Dave BBS
+bbs electronicchicken 2273532876 bbs.electronicchicken.com Electronic Chicken BBS
+bbs eldritchclockwork 2273537482 eldritchclockwork.net Eldritch Clockwork
+bbs elevator 2273538286 dxtrlab.org Elevator BBS
+bbs flipperzero 2273547737 bbs.gglab.cloud:2323 FlipperZero BBS
+bbs elvicio 2273584246 52.40.49.152 El Vicio
+bbs fluph 2273587400 fluph.zapto.org FlupH BBS
+bbs fluxpodinformationexchange 2273589763 fix.no:24 Fluxpod Information Exchange
+bbs dlwx 2273599000 107.175.69.10:60023 DLWX BBS
+bbs enchanted 2273624268 chatverse.servehttp.com Enchanted BBS
+bbs docksud 2273625783 179.41.23.26 Dock Sud
+bbs endoftheline 2273636384 endofthelinebbs.com End Of The Line BBS
+bbs emeraldhill 2273637253 bbs.emeraldhill.org Emerald Hill BBS
+bbs emeraldvalley 2273637254 bbs.emeraldvalley.net Emerald Valley
+bbs energy 2273637490 bbs.w2jkt.com:2024 Energy BBS
+bbs energycity 2273637492 energycitybbs.duckdns.org:2323 Energy City BBS
+bbs eniac20 2273642220 eniacv2.net:1337 ENiAC 2.0 BBS
+bbs enigma 2273644620 enigma-bbs.com Enigma BBS
+bbs dniprowave 2273647769 bbs.net.ua DniproWave BBS
+bbs dogtown 2273648696 bbs.kiwi.net Dogtown BBS
+bbs fonecompany 2273663266 tfcbbs.com:6400 Fone Company
+bbs foolsquarter 2273665778 fqbbs.synchro.net Fool's Quarter BBS
+bbs doorgamesunlimited 2273667426 dgu.strangled.net Door Games Unlimited
+bbs foremxe 2273673693 foremxebbs.ddns.net:9999 Forem XE BBS
+bbs empireofthedragon 2273674736 bbs.eotd.com Empire of the Dragon BBS
+bbs fmrl 2273675000 fmrl.throwbackbbs.com:2324 FMRL
+bbs forze 2273679300 bbs.opicron.eu Forze BBS
+bbs doveonly 2273683665 casper.homeip.net Dove Only
+bbs enterprise 2273683777 enterprisebbs.ddns.net:1701 Enterprise BBS
+bbs emu486 2273684860 bbs.emu486.net EMU486
+bbs entropy 2273687679 entropybbs.zapto.org Entropy BBS
+bbs fox 2273690000 bbs.home.bernardeau.net:9999 Fox-BBS
+bbs downlo 2273696560 bbs.winzlo.com Down-Lo BBS
+bbs downunder 2273696863 downunderbbs.com DownUnder BBS
+bbs foxtrot 2273698768 foxtrotbbs.hopto.org:6400 Foxtrot BBS
+bbs escapetootherworlds 2273722738 etow.synchro.net Escape To Other Worlds
+bbs dragonslair 2273724667 dragon.vk3heg.net:6800 Dragon's Lair BBS
+bbs dragonstalon 2273724668 66.78.141.19:8088 Dragonstalon BBS
+bbs dragonsweblabs 2273724669 bbs.dragonsweb.org Dragonsweb Labs BBS
+bbs dreamgarden 2273732642 207.148.108.123 Dream Garden
+bbs dreamland 2273732652 ccns.cc:3456 Dream Land BBS
+bbs dreamland2 2273732653 75.82.21.80 Dreamland BBS
+bbs dreamline 2273732654 din.asciiattic.com Dreamline BBS
+bbs freeside 2273733743 freeside.bbs.io Freeside BBS
+bbs freeway 2273733929 freeway.vkradio.com Freeway BBS
+bbs frenchconnection 2273736242 thefrenchconnexion.ca:31023 French Connection
+bbs friabad 2273742223 friabad.hopto.org:64128 Fria Bad BBS
+bbs ericadenetwork 2273742233 the.ericade.net Ericade Network
+bbs esonatremotenode 2273766287 esonet.esotericallynatured.com:8888 ESONAT Remote Node
+bbs frontier 2273766843 frontierbbs.co.uk Frontier BBS
+bbs frozenfloppy 2273769363 bbs.retrohack.se:64128 Frozen Floppy BBS
+bbs error1202 2273776712 error1202bbs.ddns.net:1202 Error 1202 BBS
+bbs error404fileserver 2273776740 error404bbs.ddns.net:513 Error 404 BBS File Server
+bbs error404phonebook 2273776741 error404bbs.ddns.net:419 Error 404 BBS Phone Book
+bbs duao 2273826000 hermes.okyler.com DUAO BBS
+bbs ftelnetdemoserver 2273835638 bbs.ftelnet.ca fTelnet Demo Server
+bbs duensingdigital 2273836746 bbs.duensing.digital Duensing Digital
+bbs eternal 2273837625 eternalbbs.com:2323 Eternal BBS
+bbs eternaldomain 2273837626 bbs.eternaldomain.net Eternal Domain BBS
+bbs dundarach 2273863272 dundarach.tplinkdns.com Dundarach BBS
+bbs dungeon1 2273864366 dungeon.synchro.net Dungeon BBS (1)
+bbs dungeon2 2273864367 dungeon.darkness.services:2323 Dungeon BBS (2)
+bbs dumpsterdive 2273867783 dumpster.krystalbbs.net:2324 Dumpster Dive
+bbs funtopia 2273868674 funtopia.synchro.net:3023 Funtopia BBS
+bbs duraeuropos 2273872387 dura-bbs.net:6359 Dura-Europos
+bbs fusion 2273874660 pruffino.com Fusion BBS
+bbs euphoria 2273874674 euphoria.mudinfo.net:8888 Euphoria BBS
+bbs furryrefuge 2273877973 bbs.furryrefuge.com Furry Refuge
+bbs futureland 2273888735 futureland.today Futureland
+bbs futurepast 2273888737 bbs.futurepast.online:1997 FuturePast
+bbs futureworldii 2273888739 fw2.cnetbbs.net:6800 Future World II
+bbs eyeofthebeholder1 2273936384 fido.beholderbbs.org Eye of the Beholder (1)
+bbs eyeofthebeholder2 2273936385 bbs.beholderbbs.org Eye Of The Beholder BBS (2)
+bbs eyeofthestorm 2273936386 on.the.net.nz Eye of the Storm
+bbs dynamite1 2273962648 dynamite.bbsing.com Dynamite BBS (1)
+bbs dynamite2 2273962649 dynamite.synchronetbbs.org:513 Dynamite BBS (2)
+bbs dyslexicdonkey 2273975394 dydo.erb.pw:1337 Dyslexic Donkey
+bbs extricate 2273987422 bbs.extricate.org Extricate BBS
+bbs ib 2274200000 bbs.ibbs.be IB-BBS
+bbs haciendelbananas 2274224363 haciend.com:8821 Haciend El Bananas
+bbs hackerforce 2274225373 bbs.hackerforce.de:2323 Hackerforce BBS
+bbs icecastle 2274232278 ice-castle-bbs.net Ice Castle BBS
+bbs hagarshelpline 2274242774 hagars.org.uk:24 Hagar's Helpline
+bbs halcyon 2274252966 halcyonbbs.scisweb.org Halcyon BBS
+bbs hallsofvalhalla 2274255763 hovalbbs.com:2333 Halls of Valhalla BBS
+bbs gamemaster 2274263627 bbs.game-master.com Game Master
+bbs gamenetnetwork 2274263638 gamenet.synchronetbbs.org:513 Gamenet BBS Network
+bbs gamer 2274263700 bbsgamer.ddns.net:2600 BBS Gamer
+bbs hammer 2274266370 hammer.pablomurad.com:2324 Hammer BBS
+bbs haradastation 2274272327 mitsukoharada.com:2323 Harada Station
+bbs harddrivecafe 2274273374 hdcbbs.com Hard Drive Cafe
+bbs happyland 2274277952 citadel.dc540.org:23230 Happyland
+bbs hatedreality 2274283373 hatedreality.homeunix.net Hated Reality
+bbs gatesynchronet 2274283796 thegateb.synchro.net Gate BBS (Synchronet)
+bbs gateway 2274283929 gatewaybbs.net:2023 Gateway BBS
+bbs gatewwiv 2274283994 thegateb.synchro.net:2424 Gate BBS (WWIV)
+bbs hauntednode 2274286833 hauntednode.com Haunted Node
+bbs hax0rspalace 2274290777 telnet.unknownrealm.org Hax0r's Palace
+bbs hawaiiatari8bit 2274292442 atari-bbs.zapto.org:8888 Hawaii BBS Atari 8 Bit
+bbs 4d2dotorg 2274323686 bbs.4d2.org 4D2 Dot Org
+bbs heatwave 2274328928 heatwave.ddns.net:9640 Heatwave
+bbs geezersfidonethub 2274339377 mbse.gzrbbs.net:2320 Geezer's Fidonet Hub
+bbs heights 2274344487 heightsbbs.heightspc.net:6860 Heights BBS
+bbs geosync 2274367962 geo.synchro.net:223 GeoSync
+bbs herbies 2274372437 herbies-bbs.ddns.net:2323 Herbies BBS
+bbs herbiesii 2274372438 herbies-bbs.ddns.net Herbies BBS II
+bbs herbiesiii 2274372439 herbies-bbs.ddns.net:2424 Herbies-BBS III
+bbs herculesworkshop 2274372853 bbs.herculesworkshop.net Hercules Workshop
+bbs hermsbbsddnsnet 2274376722 hermsbbs.ddns.net:2300 Hermsbbs.ddns.net
+bbs hexedobv2hxdhq 2274393362 hexedbbs.com:23999 HeXeD  (OBV/2 HXD HQ)
+bbs gibson 2274427660 giaco.net:2323 Gibson BBS
+bbs hidden 2274433360 the-hidden.hopto.org:64128 Hidden BBS
+bbs hiddenparadise 2274433367 hpbbs.dyndns.org Hidden Paradise
+bbs highdesert 2274444337 highdesertbbs.ddns.net:6400 High Desert BBS
+bbs ghostsinthemachine 2274467874 theunderground.us:1717 Ghosts in the Machine
+bbs ghostsoftherevolution 2274467876 67.223.99.43 Ghosts of the Revolution
+bbs hispamsx 2274477267 bbs.hispamsx.org HispaMSX BBS
+bbs globalchaos 2274562252 globalchaosbbs.com Global Chaos BBS
+bbs gloaming 2274562646 gloaming.dynv6.net Gloaming BBS
+bbs hlsc64 2274572640 bbs.tokacpt.pro:6400 HLS BBS C64
+bbs hobbitempire 2274622483 bbs.hobbitempire.net:6501 Hobbit Empire
+bbs hobbitstation 2274622487 wfido.ru:1234 Hobbit Station BBS
+bbs hobbs 2274622700 153.127.6.190:2323 HoBBS
+bbs hobbyline 2274622954 hobbylinebbs.com Hobby Line! BBS
+bbs image64bbsddnsnet 2274624364 image64bbs.ddns.net:6300 Image64bbs.ddns.net
+bbs inconsistency 2274626674 bbs.jsbackus.com:2323 Inconsistency BBS
+bbs infonet 2274636638 bbs.rclabs.com.br:2323 Infonet BBS
+bbs gods69com 2274637692 92.91.25.209:2323 Gods69.com BBS
+bbs holdfast 2274653327 interzone.annexia.xyz:2323 Hold Fast BBS
+bbs goldentempletheamigacnet 2274653368 bbs.iswix.com:6800 Golden Temple, The (Amiga C-Net BBS)
+bbs goldentemplethec64image 2274653369 bbs.iswix.com:6502 Golden Temple, The (C64 Image BBS)
+bbs goldminecommunitydoorgameserver 2274653646 goldminedoors.com:2513 Goldmine Community Door Game Server
+bbs hologramcomputing 2274656472 sbbs.hologramcomputing.net Hologram Computing BBS
+bbs innerfire 2274663734 bbs.innerfire.net Inner Fire
+bbs goofsgarage 2274663742 goofsgarage.com:6464 Goof's Garage
+bbs goneroguetwgs 2274663764 roguetw.net:2002 Gone Rogue TWGS
+bbs honeyathome 2274663928 fido.bajtek.org Honey-At-Home
+bbs gongpitthe 2274664748 bbs.gongpit.com:2323 Gongpit, The
+bbs goosenet 2274667363 bbs.g00r00.com Goosenet BBS
+bbs insaneasylum2 2274672632 75.86.99.33 Insane Asylum BBS (2)
+bbs insight 2274674448 bbs.ihlau.net:2323 Insight BBS
+bbs horizon 2274674966 bbs.horizonbbs.org Horizon BBS
+bbs integratedtelecommunicationscent 2274683472 itcbbs.ddns.net:23000 Integrated Telecommunications Centre
+bbs intergalacticloadingdocktwgs 2274683742 ild-tw.com:2002 Intergalactic Loading Dock TWGS
+bbs internaldimensionamiexpress 2274683762 bbs.idbbs.ca:1581 Internal Dimension (AmiExpress)
+bbs internaldimensionmystic 2274683763 bbs.idbbs.ca:59 Internal Dimension BBS (Mystic)
+bbs internetkingstwgsserver 2274683764 home.internetking.us Internetking's TWGS server
+bbs interstellarscoutservice 2274683778 107.174.246.213:2323 Interstellar Scout Service
+bbs involnayveritas 2274686562 volnay.org In Volnay Veritas BBS
+bbs intranic 2274687264 mx2.mexside.net:2323 IntraNIC
+bbs imzadibox 2274692342 box.imzadi.de Imzadi Box
+bbs iowastudentasscisca 2274692788 bbs.iscabbs.com Iowa Student Assc. BBS (ISCA)
+bbs gradysliquorstore 2274723975 hcow.dynu.net:1985 Grady's Liquor Store
+bbs gradysliquorstoregameserver 2274723976 hcow.dynu.net:1984 Grady's Liquor Store (Game Server)
+bbs greenhead 2274733643 bbs.greenhead.ca:2323 Greenhead BBS
+bbs gp35org 2274735674 gp35.org:2300 GP35.org
+bbs gremax 2274736290 bbs.grem.ax Gremax BBS
+bbs greywolfsden 2274739965 greywolf.synchro.net Greywolf's Den
+bbs grinchesrealmthe 2274746243 tgr.freeddns.org Grinches Realm, The
+bbs grimoire 2274746647 grimoirebbs.sytes.net Grimoire BBS
+bbs isisunveiled 2274747868 70.116.73.77 ISIS Unveiled
+bbs grognardsredoubt 2274764627 bbs.buckroe.me Grognard's Redoubt
+bbs groundcontrol 2274768632 gcbbs.net:2323 Ground Control BBS
+bbs iptiarbbspc 2274784272 bbs.ipingthereforeiam.com:2324 IPTIA (RBBS-PC)
+bbs iptiasynchronet 2274784279 bbs2.ipingthereforeiam.com:2323 IPTIA BBS (Synchronet)
+bbs itchybuttcolor64 2274824928 itchybutt.org:6502 Itchy Butt BBS (Color 64)
+bbs huanianxiaoji 2274826426 literature.twbbs.io Huanian Xiaoji
+bbs guardianofforever 2274827342 guardian.synchro.net Guardian of Forever
+bbs guru 2274878000 bbs.bajer.cz:32 Guru BBS
+bbs 4wheelham 2274943354 45.76.236.169 4 Wheel Ham BBS
+bbs hynet 2274963800 bbs.hyena.network HyNET BBS
+bbs hysteria 2274978374 bbs.retrorewind.ca Hysteria BBS
+bbs labbej27 2275222352 matrix.labbej.fr:2323 Labbej27
+bbs jacen 2275223600 bbs.jacen.moe Jacen BBS
+bbs jacobshideout 2275226274 bbs.jacobcat.app Jacob's Hideout BBS
+bbs labthe 2275228430 bbs.dicksonlabs.net:2325 Lab BBS, The
+bbs kalgoorlieretro 2275254667 bbs.theiguru.au:2323 Kalgoorlie Retro BBS
+bbs landofthelost 2275263638 landofthelost.ca:2300 Land of the Lost
+bbs landover 2275263683 landover.synchronetbbs.org Landover BBS
+bbs kcmsystem 2275267978 zahrl.ddns.net:2023 KCM BBS System
+bbs jasonwalkerca 2275276692 bbs.jasonwalker.ca:2323 BBS.JasonWalker.ca
+bbs kc7stw 2275277890 phantomrage.ddns.net KC7STW
+bbs lastrangers 2275278726 lastrangers.com Last Rangers' BBS
+bbs lasttelegraphoffice 2275278835 bbs.acornabbey.us:2323 Last Telegraph Office
+bbs latenightdiversidial 2275283644 latenight.diversidial.com:313 LateNight DiversiDial
+bbs katsalley 2275287255 tka.8bitboyz.com:6400 Kats Alley
+bbs jaydawg 2275293294 offthehook.sytes.net:2323 JayDawg BBS
+bbs kaypro 2275297760 kayprobbs.org Kaypro-BBS
+bbs kd3net 2275336380 bbs.kd3.us KD3net
+bbs keep 2275337000 thekeep.net KEEP BBS
+bbs l33test 2275338378 bbs.l33test.com L33TEST
+bbs lehighvalleyvintagecomputerclub 2275344448 bbs.lightly-salted.com:8023 Lehigh Valley Vintage Computer Club
+bbs leisuretime 2275347873 bbs.riddells.net:10023 Leisure Time BBS
+bbs kernelfortress 2275376353 kernelfortress.org Kernel Fortress
+bbs jerseyjam 2275377395 jerseyjam.com Jersey Jam BBS
+bbs level29 2275383529 bbs.fozztexx.com Level 29
+bbs kd8hfx 2275384390 bbs.kd8hfx.net KD8HFX
+bbs lexiconimage 2275394266 lexiconbbs.com:6400 Lexicon BBS (Image BBS)
+bbs liane 2275426300 bbs.vslib.cz Liane BBS
+bbs killedinaction 2275455334 kia.zapto.org Killed In Action BBS
+bbs k4jtt 2275458800 k4jttbbs.ddns.net:2424 K4JTT BBS
+bbs linernotes 2275463766 153.120.45.157 Liner Notes
+bbs kingdomsendmystic 2275464366 bbs.kingdomsendbbs.net Kingdom's End BBS (Mystic)
+bbs kingdomsendsynchronet 2275464367 sbbs.kingdomsendbbs.net Kingdom's End BBS (Synchronet)
+bbs kirika 2275474520 andcycle.idv.tw Kirika BBS
+bbs liquiddigital 2275478433 107.220.168.189 Liquid Digital
+bbs livewire 2275483947 livewirebbs.com:1025 Live Wire BBS
+bbs kiwimates 2275494628 96.231.233.47 KiwiMates
+bbs kk4qbn 2275547260 kk4qbn.synchro.net KK4QBN BBS
+bbs jlr 2275570000 104.189.133.180:8888 JLR BBS
+bbs localyocal 2275622596 localyocalbbs.com Local Yocal BBS
+bbs joescomputer 2275637266 joesbbs.com Joe's Computer BBS
+bbs jollyrogerthe 2275655976 bbs.thejollyrogerbbs.com:8023 Jolly Roger BBS, The
+bbs looneybin 2275666392 looneybinbbs.com:2023 Looney Bin BBS!
+bbs lnrcinboards 2275672462 board.lnrcbbs.net LNRC-IN Boards
+bbs korenblom 2275673625 bbs.korenblom.nl Korenblom
+bbs lordraptorsdomain 2275673727 150.221.218.212 Lord Raptor's Domain
+bbs lordstabsorg 2275673782 lord.stabs.org Lord.stabs.org
+bbs lordtown 2275673869 telnet.lord.town:2323 L.O.R.D. Town
+bbs lostcaverns 2275678228 tlcbbs.dynu.net:6400 Lost Caverns BBS
+bbs lostchordcommodore 2275678246 tlcbbs.synchro.net:6400 Lost Chord BBS (Commodore BBS)
+bbs lostchordsearchlight 2275678247 tlcbbs.synchro.net:6023 Lost Chord BBS (Searchlight BBS)
+bbs lostcrypt 2275678279 bbs.lostcrypt.com Lost Crypt BBS
+bbs lostways 2275678929 98.144.7.205 Lostways BBS
+bbs loveofnetendlesschinese 2275683636 bbs.qeeai.com Love Of Net Endless (Chinese)
+bbs lowcrashdev 2275692727 bbs.lowcrash.dev:8888 LowCrash DEV BBS
+bbs kraabygamer 2275722294 kraaby.synchro.net Kraaby Gamer BBS
+bbs kr4kpascorner 2275745727 bbs.kr4kpa.com KR4KPA's Corner
+bbs kuehlbox 2275834526 195.201.241.105:23023 Kuehlbox
+bbs lunaroutpost 2275862768 lunarout.synchro.net:8023 Lunar Outpost
+bbs lunaticsunleashed 2275862842 lunaticsunleashed.ddns.net:2333 Lunatics Unleashed BBS
+bbs jumpstart 2275867782 exciter.ws JumpStart BBS
+bbs jupiter 2275874837 217.180.212.89 Jupiter
+bbs lyticalhackfund 2275984225 134.209.40.1:31337 Lytical HackFund BBS
+bbs m0nde 2276063300 172.105.27.143 M0n.de BBS
+bbs machdyne 2276224396 206.189.226.31 Machdyne BBS
+bbs naclcon 2276225266 naclconbbs.net Naclcon BBS
+bbs mbbsdev 2276227338 mbbs.dev MBBS.dev
+bbs madetoraid 2276233867 bbs.madetoraid.com:2323 Made To Raid
+bbs madhatters 2276234288 bbs.canerduh.com:23903 Mad Hatters BBS
+bbs madmanwithabluebox 2276236269 madmanbbs.ddns.net Madman with a Blue Box
+bbs madworld 2276239675 www.madworldbbs.com:52146 MadWorld BBS
+bbs magicsystems 2276244279 bbs.magicbbs.eu:6323 Magic Systems
+bbs maiksplace 2276245775 bbs.maik.ch:2323 Maiks Place BBS
+bbs mahoneyclantwgs 2276246639 seamusmahoney.com Mahoney-Clan TWGS
+bbs magnum 2276246860 magnumbbs.net Magnum BBS
+bbs majorbbsofficialdemo 2276256722 bbs.themajorbbs.com MajorBBS Official Demo BBS
+bbs nckuccns 2276258226 bbs.ccns.ncku.edu.tw:3456 NCKU CCNS
+bbs malte 2276258300 bbs.swedishchef.org Malte
+bbs manetherenwg 2276263843 24.3.154.248 ManetherenWG
+bbs maniaczone 2276264229 tmz.synchronetbbs.org:513 Maniac Zone
+bbs manicmodem 2276264266 manic-modem.com Manic Modem
+bbs nanyanginn 2276269264 bbs.nykz.net Nanyang Inn
+bbs mbpeikert 2276273453 mbpeikert.ddns.net Mbpeikert
+bbs mbseprofessionaldev 2276273776 phoenix.bnbbbs.net:2323 MBSE Professional Dev BBS
+bbs oasis 2276274700 oasisbbs.hopto.org:6400 Oasis BBS
+bbs markvandaelestwgs 2276275826 game.tw2002.net Mark Van Daele's TWGS
+bbs masoftssh 2276276387 bbs.masoft.ro:2222 MASOFT BBS (SSH)
+bbs masterbootrecord 2276278372 mbrserver.com Master Boot Record
+bbs mastodon 2276278636 mastodon.uy Mastodon
+bbs matrix 2276287490 108.173.128.162:2323 Matrix BBS
+bbs maxbbs 2276292270 maxbbs.ddns.net:24023 MaxBBS
+bbs ne 2276300000 nebbs.servehttp.com:9223 NE BBS
+bbs necrocyber 2276327629 bbs.abraxas.wtf Necro-Cyber
+bbs needspace 2276333772 needspace.us Needspace BBS
+bbs offgridholdout 2276334743 bbs.offgridholdout.org:2524 Offgrid Holdout BBS
+bbs offthewall 2276338439 offthewall.dmxrob.net Off The Wall
+bbs medusa 2276338720 medusagaming.ca:230 Medusa BBS
+bbs megadodopublications 2276342363 megadodo.online:4242 Megadodo Publications
+bbs melsdiner 2276357346 199.195.254.241:6800 Mel's Diner
+bbs nemethsphere 2276363847 nemethsphere.ddns.net Nemethsphere BBS
+bbs neonet 2276366380 broperators.com:1025 Neonet
+bbs memphistw 2276367447 bbs.memphistw.org Memphis TW BBS
+bbs neovintage 2276368468 bbs.delorted.com Neo-Vintage BBS
+bbs nerdrage 2276373724 nerdragebbs.ddns.net NerdRage BBS
+bbs nestthe 2276378843 megabytez.pt:2323 Nest, The
+bbs metalzone 2276382596 tmzbbs01.synchro.net Metal Zone
+bbs oetelx 2276383590 oetelx.nl OETELX BBS
+bbs neverneverland 2276383763 neverneverlandbbs.com:2323 Never Never Land BBS
+bbs meulab 2276385220 bbs.meulab.fun MeuLab BBS
+bbs metroolografix 2276387665 bbs.olografix.org Metro Olografix
+bbs netvillagesysopcommunity 2276388455 96.231.233.50 NetVillage Sysop Community
+bbs neutralzonetwgs 2276388725 countsflix.com:2002 Neutral Zone TWGS
+bbs nettwerked 2276388937 nettwerked.synchronetbbs.org Nettwerked BBS
+bbs newsnetonlineorg 2276397638 47.32.85.161 NewsNetOnline.org
+bbs nexus 2276398700 nexus.aefinity.io Nexus BBS
+bbs newworldoftheinternet 2276399675 209.141.35.127 New World of the Internet
+bbs microblastertwgs 2276427625 microblaster.net:2002 MicroBlaster TWGS
+bbs micropolis 2276427676 bbs.micropolis.com Micropolis BBS
+bbs microtown 2276427686 microtownbbs.com:6400 Microtown BBS
+bbs nieltown 2276435869 nieltown.dyndns.org Nieltown BBS
+bbs midnightlounge 2276436444 midnightlounge.online Midnight Lounge
+bbs nightbite 2276444824 nightbite.redirectme.net:2323 Nightbite BBS
+bbs nightfox 2276444836 bbs.nightfox818.com NightFox BBS
+bbs nightowl 2276444869 nightowlbbs.ddns.net:6400 Night Owl BBS
+bbs nightwire 2276444894 144.91.91.30:8888 Nightwire BBS
+bbs nikom 2276456600 bbs.nikom.org:2323 Nikom BBS
+bbs mimacrebirth 2276462273 mimac.bizzi.org:2323 Mimac Rebirth
+bbs nimbus 2276462870 nimbus.synchronetbbs.org Nimbus BBS
+bbs mindseye 2276463739 themindseyebbs.com:2323 Mind's Eye BBS
+bbs nineworlds 2276463967 thenineworlds.dnshome.de:923 Nine Worlds BBS
+bbs oiranalienmuseum 2276472625 libido.cx Oiran Alien Museum
+bbs miskatonic 2276475286 timrouter.dns.army:2323 Miskatonic BBS
+bbs missinglinks 2276477464 bbs.mlinks.com Missing Links
+bbs mistressoffire 2276478737 mistressoffire.com Mistress of Fire
+bbs niteeyesmystic 2276483393 bbs.lizardmaster.com Nite Eyes BBS (Mystic)
+bbs niteeyessynchronet 2276483394 107.152.35.11 Nite Eyes BBS (Synchronet)
+bbs nitelite 2276483548 nitelite.ddns.net:9000 NiteLite BBS
+bbs 64vintage 2276484682 64vintageremixbbs.dyndns.org:6400 64 Vintage BBS
+bbs miyanet 2276492638 miyanet.moe Miya Net
+bbs mizukicommunitynewsmth 2276498542 bbs.newsmth.net Mizuki Community (Newsmth BBS)
+bbs oldchat 2276532428 bbs.oldchat.ru BBS OldChat
+bbs oldestfutureobject 2276533783 ofo.tw Oldest Future Object
+bbs oldhighlandborg 2276534444 ohb.synchronetbbs.org Old Highland Borg
+bbs oldschooltwgs 2276537246 diskhopp.synchro.net:2002 Oldschool TWGS
+bbs oldtimessake 2276538463 otsbbs.ddns.net:2323 Old Time's Sake BBS
+bbs olympus 2276596787 olympus.hermesbbs.com:2300 Olympus BBS
+bbs nocarrier 2276622774 bbs.wehack.net No Carrier BBS
+bbs modemotider 2276633668 modematider.selstam.nu:50023 Modemo Tider
+bbs modernretrothe 2276633767 higgshightech.org:2323 Modern Retro, The
+bbs moestavern 2276637828 moetiki.ddns.net:27 Moe's Tavern
+bbs noisebridge 2276647327 noisebridgebbs.com:8888 Noisebridge BBS
+bbs noiseforest 2276647336 tnf-bbs.net Noise Forest BBS
+bbs onix 2276649000 onixbbs.servebbs.com:2525 Onix BBS
+bbs mojosworld 2276656796 mojo.synchro.net Mojo's World BBS
+bbs mmn 2276660000 web.mmn.ca MMN
+bbs nonexistant 2276663947 184.99.42.197 Non-Existant BBS
+bbs omniverse 2276664837 omniversebbs.com:3237 Omniverse BBS
+bbs moonbasealphatwgs 2276666227 mba.dnsalias.com:2002 Moon Base Alpha (TWGS)
+bbs moonbasealphavadv 2276666228 mba.dnsalias.com Moon Base Alpha (VADV)
+bbs monochrome 2276666247 mono.org Monochrome
+bbs monterey 2276668373 montereybbs.com Monterey BBS
+bbs nore 2276673000 vetromac.dyndns-ip.com:2323 NORE BBS
+bbs nosignal 2276674462 217.154.107.144 No Signal BBS
+bbs morningsidemortuary 2276676464 mortuary.ddns.net MorningSide Mortuary
+bbs nostalmania 2276678256 nostalmania.com NostalMania
+bbs northernlights 2276678437 194.163.226.118 Northern Lights BBS
+bbs northernpalace 2276678438 thenorthernpalace.com:2020 Northern Palace
+bbs noverdu 2276683738 noverdu.com Noverdu BBS
+bbs motherboard 2276684372 mb.oldschoolbbs.com:6502 Motherboard BBS
+bbs mouthofhell 2276688463 mouthofhell.duckdns.org Mouth of Hell BBS
+bbs nowheretwgs 2276694373 joestavern.ddns.net:2002 NoWhere TWGS
+bbs mozysswampandreddwarf 2276699779 bbs.mozysswamp.org Mozy's Swamp and Red Dwarf BBS
+bbs mozysswampandreddwarftwgs 2276699780 bbs.mozysswamp.org:24 Mozy's Swamp and Red Dwarf TWGS
+bbs orchestra 2276724378 sacrebase.mywire.org:486 Orchestra BBS
+bbs orbisbbs 2276724722 97.154.218.154 OrbisBBS
+bbs opentwserver 2276736897 games.opentw.org:2002 Open TW Server
+bbs operationivy 2276737284 opivy-bbs.com Operation Ivy BBS
+bbs oshaboy 2276742269 top-swadba.de:2323 Oshaboy BBS
+bbs orreli 2276773540 bbs.orreli.net:45023 BBS Orreli
+bbs mstation 2276782846 mstation.servebbs.com M. Station
+bbs opticalillusion 2276784225 optical.c64bbs.nu:64128 Optical Illusion BBS
+bbs nuagecomputersystem 2276824326 bbs.nuageinfo.com Nuage BBS Computer System
+bbs nuclearclub 2276825327 nuke.club:513 Nuclear Club
+bbs nuclearreactor 2276825328 nukebbs.ddns.me:1541 Nuclear Reactor BBS
+bbs overthebrink 2276837843 brinkbbs.org Over The Brink
+bbs muinet 2276846380 muinet.com:2323 Muinet
+bbs mtlgeeksynchronet 2276854335 mtlgeek.synchro.net MtlGeek (Synchronet)
+bbs mtlgeektwgs 2276854336 mtlgeek.synchro.net:2002 MtlGeek (TWGS)
+bbs 68kmacclub 2276856222 bbs.m68k.club 68k Mac Club
+bbs musicstation 2276874278 home.bsrealm.net Music Station
+bbs murphy 2276877490 meteo.leopedone.it:2023 Murphy BBS
+bbs nutasylummystic 2276882795 xtcbox.org:2323 Nut Asylum (Mystic)
+bbs nutasylumwildcat 2276882796 xtcbox.org Nut Asylum (Wildcat)
+bbs outerlimitsthe 2276883754 outerlimitsbbs.duckdns.org Outer Limits, The
+bbs mutiny1 2276884691 mutinybbs.com:2332 Mutiny BBS (1)
+bbs mutiny2 2276884692 mutiny.cigdangle.com:65023 Mutiny BBS (2)
+bbs mutinybrazil 2276884693 bbs.retronet.com.br:2323 Mutiny Brazil
+bbs mutinycommunity 2276884694 mutinybbs.com:2300 Mutiny Community
+bbs outpost9 2276887678 bbs.outpost9.co:2023 Outpost 9 BBS
+bbs outpost 2276887679 bbs.outpostbbs.net Outpost BBS
+bbs outwest 2276889378 outwestbbs.com Outwest BBS
+bbs owces 2276923700 47.166.101.67:2323 OWCES
+bbs myndgame 2276963426 bbs.themyndgame.com Myndgame BBS
+bbs mysmth 2276976840 bbs.mysmth.net Mysmth BBS
+bbs mysteriamajicka 2276978374 majicka.at2k.org:1955 Mysteria Majicka BBS
+bbs mystichobbies 2276978424 mystic-hobbies.com Mystic Hobbies
+bbs mysticnight 2276978426 68.36.73.125 Mystic Night BBS
+bbs mysticrealms 2276978427 mysticrealms.ddns.net:11000 Mystic Realms
+bbs mysticrhythms 2276978428 mystic.wwivbbs.org Mystic Rhythms BBS
+bbs mythicalkingdomtech 2276984422 bbs.mythicalkingdom.com:3000 Mythical Kingdom Tech BBS
+bbs mythicalkingdomtechsbbs 2276984423 bbs.mythicalkingdom.com:5023 Mythical Kingdom Tech SBBS
+bbs mythology 2276984656 mythologybbs.com:6984 Mythology BBS
+bbs scannet 2277226638 scannetbbs.myddns.me:6400 ScanNet BBS
+bbs rcbox 2277226900 rc2014.ddns.net:2014 RC-BOX
+bbs rbbsystemsintl 2277227978 rbb.fidonet.fi:32 RBB Systems Int'l
+bbs sbbsystems 2277227979 bbs.sbbsystems.com:8888 SBB Systems
+bbs scenelist1 2277236354 scenelist.org Scene List (1)
+bbs scenelist2 2277236355 ftp.scenelist.org:4000 Scene List (2)
+bbs sbds 2277237000 bbs.sbdsdev.com SBDS
+bbs p2ilab 2277245220 bbs.p2i-lab.com:6400 P2i Lab
+bbs rainbowsend 2277246269 therainbowsendgs.ddns.net Rainbow's End
+bbs ragnaroks 2277246276 crm.bertonmoreno.com.ar:23021 Ragnarok's BBS
+bbs palantir 2277252684 palantirbbs.ddns.net Palantir BBS
+bbs ralserlabbbsradio 2277257375 euklid.ddns.net:5745 Ralser Lab BBS & BBSradio
+bbs sanctuary 2277262882 sanctuary.zapto.org:1541 Sanctuary BBS
+bbs sanctumii1 2277262886 sanctumbbs.com Sanctum II BBS (1)
+bbs sanctumii2 2277262887 sanctumbbs.com:6502 Sanctum II BBS (2)
+bbs sandnes 2277263637 stokmarknes.org:24 Sandnes BBS
+bbs sandsoftime 2277263763 rayyeargin.com Sands of Time
+bbs ramifications 2277264342 bbs.ramifications.ca:5128 Ramifications
+bbs santronicsrdbetasite 2277268766 update.winserver.com:24 Santronics R&D Beta Site
+bbs santronicssoftware 2277268767 online.winserver.com:24 Santronics Software
+bbs paradox1 2277272369 paradoxbbs.synchronetbbs.org:513 Paradox BBS (1)
+bbs parasite 2277272748 www.kimmoviitanen.fi:2323 Parasite
+bbs scratchedreality 2277272824 reality.throwbackbbs.com:2323 Scratched Reality
+bbs papichulosmajorbbs 2277274248 75.31.92.35 PapiChulo's MajorBBS
+bbs rapidfire 2277274334 rapidfire.hopto.org:64128 RapidFire
+bbs particles 2277278425 particlesbbs.dyndns.org:6400 Particles! BBS
+bbs parttime 2277278846 ptbbs.ddns.net:8000 Part-Time BBS
+bbs partybowl 2277278926 partybowlbbs.ddns.net:2323 Party Bowl BBS
+bbs satellite4 2277283554 satellite4.dynu.net:6400 Satellite4
+bbs raveolution 2277283658 raveolution.hopto.org:64128 Raveolution
+bbs ravenofthestorm 2277283663 50.20.127.213 Raven of the Storm
+bbs pathunknown 2277284865 pathunknown.net Path Unknown BBS
+bbs ratsden 2277287336 bbs.catracing.org:6840 Rats Den BBS
+bbs rayzernet 2277299376 connect.rayzer.net:2112 RayzerNET BBS
+bbs razzpie 2277299743 razzpie.ddns.net:2300 Razzpie BBS
+bbs seabreezegamingnetworktwgs 2277322733 seabreeze.servegame.com:2002 Sea Breeze Gaming Network (TWGS)
+bbs seabreezegamingnetworkworldgroup 2277322734 seabreeze.servegame.com Sea Breeze Gaming Network (Worldgroup)
+bbs react 2277322800 react-bbs.nikoh.it:2323 React BBS
+bbs sd2iectest 2277324328 cib.dyndns.org:6403 SD2IEC Test BBS
+bbs pebkaclol 2277325225 pebkac.lol Pebkac.lol
+bbs realitycheck 2277325489 realitycheckbbs.org Realitycheck BBS
+bbs realm 2277325600 therealm.synchro.net Realm BBS
+bbs realmofserion 2277325663 connect.serionbbs.com Realm of Serion
+bbs secondrealitytelnet 2277326637 20forbeers.com Second Reality Telnet
+bbs sector697 2277328676 73.101.88.26:2323 Sector 697
+bbs sdf1 2277331000 bbs.sdf1.net:5023 SDF-1 BBS
+bbs redghost 2277334467 87.106.7.15 Red Ghost BBS
+bbs reignoffire 2277344663 call.rofbbs.com:6800 Reign of Fire
+bbs reignoffireii 2277344664 call.rofbbs.com:6400 Reign of Fire II
+bbs reignoffireiii 2277344665 call.rofbbs.com:8502 Reign of Fire III
+bbs reliablelink 2277354225 relink.netbbs.org:2323 Reliable Link
+bbs penaltybox 2277362589 thepenaltybox.org Penalty Box BBS
+bbs resonant 2277376626 telnet.getadongle.com Resonant BBS
+bbs pepsicola 2277377426 23.118.36.39:2023 PepsiCola
+bbs pesto 2277378600 bbs.pewp.us Pesto BBS
+bbs pepzi 2277379400 pepzi.eu Pepzi BBS
+bbs revenant 2277383626 revenantbbs.com Revenant BBS
+bbs reversepolarity 2277383773 revpol.lovelybits.org:1337 Reverse Polarity
+bbs revertivepulse 2277383784 revertivepulse.net Revertive Pulse
+bbs petitcaillou 2277384822 bbs.jayscafe.net:6402 Petit Caillou BBS
+bbs petsciinw 2277387244 petscii.neuraweb.io:6400 PETSCII.NW
+bbs retro 2277387600 retro.nedmr.com:2323 Retro BBS
+bbs retro16 2277387616 mail.drf-solutions.net Retro16 BBS
+bbs retrocampus 2277387622 bbs.retrocampus.com BBS Retrocampus
+bbs retrocampus2 2277387623 bbs.retrocampus.com Retrocampus BBS
+bbs retroaktiv 2277387625 retr0aktiv.com Retroaktiv BBS
+bbs retroboard 2277387626 bbs.retroboardbbs.com:2323 RetroBoard BBS
+bbs retroarchive 2277387627 bbs.retroarchive.org Retro Archive
+bbs retroconnectorg 2277387628 retroconnect.org Retroconnect.org
+bbs retro32 2277387632 bbs.retro32.com:1337 Retro32 BBS
+bbs retrodigital 2277387634 rdnetbbs.com RetroDigital BBS
+bbs retrogamingactivities 2277387642 react-bbs.nikoh.it:2323 Retrogaming Activities
+bbs retrograde 2277387647 rtg.dyndns.biz:6428 Retrograde BBS
+bbs retrogradeii 2277387648 cib.dyndns.org:6404 Retrograde II BBS
+bbs retrolair 2277387652 retrolair.amigaretro.net:6800 RetroLair BBS
+bbs retrolink 2277387654 bbs.retro-link.net:18297 RetroLink BBS
+bbs retrorunning 2277387678 retrorunning.ddns.net:8880 Retro Running BBS
+bbs retroswim 2277387679 ezycom.retroswim.net:2323 RetroSwim BBS
+bbs retrovarese 2277387682 bbs.alecama.link Retro Varese
+bbs retrotechhaus 2277387683 bbs.retrotech.haus Retro Tech Haus
+bbs retrounboxers 2277387686 flashbackbbs.sytes.net:6502 Retro Unboxers
+bbs shadow 2277423690 shadowbbs.com Shadow BBS
+bbs shadowland 2277423695 shadowlandbbs.eu Shadowland BBS
+bbs shadoworks 2277423696 bbs.shadoworks.net ShadoWorks BBS
+bbs shadowscope 2277423697 shadowscope.noip.us Shadowscope BBS
+bbs richardsfunhouse 2277424273 richardf.synchro.net Richard's Fun House
+bbs ricks 2277425700 ricksbbs.synchro.net Ricks BBS
+bbs phantasm 2277426827 phantasm.bbs.io:4489 Phantasm
+bbs pharcyde 2277427293 bbs.pharcyde.org Pharcyde BBS
+bbs phaseshift 2277427374 174.1.49.147:2323 Phaseshift
+bbs phatstarteleporter 2277428782 198.71.48.13:7777 Phatstar Teleporter
+bbs sidirs 2277434770 www.sirdir.ch:8888 Sidir's BBS
+bbs shenksexpress 2277436573 shenksxp.dyndns.org Shenk's Express
+bbs shiftbits 2277443824 bbs.shift-bits.com:2000 Shift-Bits BBS
+bbs shipwrecksshibboleths 2277447973 shibboleths.org:800 Shipwrecks & Shibboleths
+bbs silfenpath 2277453367 bbs.silfenpath.com Silfen Path BBS
+bbs silentnode 2277453686 silentnode.ddns.net:6400 Silent Node BBS
+bbs siliconunderground 2277454266 siliconu.com SiliconUnderground
+bbs silverhawk 2277458374 bbs.silverhawk.no:6400 Silverhawk BBS
+bbs silvermere 2277458376 silvermerebbs.org Silvermere
+bbs sinclairretro 2277462524 retrobbs.sinclair.homepc.it Sinclair Retro BBS
+bbs phoenix1 2277463649 phoenix.bnbbbs.net Phoenix BBS (1)
+bbs phoenix2 2277463650 hello.phoenixbbs.uk:6502 Phoenix BBS (2)
+bbs phoenix3 2277463651 76.180.235.16 Phoenix BBS (3)
+bbs simlives 2277465483 simlives.net Sim Lives
+bbs phonenet 2277466363 bbs.phonenet.net PhoneNet BBS
+bbs sinnersheaven 2277466377 207.246.74.70 Sinner's Heaven
+bbs phospher 2277467743 bbs.phospher.com Phospher BBS
+bbs sinusoid 2277468764 188.61.246.69:2323 Sinusoid
+bbs piranha 2277472642 blackflag.acid.org:27 Piranha BBS
+bbs phreaknet 2277473256 bbs.phreaknet.org PhreakNet
+bbs pipeline 2277473546 bbs.wantit.net:2323 PipeLine BBS
+bbs shuratosheavenlysphere 2277487286 shsbbs.net Shurato's Heavenly Sphere
+bbs pixelgroundsenigma12 2277493547 bbs.pixelgrounds.net:8888 Pixelgrounds BBS (Enigma 1/2)
+bbs slackers 2277522537 slackers.ovh:2323 Slackers BBS
+bbs skarabrea 2277527227 80.7.90.17:31337 Skara Brea
+bbs plasmasphere 2277527627 bbs.halium.com Plasma Sphere BBS
+bbs playlord 2277529567 playlord.org Play LORD
+bbs playmmdev 2277529663 157.250.206.117:2323 PlayMM_dev
+bbs playpen 2277529736 playpenbbs.com PlayPen BBS
+bbs qldump 2277538670 86.12.24.168 QL Dump
+bbs slimelite 2277546354 slimelite.wiredeyes.net:6023 Slimelite BBS
+bbs slipstream 2277547787 slipstreambbs.net SlipStream BBS
+bbs plopshop 2277567746 plopshop.top:8888 Plop Shop
+bbs slumberland 2277586237 bbs.slumberland.org Slumberland
+bbs pmf 2277630000 bbs.venerandi.it PMF BBS
+bbs sneezless 2277633953 bbs.sneezless.com Sneezless' BBS
+bbs softsolutions 2277638765 bbs.softsolutions.net.br:2023 Soft Solutions
+bbs poetryname 2277638796 storm-et-al.com Poetry.name
+bbs poignantbeaconpharos 2277644626 bbs.pharos.rocks Poignant Beacon (Pharos BBS)
+bbs solarflow 2277652735 solarflow.dynu.net:2300 Solarflow BBS
+bbs rolling 2277655464 rollingbbs.ddns.net Rolling BBS
+bbs snobsoft 2277662763 snobsoft.de:6401 Snobsoft BBS
+bbs roons 2277666700 bbs.roonsbbs.hu:1212 Roon's BBS
+bbs rmsbbs 2277672270 187.61.237.55 RMSBBS
+bbs sorcerorsisle 2277672376 96.231.233.53 Sorcerors Isle
+bbs portfolioatariportfolio 2277678365 pofobbs.ddns.net:992 Portfolio BBS (Atari Portfolio)
+bbs portofcallimage 2277678632 pocbbs.duckdns.org:6400 Port of Call BBS (Image)
+bbs portofcallrenegade 2277678633 pocbbs.duckdns.org Port of Call BBS (Renegade)
+bbs portofcallsynchronet 2277678634 pocbbs.duckdns.org:2323 Port of Call BBS (Synchronet)
+bbs sotanomsx 2277682666 sotanomsxbbs.org Sotano MSX BBS
+bbs rougenet 2277684363 bbs.roguenet.work:8888 RougeNet BBS
+bbs rouguechinese 2277684832 35.201.128.35 Rougue BBS (Chinese)
+bbs soundsofsilence 2277686376 sos-bbs.net Sounds of Silence BBS
+bbs southcentral 2277688423 southcentral.se:1023 South Central
+bbs southeaststar 2277688432 sestar.synchro.net SouthEast Star
+bbs southernamis 2277688437 southernamis.ddns.net Southern Amis
+bbs southitalycbbs 2277688448 fido.fidobbs.it:2301 South Italy CBBS
+bbs power 2277693700 bbs.powerbbs.com Power BBS
+bbs roysdonnettwgs 2277697366 tw2002.roysdon.net:2002 Roysdon.net TWGS
+bbs psc 2277720000 psc.servebeer.com:6870 PSC
+bbs spaceodyssey 2277722363 bbs.sobbs.org Space Odyssey
+bbs spaghettihut 2277724438 spaghettihut.amigaretro.net:6800 Spaghetti Hut
+bbs spectrumnext 2277732878 bbs.zxnext.uk:2323 Spectrum Next BBS
+bbs spectrumsyntax 2277732879 142.44.247.204 Spectrum Syntax
+bbs privateheavenii 2277748283 bbs.sydbolton.ca:6502 Private Heaven II
+bbs spitfirexhq 2277748347 x-bit.org:10023 Spitfire-X HQ
+bbs projectluminiferousaether 2277765328 luminiferousaether.tel Project Luminiferous Aether
+bbs prokegs 2277765347 proline.ksherlock.com:6523 Pro-Kegs
+bbs protectoratethe 2277768328 73.252.135.162 Protectorate BBS, The
+bbs protoweb 2277768693 warpstream.org Protoweb BBS
+bbs squaredcircle 2277782733 45.79.93.198 Squared Circle BBS
+bbs psychoward 2277792469 bbs.8yo.biz:5150 Psycho Ward
+bbs psychward 2277792492 3.19.240.72 Psych Ward
+bbs subcarrier 2277822277 subcarrier.ignorelist.com:2323 Subcarrier BBS
+bbs publicelectronicnetinfosystem 2277825423 penisys.online:6502 Public Electronic Net Info System
+bbs quantumwormholethe 2277826886 bbs.erb.pw Quantum Wormhole, The
+bbs starbase11 2277827227 bbs.starbase11.de:2323 Starbase 11 BBS
 bbs starbase21 2277827228 bbs.starbase21.net Starbase 21
+bbs starcollision 2277827265 scbbs.nsupdate.info:61023 Star Collision BBS
+bbs starfleethq 2277827353 bbs.sfhqbbs.org:5983 Star Fleet HQ
+bbs starflight 2277827354 stateoftheark.ca:1990 Star Flight BBS
+bbs starkillerstwgs 2277827545 sk-twgs.com:2002 Star Killer's TWGS
+bbs starmansionreturns 2277827626 viewneye.net:2323 Star Mansion Returns
+bbs starshipjunkyard 2277827744 bbs.starshipjunkyard.com Starship Junkyard
+bbs starshipjunkyardmystic 2277827745 bbs.starshipjunkyard.com:2323 Starship Junkyard (Mystic)
+bbs quazardoorgameserver 2277829273 quazarbbs.dynu.net:2523 Quazar BBS Door Game Server
+bbs questforzen 2277837836 96.231.233.46 Quest for Zen
+bbs questtwgs 2277837889 thequesttwgs.game-host.org Quest TWGS
+bbs stevenshive 2277838367 stevensbbs.stevenshive.xyz Steven's Hive BBS
+bbs quicksilver 2277842574 98.17.101.31 Quicksilver BBS
+bbs ruins 2277846700 www.theunderground.us:9707 Ruins BBS
+bbs sunsetcity 2277867382 178.105.20.174 Sunset City
+bbs storm 2277867600 telnet.stormbbs.com Storm BBS
+bbs stormgate 2277867642 stormgate.synchronetbbs.org Stormgate BBS
+bbs strangeplanet 2277872643 strangeplanet.org:6800 Strange Planet BBS
+bbs streetcorner 2277873382 streetcorner.ddns.net:6400 Street Corner BBS
+bbs superdimensionfortresssdf1 2277873734 sdf.org Super Dimension Fortress (SDF-1)
+bbs surfshop1 2277873746 ssbbs.ddns.net:6510 Surf Shop BBS (1)
+bbs surfshop2 2277873747 ssbbs.ddns.net:6502 Surf Shop BBS (2)
+bbs stripittoride 2277874748 stripittoride.club:9000 Strip It To Ride
+bbs sursumcorda 2277877862 sursum-corda.com Sursum Corda! BBS
+bbs rustymailbox 2277878962 trmb.ca:2030 Rusty Mailbox
+bbs swap 2277927000 dose.0wnz.at Swap BBS
+bbs swats 2277928700 swatsbbs.ddns.net:2323 S.W.A.T.S. BBS
+bbs swats2 2277928720 swatsbbs.ddns.net:2323 SWATS BBS
+bbs pwecksretreat 2277932577 bbs.pwecksretreat.com:2332 Pweck's Retreat
+bbs swedishusergroupofamiga 2277933474 suga.se:42512 Swedish User Group Of Amiga
+bbs swibbs 2277942270 swibbs.swiowa.tech SWIBBS
+bbs swifty 2277943890 bbs.swiftycode.ca:2323 Swifty BBS
+bbs swissirc 2277947747 bbs.swissirc.net SwissIRC BBS
+bbs synchrogeek 2277962476 home.echristopherson.com SynchroGeek
+bbs synchronix 2277962477 nix.synchro.net Synchronix
+bbs synapticrecluse 2277962784 75.164.252.57:8888 Synaptic Recluse BBS
+bbs synerchat 2277963724 synerchat.com Synerchat
+bbs sysopsolarisdotcommenu 2277976776 sysopsolaris.ddns.net:2323 Sysop Solaris Dot Com (Menu)
+bbs systemone 2277978366 cib.dyndns.org:6491 System One BBS
+bbs v01dc1ph3r 2278013217 bbs.canerduh.com:23056 V01d C1ph3r
+bbs tacopronto 2278226776 tacopronto.bbs.io Taco Pronto
+bbs tails1154 2278245711 bbs.tails1154.com:9998 Tails1154 BBS
+bbs 8bitclub 2278248258 bbs.8bitclub.com:6502 8Bit Club BBS
+bbs 8bitboyz 2278248269 bbs.8bitboyz.com:6502 8-Bit Boyz BBS
+bbs vague 2278248300 vague.ddns.net Vague BBS
+bbs 8bitlair 2278248524 bbs.8bitlair.net:6400 8 Bit Lair BBS
+bbs 8bitplayground 2278248752 8bit.hoyvision.com:6502 8-Bit Playground
+bbs valley1 2278255391 valleybbs.com Valley BBS (1)
+bbs valley2 2278255392 valley64.com:6400 Valley BBS (2)
+bbs tandemlabs 2278263365 tandemlabs.jp Tandem Labs BBS
+bbs tardis 2278273470 bbs.cortex-media.info TARDIS BBS
+bbs tassiebob 2278277432 bbs.tassiebob.com:2323 Tassie Bob BBS
+bbs tartarus 2278278278 bbs.martincanto.com Tartarus BBS
+bbs vault 2278285800 thevaultbbs.ddns.net:2323 Vault BBS
+bbs techrono 2278324766 techrono.synchro.net Techrono BBS
+bbs techware 2278324927 bbs.techware2k.com Techware
+bbs telbox 2278352690 telbox.net TelBox
+bbs telearenaus 2278353273 bbs.telearena.us BBS.Telearena.us
+bbs telehack 2278353422 telehack.com Telehack
+bbs veleno 2278353660 velenobbs.net Veleno BBS
+bbs telescnetbr 2278353726 bbs.telesc.net.br BBS Telesc.net.br
+bbs telephreak 2278353747 bbs.telephreak.org Telephreak BBS
+bbs teletexttelnet 2278353839 www.teletext.ca Teletext Telnet
+bbs teletype 2278353897 teletypegames.org:2323 Teletype BBS
+bbs telnetbiblecom 2278356382 telnetbible.com:6400 TelnetBible.com
+bbs tempestfury 2278367378 tempestfury.d2g.com Tempest Fury BBS
+bbs verifynebula 2278374396 verify-nebula.kicks-ass.net Verify-Nebula
+bbs terminalobsession 2278376462 terminal-obsession.hopto.org:1541 Terminal Obsession
+bbs terrabrasilis 2278377227 tbrasilis.ddns.net:23000 Terra Brasilis
+bbs terranempire 2278377263 terranempire.ddns.net:1071 Terran Empire
+bbs vertrauen 2278378728 vert.synchro.net Vertrauen
+bbs 8424 2278424000 telnet.84-24.org 84-24
+bbs videogamenirvana 2278433642 bbs.videogamenirvana.com Video Game Nirvana
+bbs theoretically 2278436738 97.238.247.81:60723 Theoretically BBS
+bbs tigernet 2278443763 tigernet.dewindt.us Tigernet BBS
+bbs thirdagetwgs 2278447324 3rdagetwgs.freeddns.org:2002 Third Age TWGS
+bbs thisoldcabinenglish 2278447653 bbs.thisoldcabin.net:6464 This Old Cabin (English)
+bbs thisoldcabinswedish 2278447654 bbs.thisoldcabin.net:2323 This Old Cabin (Swedish)
+bbs timbernet 2278462376 bbs.timbernetbbs.com:2323 Timbernet BBS
+bbs timeair 2278463247 clients.renebates.com Time Air BBS
+bbs timelord 2278463567 teehill.adirondackpc.com:2020 Timelord BBS
+bbs timetraveler 2278463872 timetraveler.redirectme.net Time Traveler
+bbs timewarp 2278463927 twb.wrgnbr.com:6896 Time Warp BBS
+bbs timewarpoffuture 2278463928 time.synchro.net:24 Time Warp of Future
+bbs tingtaochinese 2278464826 bbs.tingtao.net Tingtao (Chinese)
+bbs violeti 2278465384 violetyggdrasil.live:1144 Violeti BBS
+bbs threeblindmice 2278473325 threeblindmice.synchronetbbs.org Three Blind Mice
+bbs viperspittwgs 2278473777 sk-twgs.com:2002 Viper's Pit TWGS
+bbs viperthe 2278473784 theviperbbs.ddnsfree.com Viper BBS, The
+bbs throwback 2278476922 bbs.throwbackbbs.com Throwback BBS
+bbs virtualcove 2278478825 vcovbbs.synchro.net:6818 Virtual Cove BBS
+bbs titantictelnetthe 2278482684 ttb.rgbbs.info Titantic BBS Telnet, The
+bbs thunder 2278486337 149.56.47.118:1023 Thunder BBS
+bbs thunderstormtwgs 2278486338 thunder-storm.ca:52002 Thunder Storm TWGS
+bbs thunderline 2278486339 thunder.synchro.net Thunder-Line BBS
+bbs thunderbolt 2278486340 tboltbbs.synchro.net Thunderbolt BBS
+bbs vk7hdms 2278574367 workstation.ddmcomputers.com.au:2323 VK7HDM's BBS
+bbs ultimateworldonline 2278584628 24.3.35.148 Ultimate World Online BBS
+bbs uncensored 2278623676 uncensored.citadel.org Uncensored!
+bbs tobyspink 2278629774 tluhtmntkwexale3.myfritz.net:6400 Tobys Pink BBS
+bbs undercurrents 2278633728 undercurrents.io:8088 Undercurrents BBS
+bbs undergroundthe 2278633747 www.theunderground.us:10023 Underground BBS, The
+bbs undernet 2278633763 undernet.uy Undernet BBS
+bbs undermine 2278633764 bbs.undermine.ca Undermine BBS
+bbs unicyber 2278642923 bbs.unicyber.co.uk:2323 Unicyber BBS
+bbs void 2278643000 voidbbs.com VOID BBS
+bbs unixbit 2278649248 x-bit.org:1336 Unix-Bit BBS
+bbs unleashed 2278653274 www.unleashedinet.org Unleashed BBS
+bbs tombbs 2278662270 bbs4eva.thomasfederico.dev TOMBBS
+bbs tomcat 2278662280 tomcatbbs.ddns.net:2323 Tomcat BBS
+bbs tomatoplace 2278662867 bbs.tomato.place:8888 Tomato Place
+bbs toolazy 2278665299 toolazy.synchro.net:2323 Too Lazy BBS
+bbs toolshed 2278665743 toolshed.synchro.net:2323 Tool Shed
+bbs tommysholidaycamp 2278666974 vintage.thcbbs.com Tommy's Holiday Camp
+bbs uorealms 2278673256 bbs.uorealms.com UORealms BBS
+bbs vortex1 2278678391 vortexbbs.com Vortex BBS (1)
+bbs vortex2 2278678392 vortex.redirectme.net:3777 Vortex BBS (2)
+bbs tournamentwordle 2278687626 bbswordle.com BBS Tournament Wordle
+bbs towerofrassilon 2278693763 bbs.towerofrassilon.net:6800 Tower of Rassilon
+bbs toxiclaboratory 2278694252 toxicbbs.com Toxic Laboratory BBS
+bbs tradewarsacademytwgs 2278723392 tradewarsacademy.com:2002 Trade Wars Academy TWGS
+bbs transferinterruped 2278726733 news.belchi.org:2323 Transfer Interruped BBS
+bbs trapdoor 2278727366 trapdoor.synchro.net TrapDoor BBS
+bbs trashbyteresearch 2278727429 research.trashbyte.com:8888 Trashbyte Research
+bbs userclub 2278737258 userclub-bbs.com UserClub BBS
+bbs trianglesmafia 2278742645 bbs.trianglesmafia.com Triangles Mafia
+bbs tsinghuaunivfengqiaostn 2278746448 bbs.cs.nthu.edu.tw Tsinghua Univ. (Fengqiao Stn.)
+bbs tringulum 2278746485 169.58.97.99:2323 Tringulum
+bbs ussexcelsior 2278773923 excelsiorbbs.ddns.net:2000 USS Excelsior BBS
+bbs tqps 2278777000 tqps.ddns.net TQPS
+bbs us99 2278799000 bbs.quinnnet.org:513 US 99 BBS
+bbs utilsretro 2278845773 retro.setsuid.net:8221 Util's Retro BBS
+bbs tuxedocatlounge 2278893362 bbs.tuxedocatbbs.com:2323 TuxedoCat Lounge
+bbs twilight 2278945444 129.151.218.124:2323 Twilight BBS
+bbs twilightzone 2278945445 tzone.nxly.org:5000 Twilight Zone
+bbs twilightnode 2278945446 twilightnode.org Twilightnode
+bbs uzisuicide 2278947842 uzisuicide.servebbs.org Uzi Suicide
+bbs twistofshadows 2278947863 twistofshadows.tel:2323 Twist of Shadows
+bbs twixed 2278949330 twixed.net:62323 Twixed BBS
+bbs twlounge 2278956864 bbs.twlounge.net TW Lounge BBS
+bbs twogirl 2278964475 bbs.2girl.net Two Girl BBS
+bbs twomicechinese 2278966423 bbs.twomice.net Two Mice (Chinese)
+bbs type42 2278973420 71.194.5.210:2323 Type-42 BBS
+bbs wabacmachine 2279222262 wabac.ccsnet.com WABAC Machine BBS
+bbs xbit 2279248000 x-bit.org X-Bit BBS
+bbs yakstation 2279257828 bbs.mycrowd.ca Yak Station BBS
+bbs warensemble 2279273673 warensemble.com War Ensemble BBS
+bbs wastelands 2279278352 wastelands-bbs.net:2323 Wastelands BBS
+bbs wastelandsii 2279278353 wastelands-bbs.net Wastelands BBS II
+bbs weatherstation 2279328437 bbs.weather-station.org Weather Station BBS
+bbs weatherviewdata 2279328438 weather.viewdata.no:16651 Weather Viewdata
+bbs weednet 2279333638 weednet.synchronetbbs.org:513 Weed Net
+bbs zelch 2279352400 coffeemud.net:6502 Zelch BBS
+bbs zenbbs 2279362270 zen.kawasu.wtf ZenBBS
+bbs zenolab 2279366522 zenolab.synchro.net Zenolab
+bbs zeroshock 2279376746 zeroshock.us ZeroShock BBS
+bbs westland 2279378526 bbs.korenblom.nl Westland BBS
+bbs westwood 2279378966 westwoodbbs.net:64738 Westwood BBS
+bbs zeus 2279387000 192.243.111.121:2323 Zeus BBS
+bbs xibalba 2279422522 xibalba.l33t.codes:44510 Xibalba
+bbs wickedgarden 2279425334 wgbbs.ddns.net Wicked Garden BBS
+bbs whiskyloversamateurradio 2279447595 wd1cks.org Whisky Lover's Amateur Radio BBS
+bbs wildcatdemoserver 2279453228 demo.winserver.com:24 Wildcat Demo Server
+bbs wildcatscastle 2279453229 bbs.wccastle.net:2424 Wildcat's Castle BBS
+bbs wildcatscastle2 2279453230 bbs.wccastle.net:2425 Wildcat's Castle BBS (2)
+bbs willametteappleconnectionwac 2279455263 wacbbs.ddns.net:6502 Willamette Apple Connection (WAC) BBS
+bbs willowcreek 2279455692 willowcreekbbs.dynu.net:6400 Willow Creek BBS
+bbs whodareswinsamiga 2279463273 whodareswinsbbs.uk Who Dares Wins Amiga BBS
+bbs windowssource 2279463697 bbs.windowssourcebbs.com Windows Source BBS
+bbs wintermute 2279468376 wintermutebbs.ddns.net Wintermute BBS
+bbs wizardscastle 2279492737 wccastle.synchro.net:24 Wizard's Castle
+bbs wizardsrainbow 2279492738 wizardsrainbow.com Wizard's Rainbow
+bbs wizzy 2279499900 wizzybbs.win Wizzy BBS
+bbs 9640news 2279640639 9640news.ddns.net:9640 9640 News BBS
+bbs wolfslair 2279653752 bbs.wolfslair.dns2go.com Wolf's Lair
+bbs x65zone 2279659663 area51.osiedlowa.org.pl:18888 X65.zone
+bbs zombiezone 2279662439 hcow.dynu.net:1923 Zombie Zone
+bbs zone 2279663000 zonebbs.net:2323 Zone BBS
+bbs zoombrau 2279666272 zoombrau.com:9223 Zoombrau
+bbs word 2279673000 wordbbs.hopto.org:64128 WORD BBS
+bbs worldsaparttwgs 2279675372 tw.worldsapart.net:2002 Worlds Apart (TWGS)
+bbs wormholeii 2279676465 wh2bbs.us:2321 Wormhole II BBS
+bbs zottwgs 2279688947 tw2002.zot.org:2002 Zot TWGS
+bbs wreckhall 2279732542 bbs.wreckhall.net Wreck Hall
+bbs wretchedbeagle 2279738243 bbs.wretchedbeagle.com Wretched Beagle BBS
+bbs wrongnumberii 2279766468 wn2.wrgnbr.com Wrong Number ][ BBS
+bbs wrongnumberiiretro1993 2279766469 wn6.wrgnbr.com:6411 Wrong Number ][ BBS Retro 1993!!
+bbs wrongnumberiiv20 2279766470 cib.dyndns.org:6405 Wrong Number ][ V2.0
+bbs wrongnumberi 2279766471 wn3.wrgnbr.com:6400 Wrong Number ]I[ BBS
+bbs wrongnumberiv 2279766472 wn4.wrgnbr.com:3000 Wrong Number IV BBS
+bbs zruspas 2279787727 bbs.zruspas.org Zruspa's BBS
+bbs z80 2279800000 bbs.probosci.de:3339 Z80
+bbs x84 2279840000 1984.ws X/84 BBS
+# sig ed25519 84f754bab492f150c927f95e23fec0a4f8ed5c7ddccc4f99c6938f36c38bfe81082aebcf618e0ff3a25354e0b050e82c7a9f3de1973c8b6c51f442214a5e4103

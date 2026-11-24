@@ -291,29 +291,30 @@ front. A port whose own number looks like one of them keeps its number.
   when asked, refuses the rest, and answers only what changes something.
   255 is doubled towards the board; CR is CR NUL while we are not binary.
   A board that speaks no telnet at all (raw TCP) works the same.
-- **The list** (format in `srv/bbs.h`). The image has a short one,
-  `lists/bbs.txt` as `/etc/v90d.bbs`. The first call to the number or the
-  first look at the BBS page makes the box fetch the list, then once a
-  day (`fw/bbsfetch.sh`). First from Netstalgia
-  (`http://api.netstalgia.online/v1/bbs.txt`: the guide's list already in
-  our format, refreshed daily; taken only if its head is `v90d-bbs 2`,
-  so an error or challenge page falls through). Else the Telnet BBS
-  Guide's own archive from the guide (today's `ibbsMMDDYY.zip`, else the
-  month's `ibbsMMYY.zip`, else last month's; nothing without a clock).
-  The OBi200 has no awk, so it has only Netstalgia's list and the short one. `fw/bbsguide.awk` turns its
-  `dialdirectory.xml` into our lines: telnet boards only, the login name
-  is the board's name in lower case letters and digits without the word
-  BBS (what 2600.network calls the same board), a second board of one
-  name is `name2`, and each gets its number as above. The guide's list is not copied into this repository;
-  each box takes it from the guide as it is. What the script prints is
-  checked line by line by the daemon (the head line first, at least one
-  board) and only then renamed over `/tmp/v90d.bbs`. A box whose owner
-  never uses the number fetches nothing. The list is never held in
-  memory: it is read from the file, 512 octets per block of the line,
-  when a name is looked up. busybox's wget does not verify certificates,
-  so somebody on the path could hand the box another list; what that list
-  can do is send a caller to another telnet host, which a telnet session
-  cannot rule out anyway.
+- **The list** (format in `srv/bbs.h`). The image carries Netstalgia's
+  signed list as it was at the release, `lists/bbs.txt` as
+  `/etc/v90d.bbs` (`/obi/bbs.txt` on the OBi200; `make -C fw
+  bbs-snapshot` takes it and checks its signature). The first call to the
+  number or the first look at the BBS page makes the box fetch the
+  current one, then once a day (`fw/bbsfetch.sh`): plain http from
+  `http://api.netstalgia.online/v1/bbs.txt`, Netstalgia's copy of the
+  Telnet BBS Guide's list in our format, refreshed daily. Its last line is
+  `# sig ed25519 <128 hex>`, Ed25519 (RFC 8032) over every octet before
+  that line (`srv/bbssig.h`). The fetch child checks it against
+  Netstalgia's public keys built into the daemon (`srv/bbskeys.h`, two
+  places for a key change; `srv/ed25519.c`, verification only, from
+  TweetNaCl), away from the loop: a check costs a good part of a second
+  on the box. A list nobody we know signed is thrown away and the box
+  keeps the one it has, the image's at worst; the next try is a day
+  later. There is no unsigned source any more (until 0.10 the box fell
+  back to the guide's own archive): the connection is not trusted, only
+  the signature, so someone on the path can withhold the list but cannot
+  change it. What passes is then checked line by line by the daemon (the
+  head line first, at least one board) and only then renamed over
+  `/tmp/v90d.bbs`. A box whose owner never uses the number fetches
+  nothing. The list is never held in memory by the daemon: it is read
+  from the file, 512 octets per block of the line, when a name is looked
+  up.
 - **The page** (`/bbs`, `status_render_bbs`) shows the numbers and the
   boards, 100 to a page (`/bbs?p=2`) with a search by part of a name or of
   a number (`q=`, kept as letters and digits only). Plain links and a GET

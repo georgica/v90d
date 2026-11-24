@@ -1219,8 +1219,10 @@ int main(int argc, char **argv)
         }
         f = fopen(fetched, "w");
         if (f) {
+            /* signed with the test key (test/bbskeys_test.h) */
             fprintf(f, "v90d-bbs 2\nbbs telehack 2278353422 tele.example Telehack\nbbs 20forbeers 2272036723 b.example:1337 20 For Beers <BBS>\n"
-                       "bbs newboard 2276392627 n.example New Board\n");
+                       "bbs newboard 2276392627 n.example New Board\n"
+                       "# sig ed25519 abc614a5c5d0f4de226a8ed99ea5bdef0e3ca114ca5bdae3dca4e2242067894d3ede0456f0a4b3e68366bc33333472662a8fca4bfa593dad8462123c4924110b\n");
             fclose(f);
         }
         unlink(live);

@@ -16,6 +16,8 @@
 #include "upnp.h"
 #include "saturn.h"
 #include "bbs.h"
+#include "bbssig.h"
+#include "ed25519.h"
 #include "telnet.h"
 #include "bbsdial.h"
 #include <signal.h>
@@ -1495,6 +1497,60 @@ static void test_bbs_shipped_list(void)
     CHECK_EQ_I(twice, 0);
 }
 
+/* the signature on a fetched list (bbssig.h): Ed25519 as RFC 8032 has it,
+ * and a list taken only when a known key signed every octet before its
+ * signature line */
+static void hexin(const char *h, uint8_t *o, size_t n) { size_t i; unsigned v; for (i = 0; i < n; i++) { if (sscanf(h + 2 * i, "%2x", &v) != 1) v = 0; o[i] = (uint8_t)v; } }
+static void test_bbs_signature(void)
+{
+    static const char body[] = "# test list\nv90d-bbs 2\nbbs telehack 2278353422 telehack.com Telehack\n";
+    static const char sighex[] = "7c87360e8104f757a267de88b9578877b333a9348f2f56d443669a45a3b5b06d35c37940637e7a879607b4345fe88abbfa3ee6ed963708896eb09f8a0a815d05";
+    uint8_t keys[2][32], pk[32], sig[64], m[2], h[64];
+    char list[512], bad[512];
+    int i, zero;
+    printf("bbs: the signature on the list\n");
+    /* RFC 8032 7.1, tests 1 and 3 */
+    hexin("d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a", pk, 32);
+    hexin("e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b", sig, 64);
+    CHECK_EQ_I(ed25519_verify(sig, m, 0, pk), 0);
+    sig[63] ^= 0x01; CHECK_EQ_I(ed25519_verify(sig, m, 0, pk), -1);
+    hexin("fc51cd8e6218a1a38da47ed00230f0580816ed13ba3303ac5deb911548908025", pk, 32);
+    hexin("6291d657deec24024827e69c3abe01a30ce548a284743a445e3680d7db5ac3ac18ff9b538d16f290ae67f760984dc6594a7c15e9716ed28dc027beceea1ec40a", sig, 64);
+    m[0] = 0xaf; m[1] = 0x82;
+    CHECK_EQ_I(ed25519_verify(sig, m, 2, pk), 0);
+    m[1] ^= 0x80; CHECK_EQ_I(ed25519_verify(sig, m, 2, pk), -1);
+    /* SHA-512 of "abc" (FIPS 180-2) */
+    ed25519_sha512((const uint8_t *)"abc", 3, h);
+    CHECK(h[0] == 0xdd && h[1] == 0xaf && h[62] == 0xa4 && h[63] == 0x9f);
+
+    memset(keys, 0, sizeof keys);
+    hexin("2152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db12", keys[1], 32);
+    snprintf(list, sizeof list, "%s" BBS_SIG_TAG "%s\n", body, sighex);
+    CHECK_EQ_I(bbs_sig_check(list, strlen(list), (const uint8_t (*)[32])keys, 2), BBS_SIG_OK);
+    CHECK_EQ_I(bbs_sig_check(list, strlen(list) - 1, (const uint8_t (*)[32])keys, 2), BBS_SIG_OK);   /* no last line end */
+    /* a board changed, added in front or behind the signature: refused */
+    strcpy(bad, list); bad[strstr(bad, "telehack.com") - bad] = 'T';
+    CHECK_EQ_I(bbs_sig_check(bad, strlen(bad), (const uint8_t (*)[32])keys, 2), BBS_SIG_BAD);
+    snprintf(bad, sizeof bad, "bbs evil 2273845000 evil.example Evil\n%s", list);
+    CHECK_EQ_I(bbs_sig_check(bad, strlen(bad), (const uint8_t (*)[32])keys, 2), BBS_SIG_BAD);
+    snprintf(bad, sizeof bad, "%sbbs evil 2273845000 evil.example Evil\n", list);
+    CHECK_EQ_I(bbs_sig_check(bad, strlen(bad), (const uint8_t (*)[32])keys, 2), BBS_SIG_NONE);
+    /* no signature line, a short one, upper case hex: none */
+    CHECK_EQ_I(bbs_sig_check(body, strlen(body), (const uint8_t (*)[32])keys, 2), BBS_SIG_NONE);
+    snprintf(bad, sizeof bad, "%s" BBS_SIG_TAG "%.126s\n", body, sighex);
+    CHECK_EQ_I(bbs_sig_check(bad, strlen(bad), (const uint8_t (*)[32])keys, 2), BBS_SIG_NONE);
+    snprintf(bad, sizeof bad, "%s" BBS_SIG_TAG "7C%s\n", body, sighex + 2);
+    CHECK_EQ_I(bbs_sig_check(bad, strlen(bad), (const uint8_t (*)[32])keys, 2), BBS_SIG_NONE);
+    /* signed, but by a key the box does not know (or no key at all) */
+    memset(keys, 0, sizeof keys);
+    CHECK_EQ_I(bbs_sig_check(list, strlen(list), (const uint8_t (*)[32])keys, 2), BBS_SIG_BAD);
+    keys[0][0] = 1;
+    CHECK_EQ_I(bbs_sig_check(list, strlen(list), (const uint8_t (*)[32])keys, 2), BBS_SIG_BAD);
+    /* the list in the image, once there is a key, is Netstalgia's signed one */
+    for (zero = 1, i = 0; i < BBS_SIG_KEYS * 32; i++) if (bbs_sig_keys[i / 32][i % 32]) zero = 0;
+    if (!zero) CHECK_EQ_I(bbs_sig_file("../lists/bbs.txt", bbs_sig_keys, BBS_SIG_KEYS), BBS_SIG_OK);
+}
+
 static void test_v92_call(void)
 {
     cfg_t c; int ms; const st_call_t *h;
@@ -1867,6 +1923,7 @@ int main(void)
     test_telnet();
     test_bbs_call();
     test_bbs_shipped_list();
+    test_bbs_signature();
     test_bbsdial();
     test_bbsdial_self();
     test_v34_call();

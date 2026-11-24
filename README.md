@@ -101,13 +101,13 @@ The boards are those of the [Telnet BBS Guide](https://www.telnetbbsguide.com),
 more than a thousand of them: a box that uses the numbers fetches the list
 once a day and stays current without a firmware release. It comes from
 [Netstalgia](https://netstalgia.online), which serves the guide's list
-ready for v90d, or else from the guide's own archive.
+ready for v90d and signs it: a box takes only a list Netstalgia signed.
 They go by the login names 2600.network uses for the same boards
 (`20forbeers` for "20 For Beers BBS"). Where two names begin alike, the
 second board takes the next free number, so look a number up on the page or
-with `?` before you put it in a phone book. A short list in the image
-([lists/bbs.txt](lists/bbs.txt)) serves until the first fetch or when the
-box has no way out. Only boards of the list can be called. The port's own
+with `?` before you put it in a phone book. The list as it was at the release
+([lists/bbs.txt](lists/bbs.txt)) is in the image and serves until the
+first fetch or when the box has no way out. Only boards of the list can be called. The port's own
 number is still the dial-up connection (a ten-digit one also with a 1 in
 front, the way Windows dials it).
 

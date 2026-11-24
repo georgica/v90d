@@ -120,11 +120,10 @@ $D/obinv where > /tmp/v90d.where 2>/dev/null
 # The Firmware page's flash tool is obinv (fw/obi/obinv.c).
 ( while :; do $D/obiline -s /var/run/v90line 2>&1 | logger -t obiline; sleep 2; done ) &
 sleep 2
-# The 1-800-BBS-DIAL list: the short one in the image, then Netstalgia's,
-# fetched daily (fw/bbsfetch.sh). This box has no awk, so the Telnet BBS
-# Guide's archive is no fallback here: BBS_AWK names no file.
+# The 1-800-BBS-DIAL list: the one in the image, then Netstalgia's signed
+# one, fetched daily (fw/bbsfetch.sh).
 ( while :; do $D/v90d -c $CONF -l seq:/var/run/v90line -i $LAN -t ppp0 -N $D/obinv \
-    -B $D/bbs.txt -b "BBS_AWK=/nonexistent sh $D/bbsfetch.sh" 2>&1 | logger -t v90d; sleep 2; done ) &
+    -B $D/bbs.txt -b "sh $D/bbsfetch.sh" 2>&1 | logger -t v90d; sleep 2; done ) &
 
 # The Restart button, and the Firmware page once it has written the flash,
 # leave a note: restart then (the settings are written as they are saved).

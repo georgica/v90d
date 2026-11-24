@@ -17,10 +17,11 @@
 #include "bbs.h"
 #include "telnet.h"
 #include "bbsdial.h"
+#include "bbssig.h"
 
 static const char *builtin_path = "/etc/v90d.bbs";
 static const char *live_path = "/tmp/v90d.bbs";
-static const char *fetch_cmd = "sh /etc/bbsfetch.sh";     /* from the Telnet BBS Guide: fw/bbsfetch.sh */
+static const char *fetch_cmd = "sh /etc/bbsfetch.sh";     /* from Netstalgia, signed: fw/bbsfetch.sh, bbssig.h */
 static const char *dial_prog = "";
 
 /* a child of the real-time daemon is an ordinary process with nothing of
@@ -89,6 +90,21 @@ static struct {
     char tmp[200];
 } ld = { .sc = { .fd = -1 } };
 
+/* The fetch, in a child of the daemon: the command writes the list to
+ * standard output (the new file), then the signature on it is checked here,
+ * away from the loop (a check takes a good part of a second on the box). */
+#define FETCH_UNSIGNED 3
+static int fetch_child(void)
+{
+    pid_t p; int st;
+    p = fork();
+    if (p == 0) { execl("/bin/sh", "sh", "-c", fetch_cmd, (char *)NULL); _exit(127); }
+    if (p < 0) return 126;
+    while (waitpid(p, &st, 0) < 0) if (errno != EINTR) return 126;
+    if (!WIFEXITED(st) || WEXITSTATUS(st) != 0) return 1;
+    return bbs_sig_file(ld.tmp, bbs_sig_keys, BBS_SIG_KEYS) == BBS_SIG_OK ? 0 : FETCH_UNSIGNED;
+}
+
 static int ld_line(void *ctx, int kind, const bbs_entry *e)
 {
     (void)ctx; (void)e;
@@ -117,6 +133,13 @@ static void ld_poll(uint32_t now_ms)
     if (ld.pid > 0) {
         if (waitpid(ld.pid, &st, WNOHANG) != ld.pid) return;
         ld.pid = 0;
+        if (WIFEXITED(st) && WEXITSTATUS(st) == FETCH_UNSIGNED) {
+            /* fetched, but nobody we know signed it: nothing to try again soon */
+            logf_(CFG_LOG_WARN, "bbs: the list that came is not signed by Netstalgia; keeping the one there is");
+            (void)unlink(ld.tmp);
+            ld.next_ms = now_ms + 24u * 3600u * 1000u; ld.fails = 0;
+            return;
+        }
         if (WIFEXITED(st) && WEXITSTATUS(st) == 0 && scan_open(&ld.sc, ld.tmp) >= 0) {
             ld.next_ms = now_ms + 24u * 3600u * 1000u; ld.fails = 0;
             ld.busy = 1; ld.n_bbs = ld.n_bad = 0; ld.head = 0; ld.first = 1;
@@ -140,8 +163,7 @@ static void ld_poll(uint32_t now_ms)
         fd = open(ld.tmp, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
         if (fd < 0) _exit(126);
         child_setup(-1, fd);
-        execl("/bin/sh", "sh", "-c", fetch_cmd, (char *)NULL);
-        _exit(127);
+        _exit(fetch_child());
     }
     if (ld.pid < 0) ld.pid = 0;
 }

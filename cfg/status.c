@@ -365,7 +365,7 @@ int status_render_bbs(status_bbs_rows rows, void *ctx, const char *query, size_t
     sbuf_t b; int shown = 0, left = 0, page; char q[33];
     static const char tail_room[] = "</table></div>\n<p class=\"sw\"><a href=\"/bbs?p=0000000&amp;q=00000000000000000000000000000000\">Previous</a> "
                                     "<a href=\"/bbs?p=0000000&amp;q=00000000000000000000000000000000\">Next</a> <a href=\"/bbs\">All boards</a></p>"
-                                    "<p>The boards are those of the <a href=\"https://www.telnetbbsguide.com\">Telnet BBS Guide</a>; the box fetches its list once a day.</p></section>\n" PAGE_END;
+                                    "<p>The boards are those of the <a href=\"https://www.telnetbbsguide.com\">Telnet BBS Guide</a>; the box fetches its list from <a href=\"https://netstalgia.online\">Netstalgia</a> once a day.</p></section>\n" PAGE_END;
 
     bbs_query(query, qlen, q, &page);
     sb_init(&b, buf, cap);
@@ -415,7 +415,7 @@ int status_render_bbs(status_bbs_rows rows, void *ctx, const char *query, size_t
             if (q[0]) sb_puts(&b, "<a href=\"/bbs\">All boards</a>");
             sb_puts(&b, "</p>");
         }
-        sb_puts(&b, "<p>The boards are those of the <a href=\"https://www.telnetbbsguide.com\">Telnet BBS Guide</a>; the box fetches its list once a day.</p>");
+        sb_puts(&b, "<p>The boards are those of the <a href=\"https://www.telnetbbsguide.com\">Telnet BBS Guide</a>; the box fetches its list from <a href=\"https://netstalgia.online\">Netstalgia</a> once a day.</p>");
     } else sb_puts(&b, "<p>The list of boards is not there.</p>");
     sb_puts(&b, "</section>\n" PAGE_END);
     return b.ovf ? -1 : (int)b.len;
