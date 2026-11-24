@@ -637,7 +637,7 @@ static void test_other_endings(void)
      * up: our LAPM runs out of retransmissions */
     call_begin(&sc, &cc, &line_clean);
     CHECK(run_until(p_ip_up, 30000) > 0);
-    C.v42_on = 0;                              /* caller.c: line bits become mark */
+    C.v42_mute = 1;                            /* caller.c: line bits become mark */
     traffic(RANDOM, 4, 0, 100, r);
     t = run_until(p_ended, 120000);
     CHECK(t > 0);
@@ -1035,7 +1035,7 @@ static void test_v90_endings(void)
     s = status();
     printf("    fourth retrain in a row: ended after %d ms: %s\n", t, dce_end_name(s->end_reason));
     CHECK(t > 0);
-    CHECK_EQ_I(s->end_reason, DCE_END_CARRIER_LOST);
+    CHECK_EQ_I(s->end_reason, DCE_END_RETRAIN_FAILED);
     check_all_down();
 
     /* the calling modem releases the error-corrected connection: our UA
@@ -1192,7 +1192,7 @@ static void test_v90_alaw(void)
         CHECK(traffic(RANDOM, 30, 15, 60000, r));
         CHECK_EQ_I(F[DN].n_bad + F[UP].n_bad, 0);
         show_rates2("incompressible, both ways at once:", r, s);
-        printf("    (frames damaged upstream: %lu; rate lowered %d times, now %d bit/s up; receiver error %d, limit %d, at connect SNR %d)\n", status()->lapm_rx_bad, v90m__answer(D.modem)->p34.rate_drops, v90m__answer(D.modem)->p34.up_rate, (int)v90m__answer(D.modem)->p34.rx.mse, (int)v90m__answer(D.modem)->p34.mse_limit, (int)v90m__answer(D.modem)->p34.snr_db10);
+        printf("    (frames damaged upstream: %lu; rate lowered %d times, now %d bit/s up; receiver error %d, limit %d, at connect SNR %d)\n", status()->lapm_rx_bad, v90m__answer(D.modem)->p34.rate_drops, v90m__answer(D.modem)->p34.up_rate, (int)v90m__answer(D.modem)->p34.up.rx.mse, (int)v90m__answer(D.modem)->p34.up.mse_limit, (int)v90m__answer(D.modem)->p34.snr_db10);
         CHECK(r[DN] * 800 / s->bitrate >= 88);
         caller_hangup(&C);
         CHECK(run_until(p_ended, 5000) > 0);

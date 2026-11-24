@@ -17,8 +17,8 @@ BB=busybox-1.36.1
 # the modem: libv90modem, pinned to a released source tarball (a GitHub
 # release asset, so its bytes do not change under us). Bump both lines to
 # move to a new modem; libv90m.mk builds whatever is unpacked at $top/libv90modem.
-LIBV90M_VER=0.5.0
-LIBV90M_SHA=f2c992240a507be0284b73f45fceba2162ab3bff5fe3af61f138215aedd2a9dc
+LIBV90M_VER=0.6.1
+LIBV90M_SHA=e7b3fb850c8f5aeaf19ca2105c5d7b2f4d24a164ca3e8f869ba829fa968d796e
 
 get() { # get URL FILE SHA256
     mkdir -p "$(dirname "$2")"
