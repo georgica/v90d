@@ -500,7 +500,16 @@ int settings_render_page(const cfg_t *c, int page, int saved, const char *error,
                 " answers without the 1); it may not be a port's own number or a BBS number. The host may be"
                 " on your network. A row without a number is not used.</p></section>\n");
     }
-    sb_puts(&b, "<p><input type=\"submit\" value=\"Save\"></p>\n</form>\n");
+    /* Save, inside the last card of the form */
+    {
+        static const char end[] = "</section>\n";
+        size_t k = sizeof end - 1;
+        /* the card's close, or (the page cut off) as much of it as was written */
+        if (b.ovf) { while (k && !(b.len >= k && memcmp(b.p + b.len - k, end, k) == 0)) k--; }
+        else if (!(b.len >= k && memcmp(b.p + b.len - k, end, k) == 0)) k = 0;
+        b.len -= k;
+        sb_puts(&b, "<p class=\"act\"><input type=\"submit\" value=\"Save\"></p></section>\n</form>\n");
+    }
     /* the new rows the Add button copies (outside the form: never posted) */
     if (ON(SETTINGS_USERS)) {
         sb_puts(&b, "<template id=\"utpl\">"); user_row(&b, ROW_TEMPLATE, "", 0, 0); sb_puts(&b, "</template>\n");
@@ -511,19 +520,20 @@ int settings_render_page(const cfg_t *c, int page, int saved, const char *error,
     if (page == SETTINGS_CONSOLES) {
         /* one profile for the box, whichever port's page this is; posted as
          * it is (text/plain), since it is longer than a form field may be */
-        sb_puts(&b, "<form method=\"post\" action=\"/dreamcast/vpn\" enctype=\"text/plain\">\n"
-                    "<section><h2>VPN profile for the IWANGO games</h2>\n<p>");
+        sb_puts(&b, "<section><h2>VPN profile for the IWANGO games</h2>\n"
+                    "<form method=\"post\" action=\"/dreamcast/vpn\" enctype=\"text/plain\">\n<p>");
         if (vpn_stored) { sb_puts(&b, "A profile is stored (server "); sb_html(&b, vpn_remote, sizeof vpn_remote, 0); sb_puts(&b, ")."); }
         else sb_puts(&b, "No profile is stored.");
         sb_puts(&b, " It is an OpenVPN client profile (.ovpn) with its certificates and keys inside it, from whoever"
                     " runs the network the games' servers are in; this firmware does not come with one. Paste it"
                     " here. It is checked, kept with the settings, and not shown again. One profile serves both"
                     " ports.</p>\n<p><textarea name=\"profile\" rows=\"8\" cols=\"70\" spellcheck=\"false\"></textarea></p>\n"
-                    "<p><input type=\"submit\" value=\"Store the profile\"></p></section>\n</form>\n");
+                    "<p class=\"act\"><input type=\"submit\" value=\"Store the profile\"></p>\n</form>\n");
         if (vpn_stored)
             sb_puts(&b, "<form method=\"post\" action=\"/dreamcast/vpn\" enctype=\"text/plain\">\n"
-                        "<p><input type=\"hidden\" name=\"remove\" value=\"1\">"
+                        "<p class=\"act\"><input type=\"hidden\" name=\"remove\" value=\"1\">"
                         "<input type=\"submit\" value=\"Remove the stored profile\"></p>\n</form>\n");
+        sb_puts(&b, "</section>\n");
     }
     if (page == SETTINGS_SERVICES) {
         static const char tail[] = "</table></div>\n<p>... and 00000 more.</p><p>The list is Netstalgia's,"
@@ -1004,8 +1014,8 @@ int login_render_html(int failed, char *buf, size_t cap)
         " autocomplete=\"username\" autofocus></td></tr>\n"
         "<tr><th>Password</th><td><input type=\"password\" name=\"password\" size=\"24\" maxlength=\"64\""
         " autocomplete=\"current-password\"></td></tr>\n"
-        "</table></section>\n"
-        "<p><input type=\"submit\" value=\"Log in\"></p>\n"
+        "</table>\n"
+        "<p class=\"act\"><input type=\"submit\" value=\"Log in\"></p></section>\n"
         "</form></div>\n" PAGE_END);
     return sb_end(&b);
 }

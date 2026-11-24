@@ -532,13 +532,13 @@ static void test_consoles_page(void)
     /* a saturn port alone brings the tab up too */
     c.port2.service = CFG_SERVICE_SATURN;
     CHECK(settings_render_page(&c, SETTINGS_LINE, 0, NULL, html, sizeof html) > 0);
-    CHECK(has(html, "<a href=\"/dreamcast\">Services</a>"));        /* the section leads to it first */
+    CHECK(has(html, "<a href=\"/dreamcast\">Consoles</a>"));        /* the section leads to it first */
     base(&c);
     c.service = CFG_SERVICE_DREAMCAST; c.dc_lan = 1;
     c.port2.service = CFG_SERVICE_SATURN; c.port2.sat_match = 1;
     CHECK(settings_render_page(&c, SETTINGS_LINE, 0, NULL, html, sizeof html) > 0);
     CHECK(!has(html, "name=\"dreamcast_now\"")); CHECK(!has(html, "name=\"saturn_matchmaking\""));
-    CHECK(has(html, "<a href=\"/dreamcast\">Services</a>"));           /* the section leads to the page */
+    CHECK(has(html, "<a href=\"/dreamcast\">Consoles</a>"));           /* the section leads to the page */
     /* the page itself: both sections, the Dreamcast switches and the Saturn one */
     CHECK(settings_render_page(&c, SETTINGS_CONSOLES, 0, NULL, html, sizeof html) > 0);
     CHECK(has(html, "<b>Consoles</b>")); CHECK(!has(html, "<a href=\"/dreamcast\">Consoles</a>"));

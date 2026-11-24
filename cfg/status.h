@@ -161,7 +161,7 @@ int status_render_calls(const status_t *const ports[2], char *buf, size_t cap);
  * many it wrote and how many more follow; NULL = there is no list. query
  * is what followed the ? in the address (p = page from 1, q = search),
  * NULL if nothing did. */
-#define STATUS_BBS_PAGE 100
+#define STATUS_BBS_PAGE 25
 typedef size_t (*status_bbs_rows)(void *ctx, const char *q, int skip, int max, char *buf, size_t cap, int *shown, int *left);
 int status_render_bbs(status_bbs_rows rows, void *ctx, const char *query, size_t qlen, char *buf, size_t cap);
 int status_render_json(const status_t *s, char *buf, size_t cap);

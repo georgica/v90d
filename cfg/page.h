@@ -68,6 +68,8 @@
     ".g{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:0 16px}" \
     ".sw{margin:0 0 12px}.sw a,.sw b{display:inline-block;padding:5px 14px;border:1px solid var(--lb);border-radius:4px;font-size:13px;text-decoration:none}" \
     ".sw b{background:var(--ac);border-color:var(--ac);color:#fff}" \
+    ".pg{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:4px 14px 14px;margin:0}" \
+    ".pg a,.pg b{min-width:36px;padding:5px 11px;text-align:center;border-color:var(--ln)}.pg span{color:var(--mu)}" \
     ".t{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;" \
     "margin-bottom:16px}" \
     ".k{padding:12px 14px;color:var(--mu)}" \
@@ -95,6 +97,7 @@
     "border-left:4px solid var(--ac);border-radius:6px}" \
     ".lg{max-width:440px;margin:6vh auto}" \
     "section>p.err{color:var(--er);font-weight:600}" \
+    "section>p.act,section>form>p.act{margin:0;padding:12px 14px 14px;border-top:1px solid var(--ln);text-align:right}" \
     "footer{padding-bottom:20px;font-size:12px;color:var(--mu)}" \
     "</style>\n"
 
@@ -127,7 +130,7 @@ static inline void page_top(sbuf_t *b, const char *title, const char *head, int 
     static const struct { const char *label; signed char tab[4]; } sections[] = {
         { "Status",   { 0, 7, -1, -1 } },
         { "Phone",    { 1, 2, 3, -1 } },
-        { "Services", { PAGE_TAB_CONSOLES, PAGE_TAB_BBS, PAGE_TAB_SERVICES, -1 } },
+        { "Services", { PAGE_TAB_BBS, PAGE_TAB_SERVICES, PAGE_TAB_CONSOLES, -1 } },
         { "System",   { 4, 5, PAGE_TAB_FIRMWARE, -1 } },
     };
     int s, k;
