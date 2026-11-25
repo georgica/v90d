@@ -21,7 +21,7 @@ stock as before.
 | HT801 | V1.0A | `9610003610A` | DSPG DVF9918 | 1 | 1 × Si3217x (factory data) | **Confirmed by its owner** (a V.90 call) |
 | HT801 | V1.0A | `9611003610A` (a flash dump) | DVF99 (same device tree) | 1 | 1 × Si3217x (factory data) | **Accepted by the loader, untested** |
 | HT801 | V1.1C | `9610003611C` | DVF99 (same device tree) | 1 | 1 × Si3217x (factory data) | **Accepted by the loader, untested** |
-| HT801 | V1.1A | `9610003611A` | DSPG DVF9918 (measured) | 1 | 1 × Si3217x (measured) | **Boots v90d from flash** (loader, network, web, one FXS port; no dial-up call yet) |
+| HT801 | V1.1A | `9610003611A` | DSPG DVF9918 (measured) | 1 | 1 × Si3217x (measured) | **Runs v90d from flash** (loader, network with IPv6, web, one FXS port; no dial-up call through it yet) |
 | HT801 | V2.x | not yet known | DVF9918 (expected) | 1 | 1 × Si3217x (expected) | **Expected, untested** |
 | HT802V2 | V2.0A | `9610009420A` | Rockchip RK3308H | 2 | Si32283 ProSLIC | **Rockchip; under investigation** |
 | Obihai OBi200 | 1.4 | (none) | Marvell FFxAV (88E7251 family), ARM926 | 1 | 1 × Si3226x (channel 0 wired) | **Tested** |
@@ -342,7 +342,8 @@ system in it is the same kernel, named `v90d ht801 VERSION` instead of
 named for the box's own model. One unit reports `9610003610A` for a V1.0A, one
 digit from the dump's `9611003610A`; both are accepted.
 
-What is not known, and matters before anyone flashes one:
+What was not known before the first units ran it (points 1 and 2 are now
+settled for the V1.0A and V1.1A, see below):
 
 1. **Ethernet.** The firmware does not name the PHY: the device tree says
    only RMII at 100 Mb (the same words in all three), the factory data has
@@ -362,15 +363,25 @@ What is not known, and matters before anyone flashes one:
    voltage, a line in the log), and the port stays dead.
 3. **V2.x HT801 units** have a part number that is not in the list yet.
 
-Since then one V1.0A (`9610003610A`) has run v90d, installed from its
-stock page: its network came up and a V.90 call connected (PROGRESS.md),
-which settles point 1 for that unit. The V1.1C and the dump's
-`9611003610A` are still untried.
+Since then two HT801s have run v90d, both installed from their stock
+upgrade page:
 
-Whoever can should make the first start on an HT801 from RAM
-(`fw/tools/ramboot.sh`, which writes nothing) with a serial console
-attached. Installing from the stock web page is expected to be safe as
-well, for the reason in point 1, with the network cable plugged in.
+- **V1.0A (`9610003610A`)**, by its owner: the network came up and a V.90
+  call connected (PROGRESS.md).
+- **V1.1A (`9610003611A`)**, here: it runs v90d from flash on its KSZ8081
+  and Winbond flash, with the web interface, its one FXS port and IPv6 (it
+  took an address and a NAT64 prefix from a router advertisement and
+  brought up the callers' translator). No dial-up call has been made
+  through it yet.
+
+That settles points 1 and 2 for both units: the Ethernet works on the
+generic driver, and the SLIC is a revision the driver starts. The V1.1C
+and the dump's `9611003610A` are still untried.
+
+Installing from the stock web page, with the network cable plugged in, is
+how both units were done, and is the way to install on an HT801. For an
+untried revision, a first start from RAM (`fw/tools/ramboot.sh`, which
+writes nothing) with a serial console attached is the cautious way.
 
 ## Flash chips and Ethernet PHYs
 
