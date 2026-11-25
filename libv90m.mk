@@ -34,7 +34,7 @@ LIBV90M_DEV_ARM  := $(LIBV90M_OUT)/arm/libv90modem-dev.a
 LIBV90M_ARM_CC   ?= $(wildcard $(V90D_ROOT)/toolchain/*/bin/arm-linux-gcc)
 
 ifeq ($(wildcard $(LIBV90M)/include/v90modem.h),)
-$(error libv90modem is not at $(LIBV90M): run fw/setup.sh to fetch it, or build against a checkout with LIBV90M=/path/to/libv90modem)
+$(error libv90modem is not at $(LIBV90M): run fw/setup.sh (or fw/setup-libv90m.sh for the PC tests alone) to fetch it, or build against a checkout with LIBV90M=/path/to/libv90modem)
 endif
 
 # The library's own Makefile decides what is out of date.
