@@ -25,6 +25,9 @@ static struct {
     uint8_t pref64[16]; int pref64_len;
     xlat_t x;
     uint8_t out[1600];
+    unsigned long n_out, n_back, n_drop, n_werr, n_answer;   /* what the translator did */
+    unsigned long logged[5];
+    uint32_t next_log;
 } C = { .fd = -1, .v4 = 1 };
 
 xlat_t *clat_xlat(void) { return C.up ? &C.x : NULL; }
@@ -124,6 +127,15 @@ void clat_poll(uint32_t now)
         }
     }
     if (!C.up) return;
+    if ((int32_t)(now - C.next_log) >= 0) {     /* its counters, when they moved */
+        unsigned long v[5] = { C.n_out, C.n_back, C.n_drop, C.n_werr, C.n_answer };
+        C.next_log = now + 30000;
+        if (memcmp(v, C.logged, sizeof v)) {
+            memcpy(C.logged, v, sizeof v);
+            logf_(CFG_LOG_INFO, "ipv6: translator: %lu out, %lu back, %lu dropped, %lu answered on the spot, %lu not written",
+                  C.n_out, C.n_back, C.n_drop, C.n_answer, C.n_werr);
+        }
+    }
     /* what comes back, for the callers */
     for (i = 0; i < 16; i++) {
         uint8_t in[1600];
@@ -132,7 +144,8 @@ void clat_poll(uint32_t now)
         int p;
         ssize_t r6 = tun_read(C.fd, in, sizeof in);
         if (r6 <= 0) break;
-        if (xlat_6to4(&C.x, in, (size_t)r6, C.out, sizeof C.out, &n, now / 1000) != XLAT_OUT) continue;
+        if (xlat_6to4(&C.x, in, (size_t)r6, C.out, sizeof C.out, &n, now / 1000) != XLAT_OUT) { C.n_drop++; continue; }
+        C.n_back++;
         dst = (uint32_t)C.out[16] << 24 | (uint32_t)C.out[17] << 16 | (uint32_t)C.out[18] << 8 | C.out[19];
         for (p = 0; p < n_ports; p++)
             if (S[p].in_call && S[p].cfg.ppp_peer == dst) { (void)srv_send_ip(&S[p], C.out, n); break; }
@@ -154,7 +167,10 @@ int clat_from_caller(int p, const uint8_t *pkt, size_t len)
         if (!bbsdial_is_public(dst)) return 0;              /* the box itself, the LAN: as IPv4, never NAT64 */
     }
     r = xlat_4to6(&C.x, pkt, len, C.out, sizeof C.out, &n, C.now_s);
-    if (r == XLAT_OUT) { if (tun_write(C.fd, C.out, n) < 0) S[p].status.rx_errors++; }
-    else if (r == XLAT_BACK) (void)srv_send_ip(&S[p], C.out, n);
+    if (r == XLAT_OUT) {
+        C.n_out++;
+        if (tun_write(C.fd, C.out, n) < 0) { C.n_werr++; S[p].status.rx_errors++; }
+    } else if (r == XLAT_BACK) { C.n_answer++; (void)srv_send_ip(&S[p], C.out, n); }
+    else C.n_drop++;
     return 1;
 }
