@@ -25,6 +25,10 @@ void clat_poll(uint32_t now_ms);
 int  clat_from_caller(int p, const uint8_t *pkt, size_t len);
 /* the translator (its stand-ins: the callers' relay); NULL while it is down */
 xlat_t *clat_xlat(void);
+/* a stand-in IPv4 address for IPv6 address v6 (dnsrelay_set_standin): 0
+ * while the translator is down, and for an address that is not public
+ * (the box itself, the LAN): a name must not lead a caller there */
+uint32_t clat_standin(const uint8_t v6[16]);
 /* is it up, and does the box have IPv4 out? (the status, the log) */
 int  clat_up(void);
 int  clat_v4_route(void);

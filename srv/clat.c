@@ -28,6 +28,12 @@ static struct {
 } C = { .fd = -1, .v4 = 1 };
 
 xlat_t *clat_xlat(void) { return C.up ? &C.x : NULL; }
+
+uint32_t clat_standin(const uint8_t v6[16])
+{
+    if (!C.up || bbsdial_is_self6(v6) || !bbsdial_is_public6(v6)) return 0;
+    return xlat_pool_get(&C.x, v6, C.now_s);
+}
 int clat_up(void) { return C.up; }
 int clat_v4_route(void) { return C.v4; }
 

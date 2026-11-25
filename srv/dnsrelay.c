@@ -48,6 +48,71 @@ size_t dnsrelay_none(const uint8_t *q, size_t n, uint8_t *out, size_t cap)
     return i;
 }
 
+/* where the question of a query ends (its type follows the name), 0 if none */
+static size_t qend(const uint8_t *q, size_t n)
+{
+    size_t i = 12;
+    if (dnsrelay_qtype(q, n) < 0) return 0;
+    while (q[i]) i += 1u + q[i];
+    return i + 1;                               /* the type's offset */
+}
+
+/* past a name at i in m (labels and a pointer at the end); 0 if bad */
+static size_t skip_name(const uint8_t *m, size_t n, size_t i)
+{
+    while (i < n) {
+        if (m[i] == 0) return i + 1;
+        if ((m[i] & 0xc0) == 0xc0) return i + 2 <= n ? i + 2 : 0;
+        if (m[i] & 0xc0) return 0;
+        i += 1u + m[i];
+    }
+    return 0;
+}
+
+size_t dnsrelay_first(const uint8_t *m, size_t n, int type, uint8_t *rd, size_t cap, uint32_t *ttl)
+{
+    size_t i = 12;
+    unsigned qd, an, k;
+    if (n < 12 || !(m[2] & 0x80)) return 0;
+    qd = (unsigned)(m[4] << 8 | m[5]); an = (unsigned)(m[6] << 8 | m[7]);
+    for (k = 0; k < qd; k++) { i = skip_name(m, n, i); if (!i || i + 4 > n) return 0; i += 4; }
+    for (k = 0; k < an; k++) {
+        unsigned t, len;
+        i = skip_name(m, n, i);
+        if (!i || i + 10 > n) return 0;
+        t = (unsigned)(m[i] << 8 | m[i + 1]);
+        len = (unsigned)(m[i + 8] << 8 | m[i + 9]);
+        if (i + 10 + len > n) return 0;
+        if ((int)t == type && (m[i + 2] << 8 | m[i + 3]) == 1) {        /* class IN */
+            if (len > cap) return 0;
+            memcpy(rd, m + i + 10, len);
+            if (ttl) *ttl = (uint32_t)m[i + 4] << 24 | (uint32_t)m[i + 5] << 16 | (uint32_t)m[i + 6] << 8 | m[i + 7];
+            return len;
+        }
+        i += 10 + len;
+    }
+    return 0;
+}
+
+size_t dnsrelay_answer_a(const uint8_t *q, size_t n, uint32_t v4, uint32_t ttl, uint8_t *out, size_t cap)
+{
+    size_t i = qend(q, n);
+    static const uint8_t rr[6] = { 0xc0, 0x0c, 0, 1, 0, 1 };   /* the question's name, A, IN */
+    if (!i || i + 4 + 16 > cap || i + 4 > n) return 0;
+    memcpy(out, q, i + 4);
+    out[2] = (uint8_t)(0x80 | (q[2] & 0x01)); out[3] = 0x80;
+    out[6] = 0; out[7] = 1; memset(out + 8, 0, 4);              /* one answer */
+    i += 4;
+    memcpy(out + i, rr, 6); i += 6;
+    out[i++] = (uint8_t)(ttl >> 24); out[i++] = (uint8_t)(ttl >> 16); out[i++] = (uint8_t)(ttl >> 8); out[i++] = (uint8_t)ttl;
+    out[i++] = 0; out[i++] = 4;
+    out[i++] = (uint8_t)(v4 >> 24); out[i++] = (uint8_t)(v4 >> 16); out[i++] = (uint8_t)(v4 >> 8); out[i++] = (uint8_t)v4;
+    return i;
+}
+
+static uint32_t (*standin)(const uint8_t v6[16]);
+void dnsrelay_set_standin(uint32_t (*fn)(const uint8_t v6[16])) { standin = fn; }
+
 /* ------------------------------------------------------------- the relay */
 static struct {
     int on, nlis;
@@ -59,6 +124,7 @@ static struct {
     int nup, nown;              /* up[0..nown): the settings'; the rest the system's */
     uint32_t peer[DNSRELAY_PEERS_MAX]; int npeer;
     uint32_t resolv_at; int resolv_read;
+    uint32_t now;
     int urnd;                   /* /dev/urandom */
     uint8_t pool[128]; size_t pool_n;
     struct {
@@ -68,6 +134,8 @@ static struct {
         struct sockaddr_in client;
         uint32_t t0;
         uint8_t q[Q_MAX]; size_t qn;
+        int qtype;              /* the caller's question's type */
+        int synth;              /* 1: asked again for AAAA, for a stand-in A (dnsrelay_set_standin) */
     } p[DNSRELAY_PENDING];
     int inited;
 } R;
@@ -260,6 +328,7 @@ static void from_caller(int li, uint32_t now)
             if (now - R.p[k].t0 > now - R.p[oldest].t0) oldest = k;
         if (k == DNSRELAY_PENDING) { k = oldest; drop(k); }    /* full: the oldest question gives way */
         R.p[k].used = 1; R.p[k].lis = li; R.p[k].srv = 0; R.p[k].tries = 1;
+        R.p[k].qtype = t; R.p[k].synth = 0;
         R.p[k].client = c; R.p[k].client_id = (uint16_t)(m[0] << 8 | m[1]);
         R.p[k].id = next_id(); R.p[k].t0 = now;
         m[0] = (uint8_t)(R.p[k].id >> 8); m[1] = (uint8_t)R.p[k].id;
@@ -278,6 +347,34 @@ static void from_servers(void)
             if (r <= 0) break;
             if (r < 12 || !(m[2] & 0x80) || (uint16_t)(m[0] << 8 | m[1]) != R.p[k].id
                 || !same_question(R.p[k].q, R.p[k].qn, m, (size_t)r)) continue;
+            if (standin && !R.p[k].synth && R.p[k].qtype == DNS_T_A && (m[3] & 0x0f) == 0) {
+                uint8_t a4[4];
+                size_t at = qend(R.p[k].q, R.p[k].qn);
+                if (at && !dnsrelay_first(m, (size_t)r, DNS_T_A, a4, sizeof a4, NULL)) {
+                    /* the name has no IPv4: does it have IPv6? the same
+                     * server, the same socket, a fresh id */
+                    R.p[k].synth = 1; R.p[k].id = next_id(); R.p[k].tries = 1; R.p[k].t0 = R.now;
+                    R.p[k].q[0] = (uint8_t)(R.p[k].id >> 8); R.p[k].q[1] = (uint8_t)R.p[k].id;
+                    R.p[k].q[at] = 0; R.p[k].q[at + 1] = DNS_T_AAAA;
+                    if (send(R.p[k].fd, R.p[k].q, R.p[k].qn, 0) < 0) drop(k);
+                    break;
+                }
+            }
+            if (R.p[k].synth) {
+                /* the IPv6 answer: a stand-in A for its first AAAA, or none */
+                uint8_t a6[16], out[Q_MAX + 32];
+                uint32_t ttl = 0, v4 = 0;
+                size_t at = qend(R.p[k].q, R.p[k].qn), o;
+                if ((m[3] & 0x0f) == 0 && dnsrelay_first(m, (size_t)r, DNS_T_AAAA, a6, sizeof a6, &ttl) == 16) v4 = standin(a6);
+                R.p[k].q[at] = 0; R.p[k].q[at + 1] = DNS_T_A;
+                R.p[k].q[0] = (uint8_t)(R.p[k].client_id >> 8); R.p[k].q[1] = (uint8_t)R.p[k].client_id;
+                o = v4 ? dnsrelay_answer_a(R.p[k].q, R.p[k].qn, v4, ttl < 60 ? ttl : 60, out, sizeof out)
+                       : dnsrelay_none(R.p[k].q, R.p[k].qn, out, sizeof out);
+                if (o && R.fd[R.p[k].lis] >= 0)
+                    (void)sendto(R.fd[R.p[k].lis], out, o, 0, (struct sockaddr *)(void *)&R.p[k].client, sizeof R.p[k].client);
+                drop(k);
+                break;
+            }
             m[0] = (uint8_t)(R.p[k].client_id >> 8); m[1] = (uint8_t)R.p[k].client_id;
             if (R.fd[R.p[k].lis] >= 0)
                 (void)sendto(R.fd[R.p[k].lis], m, (size_t)r, 0, (struct sockaddr *)(void *)&R.p[k].client, sizeof R.p[k].client);
@@ -291,6 +388,7 @@ void dnsrelay_poll(uint32_t now)
     int i, k;
     init_once();
     if (!R.on) return;
+    R.now = now;
     servers(now);
     bind_all(now);
     for (i = 0; i < R.nlis; i++) if (R.fd[i] >= 0) from_caller(i, now);

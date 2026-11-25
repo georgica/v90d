@@ -36,5 +36,18 @@ int    dnsrelay_qtype(const uint8_t *m, size_t n);
 /* the answer "no records of that type" (NOERROR, no answers) to query q:
  * its header and question back; the length, 0 if q is not a query */
 size_t dnsrelay_none(const uint8_t *q, size_t n, uint8_t *out, size_t cap);
+/* the first record of `type` in the answer section of response m (names
+ * compressed or not): its data into rd (at most cap) and its TTL; the data's
+ * length, 0 if there is none or m is not well formed */
+size_t dnsrelay_first(const uint8_t *m, size_t n, int type, uint8_t *rd, size_t cap, uint32_t *ttl);
+/* the answer to query q with one A record, v4 (host order), ttl seconds */
+size_t dnsrelay_answer_a(const uint8_t *q, size_t n, uint32_t v4, uint32_t ttl, uint8_t *out, size_t cap);
+
+/* A stand-in IPv4 address for a name that has IPv6 alone (srv/clat.h,
+ * the callers' IPv4 over IPv6): fn gives one for an IPv6 address, or 0
+ * (none: the translator is down, or the address is not to be reached).
+ * With it, an A question whose answer has no A record is asked again for
+ * AAAA, and the caller gets the stand-in as an A record. */
+void dnsrelay_set_standin(uint32_t (*fn)(const uint8_t v6[16]));
 
 #endif

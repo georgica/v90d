@@ -200,6 +200,7 @@ static void relay_want(const cfg_t *c)
     dnsrelay_set(c->dns_relay, &c->ppp_local, 1, peers, 2, c->dns);
     ra6_want(lan_if, c->ipv6);
     clat_want(c->ipv6, lan_if);
+    dnsrelay_set_standin(clat_standin);
 }
 
 /* what the network's IPv6 router says, in the log when it changes */

@@ -283,6 +283,57 @@ static void icmp6_sum(uint8_t *a, size_t n)
     ck = (uint16_t)~s; a[42] = (uint8_t)(ck >> 8); a[43] = (uint8_t)ck;
 }
 
+/* The stand-in name server of section 19, answering query m (r octets) in
+ * place: "v6only" has IPv6 alone (2a00:1450:4001:81e::80, public: a documentation address is refused a stand-in), "lanonly" a unique local
+ * address alone (fd00::5), every other name IPv4 alone (192.0.2.66). */
+static size_t standin_dns(uint8_t *m, size_t r)
+{
+    int type = m[r - 4] << 8 | m[r - 3];
+    int v6only = memmem(m + 12, r - 12, "v6only", 6) != NULL, lan = memmem(m + 12, r - 12, "lanonly", 7) != NULL;
+    size_t e = r;
+    m[2] |= 0x80; m[3] = 0x80; m[6] = 0; m[7] = 0;
+    if (type == 1 && !v6only && !lan) {
+        static const uint8_t a[] = { 0xc0, 0x0c, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4, 192, 0, 2, 66 };
+        memcpy(m + e, a, sizeof a); e += sizeof a; m[7] = 1;
+    } else if (type == 28 && (v6only || lan)) {
+        uint8_t aa[12 + 16] = { 0xc0, 0x0c, 0, 28, 0, 1, 0, 0, 1, 0x2c, 0, 16 };
+        inet_pton(AF_INET6, v6only ? "2a00:1450:4001:81e::80" : "fd00::5", aa + 12);
+        memcpy(m + e, aa, sizeof aa); e += sizeof aa; m[7] = 1;
+    }
+    return e;
+}
+
+/* a caller's A question for name (labels), through the box's relay, with
+ * dfd as the name server; 1 if answered: *an its answer count, *a its A */
+static int ask_a(const uint8_t *name, size_t nl, uint16_t id, int dfd, int *an, uint32_t *a)
+{
+    uint8_t p[200]; size_t qn = 12, n; uint16_t ck; long t; int n0 = cli_n;
+    memset(p, 0, sizeof p);
+    p[28] = (uint8_t)(id >> 8); p[29] = (uint8_t)id; p[30] = 0x01; p[33] = 1;
+    memcpy(p + 28 + qn, name, nl); qn += nl;
+    p[28 + qn++] = 0; p[28 + qn++] = 1; p[28 + qn++] = 0; p[28 + qn++] = 1;
+    n = 28 + qn;
+    p[0] = 0x45; p[2] = (uint8_t)(n >> 8); p[3] = (uint8_t)n; p[8] = 64; p[9] = 17;
+    put32(p + 12, C.ppp.my_ip); put32(p + 16, PPP_LOCAL);
+    ck = csum(p, 20); p[10] = (uint8_t)(ck >> 8); p[11] = (uint8_t)ck;
+    p[20] = 0x14; p[21] = 0xe9; p[23] = 53; p[24] = (uint8_t)((n - 20) >> 8); p[25] = (uint8_t)(n - 20);
+    for (t = 0; t < 10L * FS && !dead; t++) {
+        if (t % FS == 0) (void)caller_send_ip(&C, p, n);
+        if (t % BLK == 0) {
+            uint8_t m[512]; struct sockaddr_in6 fa; socklen_t fl = sizeof fa;
+            ssize_t r = recvfrom(dfd, m, sizeof m, 0, (struct sockaddr *)(void *)&fa, &fl);
+            if (r > 12 + 5) (void)sendto(dfd, m, standin_dns(m, (size_t)r), 0, (struct sockaddr *)(void *)&fa, fl);
+        }
+        step(0);
+        if (cli_n > n0 && cli_len > 28 + 12 && cli_pkt[9] == 17 && (cli_pkt[28] << 8 | cli_pkt[29]) == id) {
+            *an = cli_pkt[28 + 7];
+            *a = *an ? get32(cli_pkt + cli_len - 4) : 0;
+            return 1;
+        }
+    }
+    return 0;
+}
+
 /* send from the caller, wait for a packet to reach the caller; 1 = got one */
 static int ping_via_ppp(uint32_t dst, uint16_t seq, int wan_fd)
 {
@@ -1419,8 +1470,11 @@ int main(int argc, char **argv)
         memset(prev_tx, 0xFF, sizeof prev_tx);
         /* the menu wants the lists: the details are fetched, the directory made */
         /* the fetch is a child in real time, started on the daemon's clock:
-         * up to about 20 s of both, for a loaded machine (it ends when seen) */
-        for (i = 0; i < 1000 && !file_has(lanlog, "2 with the guide's details"); i++) { run_ms(100); usleep(20000); }
+         * up to 60 s of real time, for a heavily loaded machine (it ends when seen) */
+        {
+            time_t until = time(NULL) + 60;
+            while (time(NULL) < until && !file_has(lanlog, "2 with the guide's details")) { run_ms(100); usleep(20000); }
+        }
         CHECK(file_has(lanlog, "menu: the BBS directory has 2 boards, 2 with the guide's details"));
         /* (a) Dial-Up Networking: PPP, no menu */
         hook = 1; run_ms(500);
@@ -2076,12 +2130,8 @@ int main(int argc, char **argv)
                     uint8_t m[512]; struct sockaddr_in6 fa; socklen_t fl = sizeof fa;
                     ssize_t r = recvfrom(dfd, m, sizeof m, 0, (struct sockaddr *)(void *)&fa, &fl);
                     if (r > 12 + 5) {
-                        size_t e = (size_t)r;
-                        static const uint8_t ans[] = { 0xc0, 0x0c, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4, 192, 0, 2, 66 };
                         asked++;
-                        m[2] |= 0x80; m[3] = 0x80; m[7] = 1;
-                        memcpy(m + e, ans, sizeof ans); e += sizeof ans;
-                        (void)sendto(dfd, m, e, 0, (struct sockaddr *)(void *)&fa, fl);
+                        (void)sendto(dfd, m, standin_dns(m, (size_t)r), 0, (struct sockaddr *)(void *)&fa, fl);
                     }
                 }
                 step(0);
@@ -2132,6 +2182,41 @@ int main(int argc, char **argv)
             printf("  IPv4 over IPv6: the echo went out as IPv6 %d time(s); the caller had the answer %d\n", seen6, got);
             CHECK(seen6 >= 1);
             CHECK(got);
+            /* a name with IPv6 alone: the caller gets a stand-in A, and its
+             * ping to that goes to the name's IPv6 address and back */
+            {
+                static const uint8_t v6n[] = "\6v6only\7example\3com", lann[] = "\7lanonly\7example\3com";
+                int an = -1, an2 = -1, seen = 0, back = 0; uint32_t sa = 0, sa2 = 0; long t2; uint8_t q[60]; int n1;
+                CHECK(ask_a(v6n, sizeof v6n - 1 + 1, 0x5151, dfd, &an, &sa));
+                printf("  a name with IPv6 alone: %d answer(s), A %u.%u.%u.%u\n", an, sa >> 24, sa >> 16 & 255, sa >> 8 & 255, sa & 255);
+                CHECK_EQ_I(an, 1);
+                CHECK_EQ_I((long)(sa >> 17), (long)(0xc6120000u >> 17));      /* in 198.18.0.0/15 */
+                CHECK(ask_a(lann, sizeof lann - 1 + 1, 0x5252, dfd, &an2, &sa2));
+                CHECK_EQ_I(an2, 0);                                           /* a LAN address: none */
+                icmp(q, C.ppp.my_ip, sa, 8, 0x6565, 1);
+                n1 = cli_n;
+                for (t2 = 0; t2 < 10L * FS && !dead && !back; t2++) {
+                    if (t2 % FS == 0) (void)caller_send_ip(&C, q, 60);
+                    if (t2 % BLK == 0) {
+                        uint8_t z[1600]; struct sockaddr_ll from; socklen_t fl = sizeof from;
+                        ssize_t r = recvfrom(ps, z, sizeof z, 0, (struct sockaddr *)(void *)&from, &fl);
+                        uint8_t site6[16]; inet_pton(AF_INET6, "2a00:1450:4001:81e::80", site6);
+                        if (r >= 48 && z[6] == 58 && z[40] == 128 && memcmp(z + 24, site6, 16) == 0) {
+                            uint8_t tmp[16];
+                            seen++;
+                            memcpy(tmp, z + 8, 16); memcpy(z + 8, z + 24, 16); memcpy(z + 24, tmp, 16);
+                            z[7] = 64; z[40] = 129;
+                            icmp6_sum(z, (size_t)r);
+                            (void)sendto(ps, z, (size_t)r, 0, (struct sockaddr *)(void *)&from, fl);
+                        }
+                    }
+                    step(0);
+                    if (cli_n > n1 && cli_len >= 28 && cli_pkt[9] == 1 && cli_pkt[20] == 0 && get32(cli_pkt + 12) == sa) back = 1;
+                }
+                printf("  the stand-in: the echo went to 2a00:1450:4001:81e::80 %d time(s); the caller had the answer %d\n", seen, back);
+                CHECK(seen >= 1);
+                CHECK(back);
+            }
             if (ps >= 0) close(ps);
         }
         hang_up();
