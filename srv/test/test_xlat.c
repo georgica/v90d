@@ -274,6 +274,22 @@ int main(void)
         CHECK_EQ_I(x.n_pool, XLAT_POOL_MAX);
         ip6(a6, "2001:db8:5::81");                                         /* s2 went (used at 12) */
         CHECK(xlat_pool_find(&x, s2, 2000) == NULL || memcmp(xlat_pool_find(&x, s2, 2000), a6, 16) != 0);
+        /* every stand-in used within the hold: none is taken from another
+         * address, the new one gets none */
+        {
+            static xlat_t y; uint32_t v;
+            xlat_init(&y, clat);
+            for (i = 0; i < XLAT_POOL_MAX; i++) { ip6(a6, "2001:db8:7::"); a6[14] = (uint8_t)(i >> 8); a6[15] = (uint8_t)i; xlat_pool_get(&y, a6, 5000); }
+            ip6(a6, "2001:db8:8::1");
+            CHECK_EQ_I((long)xlat_pool_get(&y, a6, 5000 + XLAT_HOLD_S - 1), 0);
+            v = xlat_pool_get(&y, a6, 5000 + XLAT_HOLD_S);                   /* the hold is over */
+            CHECK(xlat_is_pool(v));
+            /* a flow keeps its stand-in fresh: in use, it is never the one given up */
+            ip6(a6, "2001:db8:7::"); a6[15] = 5;
+            v = xlat_pool_get(&y, a6, 9000);                                 /* refreshed at 9000 */
+            for (i = 0; i < XLAT_POOL_MAX - 1; i++) { uint8_t b6[16]; ip6(b6, "2001:db8:9::"); b6[14] = (uint8_t)(i >> 8); b6[15] = (uint8_t)i; xlat_pool_get(&y, b6, 9000 + XLAT_HOLD_S); }
+            CHECK(xlat_pool_find(&y, v, 9001 + XLAT_HOLD_S) != NULL && memcmp(xlat_pool_find(&y, v, 9001 + XLAT_HOLD_S), a6, 16) == 0);
+        }
     }
     /* what is not translated */
     {

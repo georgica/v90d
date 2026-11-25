@@ -26,7 +26,11 @@
 #define XLAT_MTU4        (XLAT_MTU6 - 20)
 #define XLAT_POOL_NET    0xc6120000u    /* 198.18.0.0/15, the stand-ins */
 #define XLAT_POOL_BITS   15
-#define XLAT_POOL_MAX    1024   /* stand-ins in use at once (the oldest gives way) */
+#define XLAT_POOL_MAX    1024   /* stand-ins in use at once */
+#define XLAT_HOLD_S      300    /* a stand-in used this recently is never given to another
+                                   address: an answer naming it (60 s TTL) or a flow on it
+                                   would otherwise reach a different site. A full pool of
+                                   such gives no stand-in (0) */
 
 typedef struct {
     uint32_t v4;                /* 198.18.x.y */
@@ -48,7 +52,8 @@ void xlat_init(xlat_t *x, const uint8_t clat96[16]);
 void xlat_set_pref64(xlat_t *x, const uint8_t p[16], int len);
 
 /* a stand-in IPv4 address for IPv6 address v6 (the same one again while it
- * is kept); 0 if the pool is not usable */
+ * is kept); 0 if the pool is not usable, or every stand-in was used in the
+ * last XLAT_HOLD_S seconds (the least used one older than that gives way) */
 uint32_t xlat_pool_get(xlat_t *x, const uint8_t v6[16], uint32_t now_s);
 /* the IPv6 address of a stand-in, NULL if it is none of ours */
 const uint8_t *xlat_pool_find(xlat_t *x, uint32_t v4, uint32_t now_s);

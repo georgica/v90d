@@ -76,7 +76,10 @@ uint32_t xlat_pool_get(xlat_t *x, const uint8_t v6[16], uint32_t now)
     if (x->n_pool < XLAT_POOL_MAX) {
         i = x->n_pool++;
         x->pool[i].v4 = XLAT_POOL_NET + 1 + x->next++;     /* 198.18.0.1 on; the pool is far larger than the table */
-    } else i = old;                                         /* full: the least used gives its address up */
+    } else {
+        if ((int32_t)(now - x->pool[old].used) < XLAT_HOLD_S) return 0;     /* nothing old enough to give up */
+        i = old;                                            /* full: the least used gives its address up */
+    }
     memcpy(x->pool[i].v6, v6, 16);
     x->pool[i].used = now;
     return x->pool[i].v4;
