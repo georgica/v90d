@@ -62,5 +62,9 @@ const char *bbslink_list_path(void);
 const char *bbslink_info_path(void);
 int         bbslink_menu_dial(int k, const char *login);
 int         bbslink_menu_busy(int k);
+/* port k's call is on 1 800 BBS DIAL: the terminal menu's directory is its
+ * operator (srv/termsvc.c), and this module only puts it through to the
+ * board chosen there (bbslink_menu_dial) */
+int         bbslink_operator(int k);
 
 #endif

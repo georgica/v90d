@@ -1317,44 +1317,48 @@ int main(int argc, char **argv)
         /* (a) nobody has asked for the boards: nothing is fetched */
         CHECK(!file_has(lanlog, "bbs: fetched list"));
         CHECK(access(live, F_OK) != 0);
-        /* (b) the number: the prompt, a search, a name nobody has, an
-         * address where nothing answers, then a board by its name as a
-         * person would type it */
+        /* (b) the number: the directory is its operator. Without colour:
+         * the list, a BBS: line to type at; a search, a name nobody has, an
+         * address, a board where nothing answers, then a board by its name
+         * as a person would type it */
         CHECK_EQ_I(bt_call("18002273425"), 1);
-        CHECK(bt_wait("bulletin board gateway", 4000));
-        CHECK(bt_wait("BBS: ", 2000));
-        bt_type("?beer\r");
-        CHECK(bt_wait("227 203 6723  20forbeers", 3000)); CHECK(bt_wait("20 For Beers <BBS>", 2000));
+        CHECK(bt_wait("ANSI colour?", 15000));
+        bt_got_n = 0;
+        bt_type("n");
+        CHECK(bt_wait("BBS DIRECTORY", 4000)); CHECK(bt_wait("\r\nBBS: ", 2000));
+        CHECK(bt_saw("Telehack") && bt_saw("227-835-3422"));    /* the list, at once */
+        CHECK(!bt_saw("tele.example") && !bt_saw("MAIN MENU") && !bt_saw("Start PPP"));
+        bt_got_n = 0;
+        bt_type("?beer\r");                                     /* the old prompt's search still works */
+        CHECK(bt_wait("1 found", 3000)); CHECK(bt_wait("20 For Beers <BBS>", 2000)); CHECK(bt_wait("227-203-6723", 2000));
         CHECK(!bt_saw("Telehack"));
-        bt_type("nosuch\r");
-        CHECK(bt_wait("No board of that name", 3000));
+        bt_got_n = 0;
+        bt_type("\b\b\b\bnosuch\r");
+        CHECK(bt_wait("No board matches that", 3000));
         /* an address is not a board: only what the list has is called */
-        bt_type("tele.example:23\r");
-        CHECK(bt_wait("No board of that name", 3000));
-        bt_type("227 111 1111\r");
-        CHECK(bt_wait("No board has that number", 3000));
-        bt_type("dead\r");
-        CHECK(bt_wait("Calling Dead Board ...", 3000));
+        bt_got_n = 0;
+        bt_type("\b\b\b\b\b\btele.example:23\r");
+        CHECK(bt_wait("No board matches that", 3000));
+        CHECK(!bt_saw("Putting you through"));
+        bt_got_n = 0;
+        bt_type("\b\b\b\b\b\b\b\b\b\b\b\b\b\b\bdead\r");
+        CHECK(bt_wait("Putting you through to Dead Board", 3000));
         CHECK(bt_wait("No answer.", 3000));
+        CHECK(bt_wait("BBS DIRECTORY", 3000)); CHECK(bt_wait("BBS: ", 2000));   /* back in the list */
         bt_got_n = 0;
         bt_type("20 for beerx\bs\r");
-        CHECK(bt_wait("Calling 20 For Beers <BBS> ...", 3000));
+        CHECK(bt_wait("Putting you through to 20 For Beers <BBS>", 3000));
         CHECK(bt_wait("Welcome to b.example port 1337", 3000));
         CHECK(!bt_saw("b.example:"));                            /* where a board is, is not the caller's to see */
         CHECK(memchr(bt_got, 0xFF, bt_got_n) == NULL);          /* the board's telnet words are not the caller's to see */
         bt_type("hi");
         CHECK(bt_wait("you said hi", 3000));
-        /* the board is done: the line is dropped, as a board's own modem would */
+        /* the board is done: back to the directory, as from the menu */
+        bt_got_n = 0;
         for (i = 0; i < 60 && !file_has(lanlog, "the board hung up"); i++) { run_ms(100); usleep(20000); }
         CHECK(file_has(lanlog, "bbs: the board hung up"));
-        {
-            int gone = 0;
-            for (i = 0; i < 100 && !gone; i++) {
-                run_ms(100);
-                gone = http("GET /status.json HTTP/1.0\r\n\r\n", resp, sizeof resp) > 0 && !strstr(resp, "\"line\":\"connected\"");
-            }
-            CHECK(gone);                                        /* while the caller is still off hook */
-        }
+        CHECK(bt_wait("BBS DIRECTORY", 4000)); CHECK(bt_wait("BBS: ", 2000));
+        CHECK(file_has(lanlog, "menu: 1-800-BBS-DIAL"));
         hang_up();
         /* (c) that call asked for the list: the fetched one is in force, on
          * the page and at the prompt; the short form of the number */
@@ -1377,8 +1381,10 @@ int main(int argc, char **argv)
         CHECK(http("GET /bbs HTTP/1.0\r\n\r\n", resp, sizeof resp) > 0);
         CHECK(strstr(resp, "<td>20 For Beers &lt;BBS&gt;</td>") != NULL);       /* a name is text, not markup */
         CHECK_EQ_I(bt_call("8002273425"), 1);
+        CHECK(bt_wait("ANSI colour?", 15000));
+        bt_type("n");
         CHECK(bt_wait("BBS: ", 4000));
-        bt_type("2276392627\r");                                 /* a board's number at the prompt */
+        bt_type("227-639-2627\r");                               /* a board's number at the prompt */
         CHECK(bt_wait("Welcome to n.example port 23", 3000));
         hang_up();
         /* (c2) a board's own number: no prompt, straight to the board; one

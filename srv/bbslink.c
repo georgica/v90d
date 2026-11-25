@@ -443,7 +443,9 @@ void bbslink_poll(uint32_t now_ms)
     lf_poll(&info_list, now_ms);
     for (k = 0; k < n_ports; k++) {
         struct bbs_link *l = &bl[k]; uint32_t addr = 0; int on = 0, kind = srv_link(&S[k], &addr, &on);
-        if (!(kind == SRV_LINK_MENU && l->menu) && kind != SRV_LINK_BBS && kind != SRV_LINK_SVC) {
+        int op = bbslink_operator(k);           /* 1 800 BBS DIAL: the menu's, but for a board it puts the caller through to */
+        if (op) bbs_list.wanted = info_list.wanted = 1;     /* its directory shows the boards' details too */
+        if (!((kind == SRV_LINK_MENU || op) && l->menu) && (op || (kind != SRV_LINK_BBS && kind != SRV_LINK_SVC))) {
             if (l->st != BL_IDLE || l->menu) { bl_close(l); l->st = BL_IDLE; l->menu = 0; }
             continue;
         }
@@ -626,6 +628,12 @@ unsigned    bbslink_lists_gen(void)   { return lists_gen; }
 const char *bbslink_list_path(void)   { return list_path(); }
 const char *bbslink_info_path(void)   { return info_list.have_live ? info_list.live : ""; }
 int         bbslink_menu_busy(int k)  { return k >= 0 && k < PORTS && bl[k].menu; }
+int bbslink_operator(int k)
+{
+    char num[BBS_NUMBER_LEN + 1]; uint32_t a; int on;
+    return k >= 0 && k < n_ports && srv_link(&S[k], &a, &on) == SRV_LINK_BBS
+           && bbs_number(srv_dialed(&S[k]), num) == BBS_NUM_PROMPT;
+}
 
 int bbslink_menu_dial(int k, const char *login)
 {

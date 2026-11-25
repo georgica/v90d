@@ -212,3 +212,28 @@ int tdir_letter(const tdir_t *d, const tdir_view *v, char letter)
     for (r = 0; r < v->nres; r++) if (tdir_file_as(tdir_get(d, v->res[r], TD_NAME)) == letter) return r;
     return -1;
 }
+
+int tdir_find(const tdir_t *d, const char *typed)
+{
+    char key[64], dig[16];
+    size_t k = 0, nd = 0;
+    int i, other = 0;
+    const char *p;
+    for (p = typed; *p; p++) {
+        char c = *p;
+        if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+        if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) { if (k < sizeof key - 1) key[k++] = c; }
+        if (c >= '0' && c <= '9') { if (nd < sizeof dig - 1) dig[nd++] = c; else other = 1; }
+        else if (c != ' ' && c != '-' && c != '(' && c != ')' && c != '.') other = 1;
+    }
+    key[k] = dig[nd] = '\0';
+    if (!k) return -1;
+    i = lookup(d, key, k);
+    if (i >= 0) return i;
+    if (other) return -1;
+    p = dig;
+    if (nd == 11 && dig[0] == '1') p++;
+    if (strlen(p) != 10) return -1;
+    for (i = 0; i < d->n; i++) if (strcmp(tdir_get(d, i, TD_NUMBER), p) == 0) return i;
+    return -1;
+}
