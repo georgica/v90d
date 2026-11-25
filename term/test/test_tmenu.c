@@ -216,5 +216,75 @@ int main(void)
     CHECK(line_has("MAIN MENU") && line_has("BBS DIRECTORY") && line_has("+- move"));
     for (n = 0; n < sent_n; n++) if (sent[n] >= 0x80 || (sent[n] < 32 && sent[n] != '\r' && sent[n] != '\n')) break;
     CHECK_EQ_I(n, sent_n);                           /* plain ASCII only */
+    /* 1-800-BBS-DIAL: the operator. The directory straight after the
+     * opening screen, a BBS: line that narrows it as one types */
+    c.operator = 1;
+    vt_init(&V); sent_n = 0;
+    tmenu_init(&M, &c, now); drain();
+    CHECK(shows("ANSI colour?"));
+    keys("y"); wait_ms(5); drain();
+    CHECK(shows("BBS DIRECTORY") && shows("3 boards") && shows("BBS: ") && !shows("MAIN MENU"));
+    CHECK(shows("type a board's name or number") && shows("Esc hang up"));
+    CHECK_EQ_I(vt_diff(&V, &M.cur), 0);
+    keys("zru"); wait_ms(5); drain();
+    CHECK(shows("BBS: zru") && shows("1 found") && shows("Zruspa's BBS") && !shows("Alcatraz"));
+    CHECK_EQ_I(vt_diff(&V, &M.cur), 0);
+    keys("\x7f\x7f\x7f"); wait_ms(5); drain();
+    CHECK(shows("3 boards"));
+    /* a name typed whole: through at once, not to its page */
+    keys("Floor13\r"); drain();
+    CHECK(shows("Putting you through to 13th Floor BBS"));
+    CHECK_EQ_I(tmenu_action(&M, &board), TM_ACT_DIAL);
+    CHECK_EQ_I(strcmp(tdir_get(&D, board, TD_LOGIN), "floor13"), 0);
+    tmenu_back(&M, now); wait_ms(5); drain();
+    CHECK(shows("BBS DIRECTORY") && shows("3 boards") && shows("BBS: "));
+    /* a number, with the 1 and dashes */
+    keys("1-227-978-7720\r"); drain();
+    CHECK(shows("Putting you through to Zruspa's BBS"));
+    CHECK_EQ_I(tmenu_action(&M, &board), TM_ACT_DIAL);
+    CHECK_EQ_I(strcmp(tdir_get(&D, board, TD_LOGIN), "zruspa"), 0);
+    tmenu_back(&M, now); wait_ms(5); drain();
+    /* part of a name: Enter opens the board under the bar */
+    keys("alca"); wait_ms(5); drain(); keys("\r"); drain();
+    CHECK(shows("ALCATRAZ PRISON BBS") && shows("connect to it now"));
+    keys("\x1b"); wait_ms(310); drain();
+    CHECK(shows("BBS DIRECTORY") && shows("1 found"));
+    /* Esc clears the line, Esc on an empty one says goodbye */
+    keys("\x1b"); wait_ms(310); drain();
+    CHECK(shows("3 boards"));
+    keys("\x1b"); wait_ms(310); drain();
+    CHECK(shows("NO CARRIER"));
+    CHECK_EQ_I(tmenu_action(&M, NULL), TM_ACT_HANGUP);
+    /* no match: nothing happens on Enter */
+    tmenu_init(&M, &c, now); keys("y"); wait_ms(5); drain();
+    keys("nosuchboard"); wait_ms(5); drain(); keys("\r"); drain();
+    CHECK(shows("No board matches that") && M.screen == 5);
+    CHECK_EQ_I(tmenu_action(&M, NULL), TM_ACT_NONE);
+    /* without colour: the typing is echoed, the list follows on Enter */
+    sent_n = 0;
+    tmenu_init(&M, &c, now); drain();
+    sent_n = 0;
+    keys("n"); drain();
+    CHECK(line_has("BBS DIRECTORY") && line_has("\r\nBBS: ") && line_has("Zruspa's BBS"));
+    {   /* one screen, not an empty one and then the list */
+        size_t i, screens = 0;
+        for (i = 0; i + 13 <= sent_n; i++) if (!memcmp(sent + i, "BBS DIRECTORY", 13)) screens++;
+        CHECK_EQ_I((long)screens, 1);
+    }
+    sent_n = 0;
+    keys("zru"); drain();
+    CHECK_EQ_I((long)sent_n, 3);                      /* only the echo */
+    keys("\r"); drain();
+    CHECK(line_has("1 found") && line_has("BBS: zru"));
+    keys("spa\r"); drain();
+    CHECK(line_has("Putting you through to Zruspa's BBS"));
+    CHECK(!memchr(sent, 0x1b, sent_n));
+    CHECK_EQ_I(tmenu_action(&M, &board), TM_ACT_DIAL);
+    /* the lookup itself */
+    CHECK_EQ_I(tdir_find(&D, "  ZRUSPA "), tdir_find(&D, "zruspa"));
+    CHECK(tdir_find(&D, "zruspa") >= 0 && tdir_find(&D, "(227) 978.7720") == tdir_find(&D, "zruspa"));
+    CHECK_EQ_I(tdir_find(&D, "227978772"), -1);
+    CHECK_EQ_I(tdir_find(&D, "zrusp"), -1);
+    CHECK_EQ_I(tdir_find(&D, ""), -1);
     T_REPORT("tmenu");
 }

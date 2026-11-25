@@ -35,7 +35,9 @@ static struct term {
     char      items_hint[32];
 } T[PORTS];
 
-void termsvc_want(int on) { ld.want = on != 0; bbslink_menu_want(on); }
+/* the directory is always made: 1 800 BBS DIAL shows it on every port
+ * (bbslink_operator); the board details are fetched only for the menu */
+void termsvc_want(int on) { ld.want = 1; bbslink_menu_want(on); }
 
 static int any_menu(void)
 {
@@ -127,7 +129,7 @@ const char *termsvc_where(int k)
     if (k < 0 || k >= n_ports || !S[k].in_call) return "";
     kind = srv_link(&S[k], &a, &on);
     if (kind == SRV_LINK_MENU) return bbslink_menu_busy(k) ? "a BBS" : "the menu";
-    if (kind == SRV_LINK_BBS) return "a BBS";
+    if (kind == SRV_LINK_BBS) return T[k].on && !T[k].dialing && !bbslink_menu_busy(k) ? "1-800-BBS-DIAL" : "a BBS";
     if (kind == SRV_LINK_SVC) return "a service";
     if (kind == SRV_LINK_ACTS) return "the time service";
     if (kind != SATURN_NONE) return "a Saturn game";
@@ -188,7 +190,7 @@ static int who(void *ctx, int i, tmenu_who *r)
     return 0;
 }
 
-static void start(int k, uint32_t now)
+static void start(int k, uint32_t now, int op)
 {
     struct term *t = &T[k];
     const dce_status_t *d = &S[k].ds;
@@ -217,12 +219,14 @@ static void start(int k, uint32_t now)
     c.items[2] = (tmenu_item){ '3', "BBS directory", t->items_hint, TM_BBS };
     c.dir = &dir;
     c.dir_source = ld.has_info ? "from the Telnet BBS Guide" : "names and numbers";
-    c.dir_note = "Dial 1-800-BBS-DIAL and a board's name, or its 227 number.";
+    c.dir_note = op ? "Or dial a board's own 227 number: straight through to it."
+                    : "Dial 1-800-BBS-DIAL and a board's name, or its 227 number.";
+    c.operator = op;
     c.ppp_addr = t->addr; c.ppp_server = t->server; c.ppp_mtu = S[k].cfg.mru;
     c.tonight = tonight; c.who = who; c.lines = n_ports;
     tmenu_init(&t->m, &c, now);
     t->started = 1; t->key_at = now; t->pn = 0;
-    logf_(CFG_LOG_INFO, "port %d: menu: a terminal program called", k + 1);
+    logf_(CFG_LOG_INFO, op ? "port %d: menu: 1-800-BBS-DIAL" : "port %d: menu: a terminal program called", k + 1);
 }
 
 void termsvc_from_modem(void *ctx, const uint8_t *oct, size_t n)
@@ -243,8 +247,8 @@ void termsvc_poll(uint32_t now)
     load_poll();
     for (k = 0; k < n_ports; k++) {
         struct term *t = &T[k];
-        uint32_t a; int online, kind = srv_link(&S[k], &a, &online), act, board;
-        if (kind != SRV_LINK_MENU) {           /* no menu call: or it went over to PPP */
+        uint32_t a; int online, kind = srv_link(&S[k], &a, &online), act, board, op = bbslink_operator(k);
+        if (kind != SRV_LINK_MENU && !op) {    /* no menu call: or it went over to PPP */
             if (t->on) { t->on = 0; t->started = 0; t->dialing = 0; }
             continue;
         }
@@ -254,7 +258,7 @@ void termsvc_poll(uint32_t now)
             /* Dial-Up Networking's first frame takes the call to PPP well within
              * this; a key from a terminal program starts the menu at once */
             if (!t->wake && now - t->online_at < GREET_MS) continue;
-            start(k, now);
+            start(k, now, op);
         }
         if (t->dialing) {
             if (bbslink_menu_busy(k)) continue;
