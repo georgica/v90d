@@ -551,3 +551,63 @@ int nat_ip_forward(int on)
     if (write(fd, on ? "1\n" : "0\n", 2) != 2) { err = errno; close(fd); errno = err; return -1; }
     return close(fd);
 }
+
+/* ------------------------------------------------- the callers' IPv6 (#7) */
+#define TABLE6 "v90d6"
+
+static void table6_msg(nlbuf *m, int msg, uint16_t flags)
+{
+    size_t at = msg_begin(m, nft(msg), flags, NFPROTO_IPV6, 0);
+    attr_str(m, NFTA_TABLE_NAME, TABLE6);
+    msg_end(m, at);
+}
+
+int nat_clat6(int on, const uint8_t prefix96[16])
+{
+    static nlbuf m;                 /* not on the stack: 64 kB */
+    size_t at, hook, exprs, el, data, val;
+    uint32_t first;
+    if (ipt_kernel()) { errno = EOPNOTSUPP; return -1; }   /* the maker's kernel: no IPv6 */
+    memset(&m, 0, sizeof m);
+    m.seq = (uint32_t)getpid() << 8 | 0x80;
+    msg_end(&m, msg_begin(&m, NFNL_MSG_BATCH_BEGIN, 0, AF_UNSPEC, NFNL_SUBSYS_NFTABLES));
+    first = m.seq + 1;
+    table6_msg(&m, NFT_MSG_NEWTABLE, NLM_F_CREATE | NLM_F_ACK);    /* a fresh table, or none */
+    table6_msg(&m, NFT_MSG_DELTABLE, NLM_F_ACK);
+    if (on) {
+        table6_msg(&m, NFT_MSG_NEWTABLE, NLM_F_CREATE | NLM_F_ACK);
+        at = msg_begin(&m, nft(NFT_MSG_NEWCHAIN), NLM_F_CREATE | NLM_F_ACK, NFPROTO_IPV6, 0);
+        attr_str(&m, NFTA_CHAIN_TABLE, TABLE6);
+        attr_str(&m, NFTA_CHAIN_NAME, CHAIN);
+        hook = nest_begin(&m, NFTA_CHAIN_HOOK);
+        attr_u32(&m, NFTA_HOOK_HOOKNUM, NF_INET_POST_ROUTING);
+        attr_u32(&m, NFTA_HOOK_PRIORITY, 100);
+        nest_end(&m, hook);
+        attr_str(&m, NFTA_CHAIN_TYPE, "nat");
+        msg_end(&m, at);
+        /* ip6 saddr <prefix>::/96 masquerade */
+        at = msg_begin(&m, nft(NFT_MSG_NEWRULE), NLM_F_CREATE | NLM_F_APPEND | NLM_F_ACK, NFPROTO_IPV6, 0);
+        attr_str(&m, NFTA_RULE_TABLE, TABLE6);
+        attr_str(&m, NFTA_RULE_CHAIN, CHAIN);
+        exprs = nest_begin(&m, NFTA_RULE_EXPRESSIONS);
+        el = expr_begin(&m, "payload", &data);          /* the first 96 bits of the source address */
+        attr_u32(&m, NFTA_PAYLOAD_DREG, NFT_REG_1);
+        attr_u32(&m, NFTA_PAYLOAD_BASE, NFT_PAYLOAD_NETWORK_HEADER);
+        attr_u32(&m, NFTA_PAYLOAD_OFFSET, 8);
+        attr_u32(&m, NFTA_PAYLOAD_LEN, 12);
+        expr_end(&m, el, data);
+        el = expr_begin(&m, "cmp", &data);
+        attr_u32(&m, NFTA_CMP_SREG, NFT_REG_1);
+        attr_u32(&m, NFTA_CMP_OP, NFT_CMP_EQ);
+        val = nest_begin(&m, NFTA_CMP_DATA);
+        attr(&m, NFTA_DATA_VALUE, prefix96, 12);
+        nest_end(&m, val);
+        expr_end(&m, el, data);
+        el = expr_begin(&m, "masq", &data);
+        expr_end(&m, el, data);
+        nest_end(&m, exprs);
+        msg_end(&m, at);
+    }
+    msg_end(&m, msg_begin(&m, NFNL_MSG_BATCH_END, 0, AF_UNSPEC, NFNL_SUBSYS_NFTABLES));
+    return transact(&m, first);
+}

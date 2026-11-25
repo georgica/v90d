@@ -74,6 +74,7 @@
 #include "actsvc.h"
 #include "dnsrelay.h"
 #include "ra6.h"
+#include "clat.h"
 #include "bbsdial.h"
 #include "update.h"
 #include "netsvc.h"
@@ -187,6 +188,7 @@ static void on_term(int sig) { (void)sig; stop = 1; }
 static void ip_to_kernel(void *ctx, const uint8_t *pkt, size_t len)
 {
     int i = (int)(((srv_t *)ctx) - S);
+    if (clat_from_caller(i, pkt, len)) return;      /* over IPv6 (#7) */
     if (tun_fd[i] >= 0 && tun_write(tun_fd[i], pkt, len) < 0) S[i].status.rx_errors++;
 }
 
@@ -197,6 +199,8 @@ static void relay_want(const cfg_t *c)
     const uint32_t peers[2] = { c->ppp_peer, c->port2.ppp_peer };
     dnsrelay_set(c->dns_relay, &c->ppp_local, 1, peers, 2, c->dns);
     ra6_want(lan_if, c->ipv6);
+    clat_want(c->ipv6, lan_if);
+    dnsrelay_set_standin(clat_standin);
 }
 
 /* what the network's IPv6 router says, in the log when it changes */
@@ -723,6 +727,7 @@ int main(int argc, char **argv)
             dnsrelay_poll(now_ms);
             ra6_poll(now_ms);
             ra6_log();
+            clat_poll(now_ms);
             update_poll(now_ms);
             netsvc_poll(now_ms);
             if (fw_pid > 0 && blocks == 50 && waitpid(fw_pid, NULL, WNOHANG) == fw_pid) fw_pid = 0;   /* once a second (blocks counts to 100 and starts again) */

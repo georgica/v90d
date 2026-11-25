@@ -22,6 +22,12 @@ ssize_t tun_read(int fd, uint8_t *buf, size_t cap);
 ssize_t tun_write(int fd, const uint8_t *pkt, size_t len);
 void    tun_close(int fd);
 
+/* An IPv6 TUN device (#7, srv/clat.c): `name`, up with that MTU, and the
+ * route prefix/plen into it, so that what the kernel has for that prefix
+ * (the callers' IPv6 /96, its masquerade undone) comes out of read(). IP
+ * packets both ways, as tun_open's. Needs the TUN driver and IPv6. */
+int tun_open6(const char *name, int mtu, const uint8_t prefix[16], int plen);
+
 /* IPv4 address of an interface in host byte order, 0 if it has none. */
 uint32_t if_address(const char *ifname);
 

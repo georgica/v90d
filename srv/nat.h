@@ -45,6 +45,12 @@ typedef struct {
 int nat_apply(const nat_plan *p);
 /* Remove our table. 0, or -1 with errno (ENOENT if it was not there). */
 int nat_remove(void);
+/* The callers' IPv6 (#7, srv/clat.c): a table "v90d6" of its own, in which
+ * what leaves from prefix96::/96 (the first 12 octets) is masqueraded to
+ * the box's own IPv6 address; off removes it. 0, or -1 with errno
+ * (EOPNOTSUPP under a kernel without nf_tables, which has no IPv6 here). */
+#include <stdint.h>
+int nat_clat6(int on, const uint8_t prefix96[16]);
 /* Write 1 or 0 to /proc/sys/net/ipv4/ip_forward. 0 or -1 with errno. */
 int nat_ip_forward(int on);
 

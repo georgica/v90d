@@ -11,6 +11,7 @@
 #include <netinet/in.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <net/route.h>
 #include <linux/if_tun.h>
 #include <linux/ppp_defs.h>
 #include <linux/ppp-ioctl.h>
@@ -153,6 +154,42 @@ int tun_open(const char *name, uint32_t local, uint32_t peer, int mtu)
         return -1;
     }
     return fd;
+}
+
+int tun_open6(const char *name, int mtu, const uint8_t prefix[16], int plen)
+{
+    struct ifreq ifr;
+    struct in6_rtmsg rt;
+    int fd, s, err;
+    fd = open("/dev/net/tun", O_RDWR | O_NONBLOCK | O_CLOEXEC);
+    if (fd < 0) return -1;
+    memset(&ifr, 0, sizeof ifr);
+    ifr.ifr_flags = IFF_TUN | IFF_NO_PI;
+    strncpy(ifr.ifr_name, name, IFNAMSIZ - 1);
+    if (ioctl(fd, TUNSETIFF, &ifr) < 0) goto fail;
+    s = socket(AF_INET6, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+    if (s < 0) goto fail;
+    memset(&ifr, 0, sizeof ifr);
+    strncpy(ifr.ifr_name, name, IFNAMSIZ - 1);
+    ifr.ifr_mtu = mtu;
+    if (ioctl(s, SIOCSIFMTU, &ifr) < 0) goto fail_s;
+    if (ioctl(s, SIOCGIFFLAGS, &ifr) < 0) goto fail_s;
+    ifr.ifr_flags |= IFF_UP;
+    if (ioctl(s, SIOCSIFFLAGS, &ifr) < 0) goto fail_s;
+    memset(&rt, 0, sizeof rt);
+    memcpy(&rt.rtmsg_dst, prefix, 16);
+    rt.rtmsg_dst_len = (unsigned short)plen;
+    rt.rtmsg_metric = 1;
+    rt.rtmsg_flags = RTF_UP;
+    rt.rtmsg_ifindex = (int)if_nametoindex(name);
+    if (ioctl(s, SIOCADDRT, &rt) < 0 && errno != EEXIST) goto fail_s;
+    close(s);
+    return fd;
+fail_s:
+    err = errno; close(s); errno = err;
+fail:
+    err = errno; close(fd); errno = err;
+    return -1;
 }
 
 ssize_t tun_read(int fd, uint8_t *buf, size_t cap)
