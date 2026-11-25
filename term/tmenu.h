@@ -49,6 +49,15 @@ typedef struct {
     tdir_t     *dir;              /* the BBS directory; NULL: no TM_BBS */
     const char *dir_source;       /* "from the Telnet BBS Guide, November 2026" */
     const char *dir_note;         /* the line under the directory: how to dial a board */
+    /* 1-800-BBS-DIAL, the operator: after the opening screen the directory
+     * is all there is. What the caller types goes to its BBS: line and
+     * narrows the list as they type (in colour; without colour it is
+     * echoed and the list follows on Enter); Enter on a board's name or 227
+     * number puts them through at once, on anything else it opens the
+     * board under the bar. Arrows (Ctrl-E/X, Ctrl-R/C, +, < and >) move,
+     * Esc clears the line and on an empty one says goodbye. No main menu,
+     * no PPP. */
+    int         operator;
     int         lines;            /* Who's online: "busy of lines" */
     /* PPP's handoff: the caller's address, ours, the MTU */
     const char *ppp_addr, *ppp_server; int ppp_mtu;

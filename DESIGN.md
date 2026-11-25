@@ -250,7 +250,8 @@ front. A port whose own number looks like one of them keeps its number.
   takes the next number that is free (116 of 1074 boards on 2026-11-16), so
   the number to dial is the one the BBS page or a `?` search shows. Such a
   number can move when the guide gains a board that sorts before it.
-- **1 800 BBS DIAL** (`8002273425`): the operator, a prompt.
+- **1 800 BBS DIAL** (`8002273425`): the operator, the terminal menu's
+  directory in its operator mode (below).
 
 - **The call.** No PPP: the call object is in its octet mode, as for the
   Saturn, but with `raw_ec`: error control and compression stay as `[modem]`
@@ -266,7 +267,19 @@ front. A port whose own number looks like one of them keeps its number.
   finds `20forbeers`), a board's number, or `?text` for a search (40 rows
   at most, number, login name and name, paced by what the modem has
   taken). A call to a board's own number skips the prompt and goes to the
-  board; a number no board has ends at the prompt.
+  board; a number no board has ends at the prompt. That prompt is now only
+  for such a number: a call to 1 800 BBS DIAL (`bbslink_operator()`) goes
+  to `termsvc.c` instead, which opens the terminal menu with
+  `tmenu_cfg.operator` set (`term/tmenu.h`): after the opening screen,
+  the directory alone, its search line labelled `BBS:` and fed by every
+  key typed. Enter looks the line up (`tdir_find()`: the login as letters
+  and digits, or the 227 number with or without the 1) and puts the
+  caller through on a match, through `bbslink_menu_dial()` as the menu's
+  **C** does; anything else opens the board under the bar. When the
+  board hangs up the caller is back in the directory. The directory is
+  made on every box now, not only with the menu on. Both of Netstalgia's
+  lists are fetched once a day from the first such call on (the board
+  details too, as for the menu), as the board list always was.
 - **No addresses.** A caller reaches only boards of the list and is never
   shown where one is: not at the prompt, not in "Calling ...", not on the
   page. Where a board is, is the list's business (the log names it).

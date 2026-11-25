@@ -270,9 +270,16 @@ static int draw_bbs(tmenu_t *m, tscr *s)
         snprintf(c, sizeof c, "· %s", m->cfg.dir_source);
         tscr_put(s, 17 + tscr_len(b) + 1, 2, c, TS_DK, -1);
     }
+    if (m->cfg.operator) {
+        tscr_put(s, 2, 3, "BBS: ", TS_WH, -1);
+        tscr_fill(s, 7, 3, 40, 1, " ", TS_K, TS_C);
+        tscr_put(s, 7, 3, m->q, TS_K, TS_C);
+        if (!m->q[0]) tscr_put(s, 49, 3, "type a board's name or number", TS_DK, -1);
+    } else {
     tscr_put(s, 2, 3, "Search: ", TS_W, -1);
     if (m->searching) { tscr_fill(s, 10, 3, 40, 1, " ", TS_K, TS_C); tscr_put(s, 10, 3, m->q, TS_K, TS_C); }
     else tscr_put(s, 10, 3, m->q[0] ? m->q : "(press / to search names, places, software and descriptions)", m->q[0] ? TS_WH : TS_DK, -1);
+    }
     tscr_bar(s, 4, "  Board                         Software       Location            Dial", "", TS_K, TS_M);
     first = m->dpage * TM_PER;
     for (i = 0; i < TM_PER && first + i < n; i++) {
@@ -287,13 +294,18 @@ static int draw_bbs(tmenu_t *m, tscr *s)
         tscr_put(s, 67, y, nb[0] ? number(nb, num) : "   not yet", nb[0] ? (on ? TS_K : TS_LG) : (on ? TS_K : TS_DK), bg);
     }
     if (!n && tdir_done(d, &m->view))
-        tscr_put(s, 2, 6, m->q[0] ? "No board matches that. Press / to search again, Esc to clear." : "The board list has not arrived yet.", TS_W, -1);
+        tscr_put(s, 2, 6, !m->view.q[0] ? "The board list has not arrived yet."
+                          : m->cfg.operator ? "No board matches that. Esc clears the line."
+                          : "No board matches that. Press / to search again, Esc to clear.", TS_W, -1);
     if (n) curl = tdir_file_as(tdir_get(d, m->view.res[m->dsel], TD_NAME));
     for (k = 0; letters[k]; k++) { char l[2] = { letters[k], 0 }; tscr_put(s, 2 + k * 2, 21, l, letters[k] == curl ? TS_YL : TS_DK, -1); }
     snprintf(b, sizeof b, "page %d of %d", m->dpage + 1, np);
     tscr_put(s, 58, 21, b, TS_W, -1);
     tscr_put(s, 2, 22, m->cfg.dir_note ? m->cfg.dir_note : "", TS_DK, -1);
-    snprintf(b, sizeof b, "%s  %s  A-Z jump  / search  Enter open  Esc menu",
+    if (m->cfg.operator)
+        snprintf(b, sizeof b, "%s  %s  Enter call or open  Esc %s",
+                 m->ansi ? "↑↓ move" : "^E ^X move", m->ansi ? "←→ page" : "<> page", m->q[0] ? "clear" : "hang up");
+    else snprintf(b, sizeof b, "%s  %s  A-Z jump  / search  Enter open  Esc menu",
              m->ansi ? "↑↓ move" : "+- move", m->ansi ? "←→ page" : "<> page");
     {
         char r[48], cl[12];
@@ -301,6 +313,7 @@ static int draw_bbs(tmenu_t *m, tscr *s)
         snprintf(r, sizeof r, "%s │ %s", m->cfg.user ? m->cfg.user : "", cl);
         foot(m, s, b, r);
     }
+    if (m->cfg.operator) return 3 * 256 + 7 + tscr_len(m->q);
     return m->searching ? 3 * 256 + 10 + tscr_len(m->q) : -1;
 }
 
@@ -427,6 +440,10 @@ static void emit(tmenu_t *m)
     if (n >= sizeof m->scratch) n = sizeof m->scratch - 1;   /* (never: a screen is far less) */
     if (n > TM_OUT - m->out_n) return;    /* not yet: room first */
     out_put(m, m->scratch, n);
+    if (!m->ansi && m->cfg.operator && m->screen == S_BBS) {   /* the prompt under the plain screen, and what is typed so far */
+        out_put(m, "BBS: ", 5);
+        out_put(m, m->q, strlen(m->q));
+    }
     m->sent = m->cur;
     m->dirty = 0;
     m->full = 0;
@@ -448,6 +465,15 @@ static void dir_search(tmenu_t *m)
     tdir_search(&m->view, m->q);
     m->dsel = m->dpage = 0;
     m->dirty_search = 1;
+}
+
+/* the same, done at once: a screen without colour is sent whole, so it
+ * should not go out before its list is complete */
+static void dir_search_now(tmenu_t *m)
+{
+    dir_search(m);
+    (void)tdir_step(m->cfg.dir, &m->view, TDIR_MAX);
+    m->dirty_search = 0;
 }
 
 static void open_item(tmenu_t *m, int i)
@@ -484,9 +510,67 @@ static void key_menu(tmenu_t *m, int k)
         }
 }
 
+/* the operator's line changed: in colour the list follows at once; without
+ * colour (every change is the whole screen) the key is echoed and the list
+ * follows on Enter */
+static void op_typed(tmenu_t *m, int k)
+{
+    if (m->ansi) { dir_search(m); redraw(m); return; }
+    if (m->dirty) return;                          /* a screen on its way shows the line as it is */
+    if (k == K_BS) out_put(m, "\b \b", 3);
+    else { char ch = (char)k; out_put(m, &ch, 1); }
+}
+
+static void key_op(tmenu_t *m, int k)
+{
+    size_t l = strlen(m->q);
+    int n, b;
+    char low[TDIR_Q_MAX + 1];
+    if (k == K_BS) { if (l) { m->q[l - 1] = '\0'; op_typed(m, k); } return; }
+    if (k == K_ESC) {
+        if (!l) { show(m, S_BYE); return; }
+        m->q[0] = '\0'; dir_search_now(m); redraw(m);
+        return;
+    }
+    if (k == K_ENTER) {
+        b = tdir_find(m->cfg.dir, m->q);
+        if (b >= 0) {                              /* a board's name or number: through at once */
+            m->board = b;
+            m->q[0] = '\0'; dir_search_now(m);       /* back from it: the whole list */
+            show(m, S_DIAL);
+            return;
+        }
+        for (l = 0; m->q[l]; l++) low[l] = m->q[l] >= 'A' && m->q[l] <= 'Z' ? (char)(m->q[l] + 32) : m->q[l];
+        low[l] = '\0';
+        if (strcmp(low, m->view.q) != 0) {        /* typed without colour: the list for it first */
+            dir_search_now(m);
+            redraw(m);
+            return;
+        }
+        if (m->dirty_search) { (void)tdir_step(m->cfg.dir, &m->view, TDIR_MAX); m->dirty_search = 0; }
+        if (m->view.nres) { m->board = m->view.res[m->dsel]; show(m, S_BOARD); }
+        return;
+    }
+    if (k == '?') return;                          /* the old prompt's "search": typing is one already */
+    if (k >= 32 && k < 127 && k != '+' && k != '<' && k != '>') {
+        if (l < TDIR_Q_MAX && l < 40) { m->q[l] = (char)k; m->q[l + 1] = '\0'; op_typed(m, k); }
+        return;
+    }
+    if (m->dirty_search) { (void)tdir_step(m->cfg.dir, &m->view, TDIR_MAX); m->dirty_search = 0; }
+    n = m->view.nres;
+    if (k == K_DOWN || k == '+' || k == 24) { if (m->dsel < n - 1) m->dsel++; }
+    else if (k == K_UP || k == 5) { if (m->dsel > 0) m->dsel--; }
+    else if (k == K_RIGHT || k == K_PGDN || k == '>' || k == 3) { int t = (m->dpage + 1) * TM_PER; m->dsel = t < n ? t : (n ? n - 1 : 0); }
+    else if (k == K_LEFT || k == K_PGUP || k == '<' || k == 18) { int t = (m->dpage - 1) * TM_PER; m->dsel = t > 0 ? t : 0; }
+    else return;
+    m->dpage = m->dsel / TM_PER;
+    redraw(m);
+}
+
 static void key_dir(tmenu_t *m, int k)
 {
     int n;
+    if (m->cfg.operator) { key_op(m, k); return; }
     if (m->searching) {
         size_t l = strlen(m->q);
         if (k == K_ENTER || k == K_ESC) { m->searching = 0; redraw(m); return; }
@@ -525,8 +609,12 @@ static void key(tmenu_t *m, int k)
     if (m->action && m->act_wait) return;      /* on its way out: keys wait */
     switch (m->screen) {
     case S_CONNECT:
-        if (k == 'y' || k == 'Y' || k == K_ENTER) { m->ansi = 1; m->full = 1; show(m, S_MENU); }
-        else if (k == 'n' || k == 'N') { m->ansi = 0; m->full = 1; show(m, S_MENU); }
+        if (k == 'y' || k == 'Y' || k == K_ENTER) m->ansi = 1;
+        else if (k == 'n' || k == 'N') m->ansi = 0;
+        else return;
+        m->full = 1;
+        if (m->cfg.operator && m->cfg.dir) { dir_search_now(m); show(m, S_BBS); }
+        else show(m, S_MENU);
         return;
     case S_MENU:  key_menu(m, k); return;
     case S_BBS:   key_dir(m, k); return;

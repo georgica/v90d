@@ -485,7 +485,8 @@ static void raw_from_modem(void *ctx, const uint8_t *oct, size_t n)
 {
     uint32_t addr; int on;
     int kind = srv_link((srv_t *)ctx, &addr, &on);
-    if (kind == SRV_LINK_BBS || kind == SRV_LINK_SVC) bbslink_from_modem(ctx, oct, n);
+    if (kind == SRV_LINK_BBS && bbslink_operator((int)((srv_t *)ctx - S))) termsvc_from_modem(ctx, oct, n);   /* 1 800 BBS DIAL */
+    else if (kind == SRV_LINK_BBS || kind == SRV_LINK_SVC) bbslink_from_modem(ctx, oct, n);
     else if (kind == SRV_LINK_MENU) termsvc_from_modem(ctx, oct, n);
     else if (kind == SRV_LINK_ACTS) actsvc_from_modem(ctx, oct, n);
     else satlink_from_modem(ctx, oct, n);

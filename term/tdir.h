@@ -66,6 +66,11 @@ const char *tdir_get(const tdir_t *d, int i, int f);
 /* the first result (from 0) whose name begins with the letter (A-Z, or '#'
  * for anything else), -1 when none does */
 int  tdir_letter(const tdir_t *d, const tdir_view *v, char letter);
+/* the board a caller typed at a BBS: prompt, -1 when none: its login (letters
+ * without case and digits; spaces and the rest are left out) or its 227
+ * number (digits only, with or without the 1 in front, spaces, '-', '(',
+ * ')' and '.' left out) */
+int  tdir_find(const tdir_t *d, const char *typed);
 /* the letter a name is filed under: 'A'..'Z' or '#' */
 char tdir_file_as(const char *name);
 

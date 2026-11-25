@@ -86,17 +86,23 @@ and gives every board a number:
   telephone, the seven digits are the board's name on the same keys, with
   zeros behind a short name: `telehack` is **227 835 3422**, `agency` is
   227 243 6290. Dial it and you are on the board.
-- **1 800 227 3425** (1 800 BBS DIAL) is the operator. The box asks `BBS:`;
-  type a board's name (`telehack`, `20forbeers`, ...) or number, or `?` and
-  part of a name to search.
+- **1 800 227 3425** (1 800 BBS DIAL) is the operator. After "ANSI
+  colour? Y/n" you get the BBS directory, the same list as the terminal
+  menu's (below), with a `BBS:` line to type at. Type a board's name
+  (`telehack`, `20forbeers`, ...) or its number and press Enter, and you
+  are put through. In colour the list narrows to what you type as you type
+  it; without colour it follows when you press Enter, which also opens a
+  board's page when what you typed is only part of a name. The arrow keys
+  (or Ctrl-E, Ctrl-X, `<` and `>`) move through the list, Esc clears the
+  line, and Esc on an empty line hangs up.
 
 Either with or without a 1 in front, on any phone port of the box, whatever
 its service, from anything that can dial: HyperTerminal, Telix, Procomm, a
 Commodore or Amiga terminal. The modem connects, with error correction if
 the modem has it, and without PPP: the computer needs no TCP/IP at all. The
 telnet negotiation stays inside the box; the terminal sees the board, ANSI
-and all. When the board logs you off, the line is dropped, as it always
-was.
+and all. When the board logs you off, a board's own number drops the line,
+as it always was; through 1 800 BBS DIAL you are back in the directory.
 
 The **BBS** page of the web interface (under **Services**) lists the boards with their numbers,
 a hundred to a page, with a search by name or number.
