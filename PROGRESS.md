@@ -2967,3 +2967,19 @@ The release build made and checked both files. After the per-model images,
 `make -C fw test-release` again (v90nv 26, boot model 33 with the model check,
 loader 144, each on host and ARM) and the release build: both files, each
 image named for its model.
+
+## 0.11.0: IPv6, the terminal menu, the time service, the HT801 (2026-11-24)
+
+Everything merged since 0.10.0 (#8, #10 to #20):
+
+- **IPv6 (#7)**, in three steps:
+  - IPv6 in the HT802 and OBi200 kernels, with SLAAC on the LAN port (#15);
+  - the `[network] ipv6` setting, the router's name servers and NAT64 prefix from its advertisements, and outgoing connections over IPv6 (#16);
+  - the callers' IPv4 over IPv6 through a NAT64 (an RFC 7915 translator, 464XLAT's CLAT side), and stand-in IPv4 addresses for names with IPv6 alone (#19).
+- **The callers' name server** is a DNS relay on the box, answering IPv6 lookups with none, so callers with an IPv6 stack stop trying addresses the dial-up link cannot reach (#13, #14).
+- **Netstalgia's terminal menu**, its signed services list, PROTOWEB archive calls and the reworked web interface (#8), with fixes from the first real calls (#10, #11).
+- **A time service** in NIST's ACTS format on 303 494 4774 (#12).
+- **The HT801**: a file of its own, keyed for its stock upgrade page (#17, by marrold, confirmed on a V1.0A with a V.90 call). A V1.1A boots v90d from flash (#18).
+- **libv90modem 0.6.1** (#20): V.90 9.2.1.2.1 recovery (a caller restarting at INFO0a now connects) and the shared upstream receiver.
+
+Proof on hardware for this release: the OBi200 on 0.6.1 answered a USR Sportster (V.34 31200) with PPP, ping and HTTP. With no IPv4 route out and only IPv6 to a NAT64, the same call reached 1.0.0.1 through the translator. The HT801 V1.1A heard a router advertisement and brought its translator up.
