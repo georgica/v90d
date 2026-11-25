@@ -7,11 +7,10 @@
 set -e
 fw=$(cd "$(dirname "$0")" && pwd)
 top=$(dirname "$fw")
-# pinned to a released source tarball (a GitHub release asset, so its bytes
-# do not change under us). Bump both lines to move to a new modem;
-# libv90m.mk builds whatever is unpacked at $top/libv90modem.
-LIBV90M_VER=0.6.1
-LIBV90M_SHA=e7b3fb850c8f5aeaf19ca2105c5d7b2f4d24a164ca3e8f869ba829fa968d796e
+# The pin stays declared in fw/setup.sh, where upstream's version bumps land
+# (two lines, LIBV90M_VER=/LIBV90M_SHA=) -- read it from there instead of
+# keeping a second copy here that a bump would then also have to touch.
+eval "$(grep -E '^LIBV90M_(VER|SHA)=' "$fw/setup.sh")"
 
 get() { # get URL FILE SHA256
     mkdir -p "$(dirname "$2")"
