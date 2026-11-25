@@ -6,13 +6,13 @@
 static int line_getbit(void *user)
 {
     caller_t *c = user;
-    return c->v42_on ? v42ec_tx_bit(&c->v42) : 1;
+    return c->v42_on && !c->v42_mute ? v42ec_tx_bit(&c->v42) : 1;
 }
 
 static void line_putbit(void *user, int bit)
 {
     caller_t *c = user;
-    if (c->v42_on) v42ec_rx_bit(&c->v42, bit);
+    if (c->v42_on && !c->v42_mute) v42ec_rx_bit(&c->v42, bit);
 }
 
 void caller_cfg_default(caller_cfg_t *cfg)
@@ -291,7 +291,7 @@ static void after_modem(caller_t *c)
     c->sub = 0;
     c->ms++;
     if (c->retraining) return;          /* a modem holds its error control while it retrains */
-    if (c->v42_on) v42ec_tick(&c->v42, 1);
+    if (c->v42_on && !c->v42_mute) v42ec_tick(&c->v42, 1);
     if (!c->ppp_on && caller_link_up(c)) {
         if (!c->cfg.fixed_timers) {
             /* as dce.c does: a Restart timer that covers the round trip */

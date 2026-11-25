@@ -80,6 +80,7 @@ typedef struct {
     v42ec_t      v42;
     pppc_t       ppp;
     int      v42_on, ppp_on, on_hook, sub;
+    int      v42_mute;         /* error control gone deaf and dumb: mark out, nothing in, no timers */
     int      ip_seen;          /* pppc ip_count already reported */
     uint8_t  stash[256];       /* PPP octets the lower layer had no room for */
     size_t   stash_n;
