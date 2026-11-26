@@ -370,24 +370,26 @@ iptables; PPP takes seconds to come up, the plan milliseconds. The gateway
 is started for the first such call and kept from then on. Netstalgia's own
 dial-in answers the same number the same way.
 
-### 5c2. WebTV, the box's own numbers
+### 5c2. WebTV, a service per port
 
-`SRV_WEBTV`, `SRV_WEBTV_TF` and `SRV_WEBTV_56` (`8009328800`,
-`8006138199`, `4848201337`) answer like PROTOWEB, on a port whose service
-is internet or archive, unless it is the port's own number, while
-`[services] webtv` is on. The call is the port's PPP call with PAP asked
-for and any name and password taken through `pap_cb` (a box logs in with
-its own built-in details), no MPPE and no terminal menu; on `SRV_WEBTV_TF`
-no V.90, V.92, x2 or K56flex (and so no heavy slot). `srv_webtv()` says it
-is one. `pw_poll` gives such a port two rewrites in the NAT plan (`nat.h`,
+`CFG_SERVICE_WEBTV` (`[line] service = webtv`) is a port for a WebTV / MSN
+TV box. Its telephony takes any number (as Saturn's): `SRV_WEBTV`,
+`SRV_WEBTV_TF` and `SRV_WEBTV_56` (`8009328800`, `8006138199`,
+`4848201337`, with or without the 1) end the dialling at once through
+`tel_cfg.more` (which on a port that takes any number now ends it on a 2),
+any other after `ANY_WAIT_MS`. Every call is the box's, BBS and service
+numbers included: the port's PPP call with PAP asked for and any name and
+password taken through `pap_cb` (a box logs in with its own built-in
+details), no MPPE and no terminal menu; on `SRV_WEBTV_TF` no V.90, V.92, x2
+or K56flex (and so no heavy slot). `srv_webtv()` says it is one.
+`pw_poll` gives such a port two rewrites in the NAT plan (`nat.h`,
 `webtv[]`): 10.0.0.1, any protocol and port, to WebTV Redialed, and DNS to
-157.57.221.51 to the name server the port gives its callers; such a call
-on an archive port is not the archive's, so its names are not caught by
-the gateway. WebTV Redialed's address is looked up from
-community.webtv.zone by a child (`wt_poll`), every 10 minutes while a port
-can take such calls; only a public IPv4 answer is taken (`webtv_pick`), and
-a failed lookup keeps the last good address. `-Q` gives one instead.
-Netstalgia's own dial-in answers the same numbers the same way.
+157.57.221.51 to the name server the port gives its callers. WebTV
+Redialed's address is looked up from community.webtv.zone by a child
+(`wt_poll`), every 10 minutes while a port is a WebTV port; only a public
+IPv4 answer is taken (`webtv_pick`), and a failed lookup keeps the last
+good address. `-Q` gives one instead. Netstalgia's own dial-in answers the
+same numbers the same way.
 
 ### 5d. Numbers to services
 

@@ -80,11 +80,8 @@ void srv_set_entropy(srv_t *s, const uint8_t *b, size_t n)
 int  srv_protoweb(const srv_t *s) { return s->in_call && s->protoweb; }
 int  srv_webtv(const srv_t *s) { return s->in_call && s->webtv; }
 static const char *const webtv_numbers[] = { SRV_WEBTV, SRV_WEBTV_TF, SRV_WEBTV_56 };
-/* the WebTV numbers answer on this port */
-static int webtv_here(const srv_t *s)
-{
-    return s->cfg.svc_webtv && (s->cfg.service == CFG_SERVICE_INTERNET || s->cfg.service == CFG_SERVICE_ARCHIVE);
-}
+/* a port for a WebTV box: every call on it is the box's */
+static int webtv_here(const srv_t *s) { return s->cfg.service == CFG_SERVICE_WEBTV; }
 /* a WebTV box logs in with its own built-in name and password: any is taken */
 static int webtv_pap(void *ctx, const uint8_t *user, size_t ulen, const uint8_t *pass, size_t plen)
 {
@@ -105,12 +102,16 @@ static int tel_more(void *ctx, const char *dialed)
 {
     const srv_t *s = ctx; const cfg_t *c = &s->cfg;
     int i, best = 0, m;
+    /* a port that takes any number: only these end the dialling at once */
+    if (c->service == CFG_SERVICE_SATURN) return 0;
+    if (webtv_here(s)) {
+        for (i = 0; i < 3; i++) if ((m = cfg_svc_number_begins(webtv_numbers[i], dialed)) > best) best = m;
+        return best;
+    }
     for (i = 0; i < c->n_services && i < CFG_MAX_SERVICES; i++)
         if ((m = cfg_svc_number_begins(c->services[i].number, dialed)) > best) best = m;
     if (best < 2 && c->svc_netstalgia && s->svc_known && (m = s->svc_known(dialed)) > best) best = m;
     if (best < 2 && protoweb_here(s) && (m = cfg_svc_number_begins(SRV_PROTOWEB, dialed)) > best) best = m;
-    for (i = 0; i < 3 && best < 2 && webtv_here(s); i++)
-        if ((m = cfg_svc_number_begins(webtv_numbers[i], dialed)) > best) best = m;
     if (best < 2 && acts_here(s) && (m = cfg_svc_number_begins(SRV_ACTS, dialed)) > best) best = m;
     return best;
 }
@@ -172,6 +173,7 @@ static void tel_settings(const srv_t *s, tel_cfg *t)
     memset(t, 0, sizeof *t);
     memcpy(t->number, c->line_number, TEL_NUMBER_MAX); t->number[TEL_NUMBER_MAX] = 0;
     if (c->service == CFG_SERVICE_SATURN) t->number[0] = 0;     /* what is dialled is an instruction: saturn.h */
+    if (c->service == CFG_SERVICE_WEBTV) t->number[0] = 0;      /* whatever the box dials */
     /* on every port: 1 800 BBS DIAL and the boards' own numbers (bbs.h) */
     strcpy(t->also[0], BBS_NUMBER); strcpy(t->also[1], BBS_NUMBER_LONG);
     strcpy(t->also[2], BBS_AREA "???????"); strcpy(t->also[3], "1" BBS_AREA "???????");
@@ -274,20 +276,20 @@ static void call_start(srv_t *s)
 {
     dce_cfg_t d;
     const cfg_t *c = &s->cfg;
-    int bbs, svc, acts, enc, webtv_tf = 0, i; char board[BBS_NUMBER_LEN + 1];
+    int bbs, svc, acts, enc, webtv_tf; char board[BBS_NUMBER_LEN + 1];
     s->link = SATURN_NONE;
     s->call_start = s->clock; s->call_s = 0; s->ppp_up_once = 0; s->ppp_from_s = 0;
+    /* a WebTV port: every call is the box's, whatever it dialled */
+    s->webtv = webtv_here(s);
     /* a terminal program for a bulletin board (bbs.h), unless the number is the port's own */
-    bbs = !own_number(c, s->tel.dialed) && bbs_number(s->tel.dialed, board) != BBS_NUM_NONE;
+    bbs = !s->webtv && !own_number(c, s->tel.dialed) && bbs_number(s->tel.dialed, board) != BBS_NUM_NONE;
     /* a number that connects straight to a service ([services]), the same way */
-    svc = !bbs && !own_number(c, s->tel.dialed) && srv_svc_number(s, s->tel.dialed);
+    svc = !bbs && !s->webtv && !own_number(c, s->tel.dialed) && srv_svc_number(s, s->tel.dialed);
     /* the PROTOWEB number: the port's dial-up connection, with the archive */
     s->protoweb = !bbs && !svc && protoweb_here(s) && !own_number(c, s->tel.dialed)
                   && cfg_svc_number_match(SRV_PROTOWEB, s->tel.dialed);
-    /* a WebTV box's numbers: the port's dial-up connection, for the box */
-    s->webtv = 0;
-    for (i = 0; i < 3 && !bbs && !svc && !s->protoweb && webtv_here(s) && !own_number(c, s->tel.dialed); i++)
-        if (cfg_svc_number_match(webtv_numbers[i], s->tel.dialed)) { s->webtv = 1; webtv_tf = i == 1; }
+    /* the toll-free number of a box with no TellyScript (srv.h) */
+    webtv_tf = s->webtv && cfg_svc_number_match(SRV_WEBTV_TF, s->tel.dialed);
     /* the time service (SRV_ACTS): ACTS's own terms, octets at the line's rate */
     acts = !bbs && !svc && !s->protoweb && !s->webtv && !own_number(c, s->tel.dialed) && acts_here(s)
            && cfg_svc_number_match(SRV_ACTS, s->tel.dialed);

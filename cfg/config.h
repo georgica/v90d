@@ -201,7 +201,8 @@ enum { CFG_TONES_US = 0, CFG_TONES_EU = 1 };
  *              octets of the game (srv/saturn.h). Not tried with a real
  *              console. */
 enum { CFG_SERVICE_INTERNET = 0, CFG_SERVICE_ARCHIVE = 1, CFG_SERVICE_DREAMCAST = 2, CFG_SERVICE_SATURN = 3,
-       CFG_SERVICE_COUNT = 4 };
+       CFG_SERVICE_WEBTV = 4,       /* a WebTV / MSN TV box: every call goes to WebTV Redialed (srv.h, srv_webtv) */
+       CFG_SERVICE_COUNT = 5 };
 enum { CFG_LISTEN_OFF = 0, CFG_LISTEN_LAN = 1 };
 enum { CFG_LOG_ERROR = 0, CFG_LOG_WARN = 1, CFG_LOG_INFO = 2, CFG_LOG_DEBUG = 3 };
 
@@ -293,7 +294,6 @@ typedef struct {
     int        svc_netstalgia;  /* 1 = answer the numbers of Netstalgia's list too */
     int        svc_menu;        /* 1 = the terminal menu on the Internet service (term/tmenu.h): a
                                    terminal program gets it, Dial-Up Networking still goes straight to PPP */
-    int        svc_webtv;       /* 1 = answer the WebTV numbers (srv.h, SRV_WEBTV*) on an internet or archive port */
     int        n_services;
     cfg_service_t services[CFG_MAX_SERVICES];
     /* [system] */

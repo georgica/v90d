@@ -40,7 +40,7 @@ typedef void (*srv_raw_fn)(void *ctx, const uint8_t *oct, size_t n);
 /* PROTOWEB on the keypad with zeros behind (the rule of the board numbers):
  * the old web of Protoweb, as Netstalgia also has it */
 #define SRV_PROTOWEB "7768693200"
-/* a WebTV / MSN TV box's own numbers ([services] webtv): 1-800-WEBTV-00;
+/* a WebTV / MSN TV box's own numbers (a WebTV port, srv_webtv): 1-800-WEBTV-00;
  * the toll-free number a box with no TellyScript dials (V.34 at most: such
  * a box hangs up above 33.6K); and the TellyScript's number. All three as
  * Netstalgia has them, the WebTV service going to WebTV Redialed */
@@ -91,7 +91,7 @@ typedef struct {
     int        protoweb_ok;     /* the box has the archive gateway: SRV_PROTOWEB answers */
     uint8_t    entropy[32]; size_t entropy_n;   /* srv_set_entropy: for the next call's PPP */
     int        protoweb;        /* the call in progress came in on SRV_PROTOWEB */
-    int        webtv;           /* ... on one of the SRV_WEBTV* numbers */
+    int        webtv;           /* the call in progress is a WebTV box's (srv_webtv) */
     uint8_t    pkt[1500];
 } srv_t;
 
@@ -178,13 +178,14 @@ int     srv_svc_number(const srv_t *s, const char *dialed);
  * alone). Only when the daemon says it has the archive gateway (on = 1).
  * srv_protoweb() is 1 while such a call is in progress. */
 void    srv_set_protoweb(srv_t *s, int on);
-/* The SRV_WEBTV* numbers, with or without a 1 in front, on a port whose
- * service is internet or archive while [services] webtv is on, unless it is
- * the port's own number: the dial-up connection with PAP asked for and any
- * name and password taken (the box's own built-in login), no encryption
- * and no terminal menu, whatever [ppp] and [services] menu say; on
- * SRV_WEBTV_TF no V.90, V.92, x2 or K56flex. 1 while such a call is in
- * progress (the daemon then sends its WebTV service to WebTV Redialed). */
+/* A WebTV port ([line] service = webtv): every call, whatever number it
+ * dialled (the SRV_WEBTV* numbers, with or without a 1, end the dialling at
+ * once; any other after the pause), is the box's: the dial-up connection
+ * with PAP asked for and any name and password taken (its own built-in
+ * login), no encryption and no terminal menu, whatever [ppp] and
+ * [services] menu say; on SRV_WEBTV_TF no V.90, V.92, x2 or K56flex. 1
+ * while such a call is in progress (the daemon then sends its WebTV
+ * service to WebTV Redialed). */
 int     srv_webtv(const srv_t *s);
 /* Unpredictable octets (the daemon reads them from /dev/urandom) for the
  * next call's PPP: its magic numbers and challenges. Give fresh ones after

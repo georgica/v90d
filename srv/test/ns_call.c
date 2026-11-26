@@ -1771,15 +1771,15 @@ int main(int argc, char **argv)
         CHECK_EQ_I(waitpid(pid, &st, 0), pid);
         CHECK(WIFEXITED(st) && WEXITSTATUS(st) == 0);
     }
-    /* 16b. WebTV (800 932 8800, srv.h SRV_WEBTV): the port's dial-up
-     * connection with any PAP login (no user on this port is "alice"), and
-     * 10.0.0.1 and the box's name server sent on for that call alone. -Q
-     * gives WebTV Redialed's address (no lookup here); the NAT plan is read
-     * back from the kernel. */
+    /* 16b. a WebTV port ([line] service = webtv, srv.h srv_webtv): the
+     * dial-up connection with any PAP login (no user on this port is
+     * "alice"), whatever number, and 10.0.0.1 and the box's name server
+     * sent on for that call alone. -Q gives WebTV Redialed's address (no
+     * lookup here); the NAT plan is read back from the kernel. */
     {
         static char lanlog[300], ruleset[300], cmd[700];
         cfg_default(&c);
-        strcpy(c.line_number, "5551234"); c.rings = 1; c.status_port = 8080;
+        strcpy(c.line_number, "5551234"); c.rings = 1; c.status_port = 8080; c.service = CFG_SERVICE_WEBTV;
         c.auth = CFG_AUTH_CHAP; c.n_users = 1; strcpy(c.users[0].name, "bob"); strcpy(c.users[0].secret, "builder");
         CHECK_EQ_I(cfg_save(&c, conf, err, sizeof err), CFG_OK);
         CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
@@ -1816,12 +1816,14 @@ int main(int argc, char **argv)
         /* (b) the call over: no WebTV rules */
         for (i = 0; i < 30; i++) { if (system(cmd)) { } if (!file_has(ruleset, "192.0.2.7")) break; run_ms(100); usleep(20000); }
         CHECK(!file_has(ruleset, "192.0.2.7"));
-        /* (c) the port's own number: the port's login, so "alice" is refused */
+        /* (c) a number the box does not usually dial: the same, after the pause */
         hook = 1; run_ms(500);
-        dial("5551234");
-        run_ms(2000 + 300);
+        dial("5550000");
+        run_ms(3000 + 2000 + 300);
         start_modem(0);
-        CHECK(wait_ip(20000) < 0);
+        CHECK(wait_ip(60000) >= 0);
+        for (i = 0; i < 30; i++) { if (system(cmd)) { } if (file_has(ruleset, "192.0.2.7")) break; run_ms(100); usleep(20000); }
+        CHECK(file_has(ruleset, "192.0.2.7"));
         hang_up();
         quiet_exit = 1;
         kill(pid, SIGTERM);
