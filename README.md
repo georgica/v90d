@@ -147,9 +147,16 @@ V.34 at most, as such a box hangs up above 33.6K. The call is a dial-up
 connection, but the box logs in with its own built-in name and password,
 so any is taken, with no encryption and no terminal menu. For that call
 the box's old service addresses (10.0.0.1, 10.0.0.2, 10.0.128.1 and
-10.0.1.129) go to WebTV Redialed (community.webtv.zone, looked up every
-10 minutes) and its fixed name server to the port's. A Dreamcast port sends
-10.0.1.129 there too. Netstalgia answers the same numbers the same way.
+10.0.1.129) go to the **WebTV server** and its fixed name server to the
+port's. A Dreamcast port sends 10.0.1.129, the address of WebTV for
+Dreamcast (the Japanese WebTV client for the console), to the same server.
+
+The WebTV server is chosen on the Services page (`[services]
+webtv_server`): **WebTV Redialed** (the default; community.webtv.zone,
+looked up every 10 minutes, 31.97.100.150 until a lookup has worked),
+**HackTV Public Minisrv** (71.244.121.234), **ZefieTV** (216.126.232.171),
+or the address of a server of your own, on your network if you like.
+Netstalgia answers the same numbers the same way.
 
 ## 1 303 494 4774: the time
 

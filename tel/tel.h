@@ -44,7 +44,8 @@ typedef struct {
     /* more numbers that connect, asked of the owner: what has been dialled
      * so far gives 2 = it is one of them, 1 = it begins one, 0 = neither.
      * On a port that takes any number (number ""), a 2 ends the dialling
-     * at once instead of after the pause. NULL = none. */
+     * at once instead of after the pause (the owner answers 0 there but
+     * for numbers it wants answered at once). NULL = none. */
     int    (*more)(void *ctx, const char *dialed);
     void    *more_ctx;
 } tel_cfg;

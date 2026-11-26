@@ -1,8 +1,9 @@
-/* WebTV Redialed, for the WebTV numbers (srv.h, SRV_WEBTV*): a WebTV / MSN
- * TV box talks to fixed addresses of its old network, which the daemon
- * sends to WebTV Redialed for the length of such a call (nat.h). Its
- * address is looked up by name (they asked that it be followed, not
- * written down), and only a public IPv4 answer is taken. */
+/* WebTV Redialed, the default WebTV server ([services] webtv_server): a
+ * WebTV / MSN TV box, and WebTV for Dreamcast, talk to fixed addresses of
+ * their old network, which the daemon sends to the WebTV server (nat.h).
+ * WebTV Redialed's address is looked up by name (they asked that it be
+ * followed; CFG_WTV_REDIALED_ADDR only stands in until a lookup has
+ * worked), and only a public IPv4 answer is taken. */
 #ifndef V90D_SRV_WEBTV_H
 #define V90D_SRV_WEBTV_H
 #include <stdint.h>

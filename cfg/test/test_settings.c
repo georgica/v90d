@@ -531,7 +531,7 @@ static void test_consoles_page(void)
     /* no console port: no tab */
     base(&c);
     CHECK(settings_render_page(&c, SETTINGS_LINE, 0, NULL, html, sizeof html) > 0);
-    CHECK(has(html, "<option value=\"webtv\">WebTV: for a WebTV or MSN TV box (WebTV Redialed)</option>"));
+    CHECK(has(html, "<option value=\"webtv\">WebTV: for a WebTV or MSN TV box</option>"));
     CHECK(!has(html, "/dreamcast"));
     /* a saturn port alone brings the tab up too */
     c.port2.service = CFG_SERVICE_SATURN;
@@ -1306,6 +1306,26 @@ static void test_services_page(void)
     CHECK(has(html, "<select name=\"netstalgia\"><option value=\"off\">Off") && has(html, "<option value=\"on\" selected>On"));
     CHECK(has(html, "No list."));
     CHECK(has(html, "<select name=\"menu\"><option value=\"off\" selected>Off: every call"));
+    CHECK(has(html, "<select name=\"webtv_server\"><option value=\"redialed\" selected>WebTV Redialed"));
+    CHECK(has(html, "<option value=\"hacktv\">HackTV Public Minisrv</option>"));
+    CHECK(has(html, "name=\"webtv_addr\""));
+    {   /* the WebTV server: one of the three, or an address typed in */
+        cfg_t w;
+        CHECK_EQ_I(apply(&c, "webtv_server=hacktv&webtv_addr=", &w), SETTINGS_OK);
+        CHECK_EQ_I(w.webtv_server, CFG_WTV_HACKTV);
+        CHECK_EQ_I(apply(&c, "webtv_server=other&webtv_addr=+192.168.1.50+", &w), SETTINGS_OK);
+        CHECK_EQ_I(w.webtv_server, CFG_WTV_OTHER); CHECK(w.webtv_addr == 0xC0A80132u);
+        CHECK_EQ_I(apply(&c, "webtv_server=other&webtv_addr=", &w), SETTINGS_INVALID);
+        CHECK_EQ_I(apply(&c, "webtv_server=other&webtv_addr=127.0.0.1", &w), SETTINGS_INVALID);
+        CHECK(has(err, "[services] webtv_server: the address '127.0.0.1' cannot be a WebTV server"));
+        CHECK_EQ_I(apply(&c, "webtv_server=other&webtv_addr=nonsense", &w), SETTINGS_INVALID);
+        CHECK(has(err, "[services] webtv_server: the address 'nonsense' cannot be a WebTV server"));
+        CHECK_EQ_I(apply(&c, "webtv_server=redialed&webtv_addr=junk", &w), SETTINGS_OK);   /* not asked for */
+        CHECK_EQ_I(w.webtv_server, CFG_WTV_REDIALED);
+        w.webtv_server = CFG_WTV_OTHER; w.webtv_addr = 0x47F479EAu;
+        CHECK(settings_render_page(&w, SETTINGS_SERVICES, 0, NULL, html, sizeof html) > 0);
+        CHECK(has(html, "<option value=\"other\" selected>") && has(html, "value=\"71.244.121.234\""));
+    }
 
     /* a post from the page */
     CHECK_EQ_I(apply(&c, "snum0=13855961775&shost0=nwnrevival.com&sport0=5000&smode0=raw&sname0=AOL+Neverwinter+Nights"

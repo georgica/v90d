@@ -2137,6 +2137,21 @@ static void test_webtv(void)
     webtv_call(&c, NULL, "5551234");
     CHECK_EQ_I(S.tel.state, TEL_ANSWERED); CHECK_EQ_I(srv_webtv(&S), 0);
     hang_up();
+    /* an internet port with no number of its own takes any number after the
+     * pause: a service's number does not end the dialling there (only a
+     * WebTV port's own numbers do) */
+    c.service = CFG_SERVICE_INTERNET; c.line_number[0] = 0;
+    c.n_services = 1; strcpy(c.services[0].number, "5559999"); strcpy(c.services[0].host, "192.0.2.1");
+    c.services[0].port = 23; strcpy(c.services[0].name, "x");
+    line_init();
+    srv_init(&S, &c, 31, lan_rx, NULL);
+    srv_set_clock(&S, 1000000000u);
+    run_ms(300);
+    hook = 1; run_ms(400);
+    dial("5559999");
+    run_ms(200);
+    CHECK_EQ_I(S.tel.state, TEL_DIALING);
+    hang_up();
 }
 
 /* the list of services' numbers (svc.h) and what a list entry may call */

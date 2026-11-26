@@ -102,12 +102,13 @@ static int tel_more(void *ctx, const char *dialed)
 {
     const srv_t *s = ctx; const cfg_t *c = &s->cfg;
     int i, best = 0, m;
-    /* a port that takes any number: only these end the dialling at once */
-    if (c->service == CFG_SERVICE_SATURN) return 0;
+    /* a port that takes any number (tel.h): only a WebTV port's own numbers
+     * end the dialling at once there; on the others it ends on the pause */
     if (webtv_here(s)) {
         for (i = 0; i < 3; i++) if ((m = cfg_svc_number_begins(webtv_numbers[i], dialed)) > best) best = m;
         return best;
     }
+    if (c->service == CFG_SERVICE_SATURN || !c->line_number[0]) return 0;
     for (i = 0; i < c->n_services && i < CFG_MAX_SERVICES; i++)
         if ((m = cfg_svc_number_begins(c->services[i].number, dialed)) > best) best = m;
     if (best < 2 && c->svc_netstalgia && s->svc_known && (m = s->svc_known(dialed)) > best) best = m;
@@ -172,8 +173,9 @@ static void tel_settings(const srv_t *s, tel_cfg *t)
     const cfg_t *c = &s->cfg;
     memset(t, 0, sizeof *t);
     memcpy(t->number, c->line_number, TEL_NUMBER_MAX); t->number[TEL_NUMBER_MAX] = 0;
-    if (c->service == CFG_SERVICE_SATURN) t->number[0] = 0;     /* what is dialled is an instruction: saturn.h */
-    if (c->service == CFG_SERVICE_WEBTV) t->number[0] = 0;      /* whatever the box dials */
+    /* any number: on Saturn what is dialled is an instruction (saturn.h), a
+     * WebTV box's is the box's */
+    if (c->service == CFG_SERVICE_SATURN || c->service == CFG_SERVICE_WEBTV) t->number[0] = 0;
     /* on every port: 1 800 BBS DIAL and the boards' own numbers (bbs.h) */
     strcpy(t->also[0], BBS_NUMBER); strcpy(t->also[1], BBS_NUMBER_LONG);
     strcpy(t->also[2], BBS_AREA "???????"); strcpy(t->also[3], "1" BBS_AREA "???????");
@@ -276,23 +278,23 @@ static void call_start(srv_t *s)
 {
     dce_cfg_t d;
     const cfg_t *c = &s->cfg;
-    int bbs, svc, acts, enc, webtv_tf; char board[BBS_NUMBER_LEN + 1];
+    int bbs, svc, acts, enc, webtv_tf, other; char board[BBS_NUMBER_LEN + 1];
     s->link = SATURN_NONE;
     s->call_start = s->clock; s->call_s = 0; s->ppp_up_once = 0; s->ppp_from_s = 0;
     /* a WebTV port: every call is the box's, whatever it dialled */
     s->webtv = webtv_here(s);
-    /* a terminal program for a bulletin board (bbs.h), unless the number is the port's own */
-    bbs = !s->webtv && !own_number(c, s->tel.dialed) && bbs_number(s->tel.dialed, board) != BBS_NUM_NONE;
-    /* a number that connects straight to a service ([services]), the same way */
-    svc = !bbs && !s->webtv && !own_number(c, s->tel.dialed) && srv_svc_number(s, s->tel.dialed);
+    /* a number of something else than the port's own service */
+    other = !s->webtv && !own_number(c, s->tel.dialed);
+    /* a terminal program for a bulletin board (bbs.h) */
+    bbs = other && bbs_number(s->tel.dialed, board) != BBS_NUM_NONE;
+    /* a number that connects straight to a service ([services]) */
+    svc = other && !bbs && srv_svc_number(s, s->tel.dialed);
     /* the PROTOWEB number: the port's dial-up connection, with the archive */
-    s->protoweb = !bbs && !svc && protoweb_here(s) && !own_number(c, s->tel.dialed)
-                  && cfg_svc_number_match(SRV_PROTOWEB, s->tel.dialed);
+    s->protoweb = other && !bbs && !svc && protoweb_here(s) && cfg_svc_number_match(SRV_PROTOWEB, s->tel.dialed);
     /* the toll-free number of a box with no TellyScript (srv.h) */
     webtv_tf = s->webtv && cfg_svc_number_match(SRV_WEBTV_TF, s->tel.dialed);
     /* the time service (SRV_ACTS): ACTS's own terms, octets at the line's rate */
-    acts = !bbs && !svc && !s->protoweb && !s->webtv && !own_number(c, s->tel.dialed) && acts_here(s)
-           && cfg_svc_number_match(SRV_ACTS, s->tel.dialed);
+    acts = other && !bbs && !svc && !s->protoweb && acts_here(s) && cfg_svc_number_match(SRV_ACTS, s->tel.dialed);
     if (bbs) s->link = SRV_LINK_BBS;
     else if (svc) s->link = SRV_LINK_SVC;
     else if (acts) s->link = SRV_LINK_ACTS;
@@ -352,7 +354,7 @@ static void call_start(srv_t *s)
         d.originate = 1;
         d.modulations &= V90M_MOD_V34 | V90M_MOD_V32BIS | V90M_MOD_V22 | V90M_MOD_V21;
     }
-    if (webtv_tf) d.modulations &= ~(V90M_MOD_V90 | V90M_MOD_V92 | V90M_MOD_X2 | V90M_MOD_K56);
+    if (webtv_tf) d.modulations &= ~(V90M_MOD_V90 | V90M_MOD_V92);      /* (x2 and K56flex: not offered above) */
     if (!c->v42) { d.v42.detect = 1; d.v42.fallback = 1; d.v42.t400_ms = 1; }  /* straight to start-stop */
     if (acts) {
         /* ACTS's terms: up to 9600 bit/s and on (V.32bis here; no V.34 or

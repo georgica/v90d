@@ -201,7 +201,7 @@ enum { CFG_TONES_US = 0, CFG_TONES_EU = 1 };
  *              octets of the game (srv/saturn.h). Not tried with a real
  *              console. */
 enum { CFG_SERVICE_INTERNET = 0, CFG_SERVICE_ARCHIVE = 1, CFG_SERVICE_DREAMCAST = 2, CFG_SERVICE_SATURN = 3,
-       CFG_SERVICE_WEBTV = 4,       /* a WebTV / MSN TV box: every call goes to WebTV Redialed (srv.h, srv_webtv) */
+       CFG_SERVICE_WEBTV = 4,       /* a WebTV / MSN TV box: every call goes to its server (webtv_server; srv.h, srv_webtv) */
        CFG_SERVICE_COUNT = 5 };
 enum { CFG_LISTEN_OFF = 0, CFG_LISTEN_LAN = 1 };
 enum { CFG_LOG_ERROR = 0, CFG_LOG_WARN = 1, CFG_LOG_INFO = 2, CFG_LOG_DEBUG = 3 };
@@ -294,6 +294,8 @@ typedef struct {
     int        svc_netstalgia;  /* 1 = answer the numbers of Netstalgia's list too */
     int        svc_menu;        /* 1 = the terminal menu on the Internet service (term/tmenu.h): a
                                    terminal program gets it, Dial-Up Networking still goes straight to PPP */
+    int        webtv_server;    /* CFG_WTV_*: where a WebTV box's service goes (srv/webtv.h) */
+    uint32_t   webtv_addr;      /* CFG_WTV_OTHER: the owner's server, host order */
     int        n_services;
     cfg_service_t services[CFG_MAX_SERVICES];
     /* [system] */
@@ -364,5 +366,20 @@ int cfg_svc_number_taken(const char *number);
 /* One dotted IPv4 address, nothing around it, into host byte order.
  * Returns 0, or -1 if v is not one. */
 int cfg_parse_ip(const char *v, uint32_t *out);
+/* [services] webtv_server: WebTV Redialed (followed by its name, srv/webtv.h),
+ * HackTV's public minisrv, ZefieTV, or an IPv4 address of the owner's */
+enum { CFG_WTV_REDIALED = 0, CFG_WTV_HACKTV = 1, CFG_WTV_ZEFIE = 2, CFG_WTV_OTHER = 3, CFG_WTV_COUNT = 4 };
+#define CFG_WTV_REDIALED_ADDR 0x1F616496u  /* 31.97.100.150: WebTV Redialed until its name is looked up */
+#define CFG_WTV_HACKTV_ADDR   0x47F479EAu  /* 71.244.121.234: HackTV Public Minisrv */
+#define CFG_WTV_ZEFIE_ADDR    0xD87EE8ABu  /* 216.126.232.171: ZefieTV */
+/* the server's fixed address, host order; 0 for WebTV Redialed (looked up) */
+uint32_t cfg_webtv_fixed(const cfg_t *c);
+/* 1 when the address can be a WebTV server: not 0/8, loopback, multicast
+ * or above, nor one of the boxes' own old addresses (10.0.0.1, 10.0.0.2,
+ * 10.0.128.1, 10.0.1.129: sent there, they would come back); an address on
+ * the home network is fine */
+int cfg_webtv_usable(uint32_t a);
+/* the server's name, for the log and the pages ("Other" for an address) */
+const char *cfg_webtv_name(int server);
 
 #endif

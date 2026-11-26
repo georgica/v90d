@@ -59,3 +59,15 @@ box's whatever it dials; the three numbers end the dialling at once, the
 toll-free one still V.34 at most. `[services] webtv` and the numbers on
 internet and archive ports are gone. The NAT, the lookup and the login
 rules are unchanged.
+
+## Changed again (2026-11-25, owner's word)
+
+- 10.0.1.129 is not a non-goal after all: it is WebTV for Dreamcast's
+  service address (the Japanese WebTV client for the console), so a WebTV
+  port sends it with the boxes' other addresses (10.0.0.1, 10.0.0.2,
+  10.0.128.1) and a Dreamcast port sends it alone, both to the same server.
+- The server is a setting, `[services] webtv_server`: WebTV Redialed (the
+  default, still followed by name, 31.97.100.150 until a lookup has
+  worked), HackTV Public Minisrv (71.244.121.234), ZefieTV
+  (216.126.232.171), or an address of the owner's. Netstalgia makes it a
+  per-member choice on its side.

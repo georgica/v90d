@@ -183,7 +183,7 @@ int main(void)
      * WebTV Redialed, every protocol and port, and its fixed name server to
      * the port's; nothing else of the caller's is touched */
     p.console[0] = 0;
-    p.webtv[0] = 1; p.webtv_to = IP4(198, 51, 100, 20); p.webtv_dns = IP4(198, 51, 100, 53);
+    p.webtv[0] = NAT_WEBTV_BOX; p.webtv_to = IP4(198, 51, 100, 20); p.webtv_dns = IP4(198, 51, 100, 53);
     CHECK_EQ_I(nat_apply(&p), 0);
     n = mkpkt(pkt, 6, CALLER, 4040, NAT_WEBTV_ADDR, 1615);
     CHECK(through(ppp_fd, wan_fd, pkt, n, &s, &d, &dp));
@@ -200,18 +200,19 @@ int main(void)
     n = mkpkt(pkt, 6, CALLER, 4045, IP4(203, 0, 113, 50), 80);
     CHECK(through(ppp_fd, wan_fd, pkt, n, &s, &d, &dp)); CHECK(d == IP4(203, 0, 113, 50));
     /* the box's other fixed addresses: its fallback, the daily builds' and
-     * 10.0.1.129 (the box's as well as the Dreamcast's), all at WebTV Redialed */
+     * 10.0.1.129, all at the boxes' WebTV server */
     n = mkpkt(pkt, 6, CALLER, 4060, IP4(10, 0, 0, 2), 1615);
     CHECK(through(ppp_fd, wan_fd, pkt, n, &s, &d, &dp)); CHECK(d == IP4(198, 51, 100, 20));
     n = mkpkt(pkt, 6, CALLER, 4061, IP4(10, 0, 128, 1), 1615);
     CHECK(through(ppp_fd, wan_fd, pkt, n, &s, &d, &dp)); CHECK(d == IP4(198, 51, 100, 20));
     n = mkpkt(pkt, 17, CALLER, 4062, IP4(10, 0, 1, 129), 1615);
     CHECK(through(ppp_fd, wan_fd, pkt, n, &s, &d, &dp)); CHECK(d == IP4(198, 51, 100, 20));
-    /* a Dreamcast port (NAT_WEBTV_DC): 10.0.1.129 alone, its names untouched */
+    /* a Dreamcast port (NAT_WEBTV_DC): 10.0.1.129 alone (WebTV for
+     * Dreamcast), to the same WebTV server; its names untouched */
     p.webtv[0] = NAT_WEBTV_DC;
     CHECK_EQ_I(nat_apply(&p), 0);
-    n = mkpkt(pkt, 6, CALLER, 4063, IP4(10, 0, 1, 129), 80);
-    CHECK(through(ppp_fd, wan_fd, pkt, n, &s, &d, &dp)); CHECK(d == IP4(198, 51, 100, 20)); CHECK_EQ_I((int)dp, 80);
+    n = mkpkt(pkt, 6, CALLER, 4063, IP4(10, 0, 1, 129), 1615);
+    CHECK(through(ppp_fd, wan_fd, pkt, n, &s, &d, &dp)); CHECK(d == IP4(198, 51, 100, 20)); CHECK_EQ_I((int)dp, 1615);
     n = mkpkt(pkt, 6, CALLER, 4064, NAT_WEBTV_ADDR, 1615);
     CHECK(through(ppp_fd, wan_fd, pkt, n, &s, &d, &dp)); CHECK(d == NAT_WEBTV_ADDR);
     n = mkpkt(pkt, 17, CALLER, 4065, NAT_WEBTV_DNS, 53);
@@ -227,14 +228,14 @@ int main(void)
     CHECK(through(ppp_fd, wan_fd, pkt, n, &s, &d, &dp)); CHECK(d == IP4(198, 51, 100, 53));
     /* the other port's WebTV call: its caller's packets, not this one's */
     p.webtv_to = IP4(198, 51, 100, 20);
-    p.webtv[0] = 0; p.peer[1] = IP4(10, 64, 64, 3); p.webtv[1] = 1;
+    p.webtv[0] = 0; p.peer[1] = IP4(10, 64, 64, 3); p.webtv[1] = NAT_WEBTV_BOX;
     CHECK_EQ_I(nat_apply(&p), 0);
     n = mkpkt(pkt, 6, CALLER, 4048, NAT_WEBTV_ADDR, 1615);
     CHECK(through(ppp_fd, wan_fd, pkt, n, &s, &d, &dp)); CHECK(d == NAT_WEBTV_ADDR);
     n = mkpkt(pkt, 6, IP4(10, 64, 64, 3), 4049, NAT_WEBTV_ADDR, 1615);
     CHECK(through(ppp_fd, wan_fd, pkt, n, &s, &d, &dp)); CHECK(d == IP4(198, 51, 100, 20));
     /* both at once */
-    p.webtv[0] = 1;
+    p.webtv[0] = NAT_WEBTV_BOX;
     CHECK_EQ_I(nat_apply(&p), 0);
     n = mkpkt(pkt, 6, CALLER, 4050, NAT_WEBTV_ADDR, 1615);
     CHECK(through(ppp_fd, wan_fd, pkt, n, &s, &d, &dp)); CHECK(d == IP4(198, 51, 100, 20));

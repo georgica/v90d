@@ -3046,3 +3046,40 @@ caught it.
 - 10.0.0.2, 10.0.128.1 and 10.0.1.129 to WebTV Redialed for WebTV calls,
   10.0.1.129 for Dreamcast ports (above).
 - The lookup's child no longer holds the daemon's TUN devices.
+
+## 0.12.2: the WebTV server, and an audit of the WebTV work (2026-11-25)
+
+- **`[services] webtv_server`** (Services page): WebTV Redialed (the
+  default, followed by name; 31.97.100.150 until a lookup has worked),
+  HackTV Public Minisrv (71.244.121.234), ZefieTV (216.126.232.171), or an
+  address of the owner's (one on the home network is fine; 0/8, loopback,
+  multicast and the boxes' own old addresses are refused). A WebTV port's
+  box and a Dreamcast port's 10.0.1.129 go to it: 10.0.1.129 is WebTV for
+  Dreamcast's service address (the WebTV Wiki), a WebTV service, not the
+  console's games. The lookup runs only while that server is WebTV
+  Redialed, and again a minute after a failure instead of ten.
+- An audit of everything WebTV since 0.11.0 (a fresh reviewer, then one
+  pass of fixes):
+  - fewer NAT rules: the four addresses match any protocol, one nftables
+    rule each instead of two, one iptables command for all four instead of
+    eight; a Dreamcast port one rule;
+  - on an internet port with no number of its own, a service's or
+    Netstalgia's number no longer ends the dialling at once (only a WebTV
+    port's own numbers do), so the list is not asked on every digit;
+  - a change of the WebTV server reaches a Dreamcast port's rule at once;
+  - the archive gateway is not touched when only a WebTV call began or
+    ended; the lookup runs in the 1 second step; a lookup child that
+    vanished is taken as failed, not killed every second;
+  - stale wording from the first designs gone (code, pages, docs); the
+    Services page and the log share the servers' names; a bad address for
+    Other is reported as the server's (the key it is saved under); the
+    status page's service a table.
+  - The Services page's "worst case" (28585 of 28672 bytes) is no near
+    miss: that test fills Netstalgia's list until the page is full, so it
+    always ends close to the buffer's size.
+  - Left as they were: the NAT layer's "no server" guards (the daemon
+    always passes one now); DNS over TCP to the box's relay, which answers
+    UDP only (the boxes ask over UDP).
+- Tests: cfg (the setting, its refusals, the page), srv (any-number
+  ports), ns_nat (both kinds of rule), ns_call (a call's log names the
+  server, a Dreamcast port's rule follows the setting).

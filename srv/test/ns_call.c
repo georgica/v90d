@@ -690,6 +690,7 @@ int main(int argc, char **argv)
         strcpy(c.line_number, "5551234"); c.rings = 1;
         strcpy(c.port2.line_number, "777"); c.port2.rings = 1;
         c.port2.service = CFG_SERVICE_DREAMCAST;   /* port 2 is a game console's */
+        c.webtv_server = CFG_WTV_ZEFIE;            /* the WebTV server: WebTV for Dreamcast's too */
         c.port2.dc_now = 1;                         /* and reports to Dreamcast Now */
         c.auth = CFG_AUTH_CHAP; c.n_users = 1; strcpy(c.users[0].name, "alice"); strcpy(c.users[0].secret, "wonderland");
         c.status_port = 8080;
@@ -748,13 +749,14 @@ int main(int argc, char **argv)
         snprintf(dclog, sizeof dclog, "%s/ns_dc.log", argv[2]);
         CHECK(file_has(dclog, "console service: address list with 1 rules"));
         CHECK(file_has(dclog, "console service on port 2: 1 address rules, 24 port ranges opened from lo"));
-        /* and the Dreamcast's old service address, 10.0.1.129, to WebTV Redialed */
+        /* and WebTV for Dreamcast's service address, 10.0.1.129, to the WebTV
+         * server (alone: the boxes' other addresses are not the Dreamcast's) */
         {
             static char rs[300], rcmd[700];
             snprintf(rs, sizeof rs, "%s/ns_dc.rules", argv[2]);
             snprintf(rcmd, sizeof rcmd, "nft list ruleset > %s 2>&1 || iptables-save -t nat > %s 2>&1", rs, rs);
             if (system(rcmd)) { }
-            CHECK(file_has(rs, "10.0.1.129")); CHECK(file_has(rs, "192.0.2.7"));
+            CHECK(file_has(rs, "10.0.1.129")); CHECK(file_has(rs, "216.126.232.171")); CHECK(!file_has(rs, "10.0.0.2"));
             CHECK(!file_has(rs, "157.57.221.51"));
         }
         /* port 1's number is a wrong number on port 2 */
@@ -1818,7 +1820,7 @@ int main(int argc, char **argv)
         start_modem(0);
         CHECK(wait_ip(60000) >= 0);
         for (i = 0; i < 50 && !file_has(lanlog, "a call to WebTV"); i++) { run_ms(100); usleep(10000); }
-        CHECK(file_has(lanlog, "port 1: a call to WebTV: 10.0.0.1 goes to WebTV Redialed (192.0.2.7)"));
+        CHECK(file_has(lanlog, "port 1: a call to WebTV: its service goes to WebTV Redialed (192.0.2.7)"));
         for (i = 0; i < 30; i++) { if (system(cmd)) { } if (file_has(ruleset, "192.0.2.7")) break; run_ms(100); usleep(20000); }
         CHECK(file_has(ruleset, "192.0.2.7")); CHECK(file_has(ruleset, "157.57.221.51"));
         CHECK(file_has(ruleset, "10.0.1.129")); CHECK(file_has(ruleset, "10.0.128.1"));

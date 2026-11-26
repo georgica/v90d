@@ -21,7 +21,7 @@ enum {
     K_LISTEN, K_PORT, K_ADMINPW,
     K_LEVEL,
     K_PPP_PEER2, K_ARCHIVE, K_COMPRESSION, K_ENCRYPTION, K_ENCRYPTION2, K_UPDATE_CHECK, K_DNS_RELAY, K_IPV6,
-    K_SVC_NETSTALGIA, K_SVC_MENU, K_SVC,
+    K_SVC_NETSTALGIA, K_SVC_MENU, K_SVC, K_SVC_WTV,
     /* port 2: the keys of [modem] and [line] again, in the same order */
     K2_MODS, K2_MAXDOWN, K2_MAXUP, K2_TXLEVEL, K2_V42, K2_V42BIS, K2_V92, K2_X2, K2_K56, K2_RINGS, K2_LAW,
     K2_NUMBER, K2_TONES, K2_BUSY, K2_DROP, K2_SESSION, K2_IDLE, K2_SERVICE, K2_DCNOW, K2_DCLAN, K2_DCUPNP, K2_DCIWANGO, K2_SATMATCH,
@@ -42,7 +42,7 @@ static const struct { int sec; const char *name; } keydefs[K_COUNT] = {
     { S_STATUS, "listen" }, { S_STATUS, "port" }, { S_STATUS, "admin_password" },
     { S_LOG, "level" },
     { S_NETWORK, "ppp_peer2" }, { S_NETWORK, "archive" }, { S_PPP, "compression" }, { S_PPP, "encryption" }, { S_PPP, "encryption2" }, { S_SYSTEM, "update_check" }, { S_NETWORK, "dns_relay" }, { S_NETWORK, "ipv6" },
-    { S_SERVICES, "netstalgia" }, { S_SERVICES, "menu" }, { S_SERVICES, "service" },
+    { S_SERVICES, "netstalgia" }, { S_SERVICES, "menu" }, { S_SERVICES, "service" }, { S_SERVICES, "webtv_server" },
     { S_MODEM2, "modulations" }, { S_MODEM2, "max_downstream" }, { S_MODEM2, "max_upstream" },
     { S_MODEM2, "tx_level" }, { S_MODEM2, "v42" }, { S_MODEM2, "v42bis" }, { S_MODEM2, "v92" }, { S_MODEM2, "x2" }, { S_MODEM2, "k56" },
     { S_MODEM2, "rings" }, { S_MODEM2, "law" },
@@ -413,6 +413,9 @@ static int validate(const cfg_t *c, char *msg, int *k1, int *k2)
     /* services */
     *k1 = K_SVC_NETSTALGIA; if (en(msg, K_SVC_NETSTALGIA, c->svc_netstalgia, 2)) return -1;
     *k1 = K_SVC_MENU; if (en(msg, K_SVC_MENU, c->svc_menu, 2)) return -1;
+    *k1 = K_SVC_WTV; if (en(msg, K_SVC_WTV, c->webtv_server, CFG_WTV_COUNT)) return -1;
+    if (c->webtv_server == CFG_WTV_OTHER && !cfg_webtv_usable(c->webtv_addr))
+        return kerr(msg, K_SVC_WTV, "no address for the server");
     *k1 = K_SVC;
     if (c->n_services < 0 || c->n_services > CFG_MAX_SERVICES)
         return kerr(msg, K_SVC, "more than %d services", CFG_MAX_SERVICES);
@@ -765,6 +768,36 @@ static int set_int(int *field, int k, const char *v, char *msg)
     return 0;
 }
 
+static const char *const n_wtv[] = { "redialed", "hacktv", "zefie" };
+int cfg_webtv_usable(uint32_t a)
+{
+    return (a >> 24) != 0 && (a >> 24) != 127 && a < 0xE0000000u
+           && a != 0x0A000001u && a != 0x0A000002u && a != 0x0A008001u && a != 0x0A000181u;
+}
+const char *cfg_webtv_name(int server)
+{
+    static const char *const t[] = { "WebTV Redialed", "HackTV Public Minisrv", "ZefieTV", "Other" };
+    return server >= 0 && server < CFG_WTV_COUNT ? t[server] : "?";
+}
+uint32_t cfg_webtv_fixed(const cfg_t *c)
+{
+    switch (c->webtv_server) {
+    case CFG_WTV_HACKTV: return CFG_WTV_HACKTV_ADDR;
+    case CFG_WTV_ZEFIE:  return CFG_WTV_ZEFIE_ADDR;
+    case CFG_WTV_OTHER:  return c->webtv_addr;
+    default:             return 0;
+    }
+}
+static int set_wtv(cfg_t *c, int k, const char *v, char *msg)
+{
+    uint32_t a; int i;
+    for (i = 0; i < 3; i++) if (strcmp(v, n_wtv[i]) == 0) { c->webtv_server = i; c->webtv_addr = 0; return 0; }
+    if (get_ip(v, &a)) return kerr(msg, k, "'%.40s' is not one of: redialed, hacktv, zefie, or an IPv4 address", v);
+    if (!cfg_webtv_usable(a)) return kerr(msg, k, "%.40s cannot be a server", v);
+    c->webtv_server = CFG_WTV_OTHER; c->webtv_addr = a;
+    return 0;
+}
+
 int cfg_parse_ip(const char *v, uint32_t *out)
 {
     return get_ip(v, out) ? -1 : 0;
@@ -812,6 +845,7 @@ static int set_value(cfg_t *c, pctx_t *px, int k, int mk, int line, const char *
     case K_SVC:       return set_service(c, v, msg);
     case K_SVC_NETSTALGIA: return set_enum(&c->svc_netstalgia, mk, v, n_onoff, 2, l_onoff, msg);
     case K_SVC_MENU:  return set_enum(&c->svc_menu, mk, v, n_onoff, 2, l_onoff, msg);
+    case K_SVC_WTV:   return set_wtv(c, mk, v, msg);
     case K_MODS:      return set_mods(c, mk, v, msg);
     case K_MAXDOWN:   return set_int(&c->max_down, mk, v, msg);
     case K_MAXUP:     return set_int(&c->max_up, mk, v, msg);
@@ -1159,6 +1193,8 @@ int cfg_write(const cfg_t *c, int with_secrets, char *buf, size_t cap)
     sb_puts(&s, "\n[services]\n");
     w_str(&s, K_SVC_NETSTALGIA, nm(n_onoff, 2, c->svc_netstalgia));
     w_str(&s, K_SVC_MENU, nm(n_onoff, 2, c->svc_menu));
+    if (c->webtv_server == CFG_WTV_OTHER) w_ip(&s, K_SVC_WTV, c->webtv_addr, 0);
+    else w_str(&s, K_SVC_WTV, nm(n_wtv, 3, c->webtv_server));
     n = c->n_services < 0 ? 0 : c->n_services > CFG_MAX_SERVICES ? CFG_MAX_SERVICES : c->n_services;
     for (i = 0; i < n; i++) {
         const cfg_service_t *e = &c->services[i];

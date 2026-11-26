@@ -16,7 +16,7 @@ enum {
     F_LAN, F_ADDRESS, F_NETMASK, F_GATEWAY, F_DNS1, F_DNS2, F_PORT, F_SERVICE, F_V92, F_COMPRESSION,
     F_ENCRYPTION,
     F_DCNOW, F_DCLAN, F_DCUPNP, F_DCIWANGO, F_SATMATCH, F_UPDATE_CHECK, F_X2, F_K56,
-    F_SVCNET, F_ADD, F_SVCMENU, F_DNSRELAY, F_IPV6,
+    F_SVCNET, F_ADD, F_SVCMENU, F_DNSRELAY, F_IPV6, F_WTV, F_WTVADDR,
     F_COUNT,
     F_USER = 100, F_PASS = 200,     /* plus the row */
     F_SVC = 300                     /* plus 100 * the S_ column, plus the row */
@@ -40,7 +40,7 @@ static const struct { const char *name; const char *sec; } fields[F_COUNT] = {
     { "encryption", "ppp" },
     { "dreamcast_now", "line" }, { "dreamcast_lan", "line" }, { "dreamcast_upnp", "line" }, { "dreamcast_iwango", "line" }, { "saturn_matchmaking", "line" },
     { "update_check", "system" }, { "x2", "modem" }, { "k56", "modem" },
-    { "netstalgia", "services" }, { "add", "status" }, { "menu", "services" }, { "dns_relay", "network" }, { "ipv6", "network" },
+    { "netstalgia", "services" }, { "add", "status" }, { "menu", "services" }, { "dns_relay", "network" }, { "ipv6", "network" }, { "webtv_server", "services" }, { "webtv_addr", "services" },
 };
 
 static const char *const n_tones[] = { "us", "eu" };
@@ -51,7 +51,7 @@ static const char *const n_lan[]   = { "static", "dhcp" };      /* the value of 
 static const char *const t_lan[]   = { "Static address", "DHCP" };
 static const char *const n_service[] = { "internet", "archive", "dreamcast", "saturn", "webtv" };
 static const char *const t_service[] = { "Internet: as it is", "Archive: the old web (Protoweb)", "Dreamcast: for the game console",
-                                         "Saturn: console to console (NetLink)", "WebTV: for a WebTV or MSN TV box (WebTV Redialed)" };
+                                         "Saturn: console to console (NetLink)", "WebTV: for a WebTV or MSN TV box" };
 static const char *const n_v92[]   = { "off", "on" };
 static const char *const t_dcnow[]  = { "Off", "On: tell the Dreamcast Now site that a console is online and which game server it asked for" };
 static const char *const t_dclan[]  = { "Off: the console is behind this box's address", "On: the console gets an address of its own on the network" };
@@ -76,6 +76,7 @@ static const char *const t_mods[]  = { "V.90", "V.34", "V.32bis", "V.22bis", "V.
 static const char *const n_svcmode[] = { "raw", "telnet" };        /* CFG_SVC_* */
 static const char *const t_svcnet[] = { "Off: only the numbers above",
                                         "On: also Netstalgia's numbers, fetched once a day" };
+static const char *const n_wtv[] = { "redialed", "hacktv", "zefie", "other" };
 static const char *const t_ipv6[] = { "Off: IPv4 only",
                                       "On: an address from your network's router, when it offers IPv6" };
 static const char *const t_dnsrelay[] = { "Off: the callers ask the servers below themselves",
@@ -371,7 +372,7 @@ int settings_render_page(const cfg_t *c, int page, int saved, const char *error,
                 " for this port and the console is given the name servers of the game revival"
                 " projects, whatever the other pages say. Its further switches are on the Consoles page (under Services). Saturn: two consoles that telephone each other, each on a box of its own; dial 0 to wait for the other player, #a*b*c*d# to call the one at that address. The last two have not been tried with a real"
                 " console. WebTV: for a WebTV or MSN TV box, whatever number it dials; any login, no encryption, and its"
-                " service goes to WebTV Redialed. A change takes effect when the lines are free.</p></section>\n");
+                " service goes to the WebTV server (Services page). A change takes effect when the lines are free.</p></section>\n");
 
     }
     if (ON(SETTINGS_CONSOLES)) {
@@ -515,6 +516,13 @@ int settings_render_page(const cfg_t *c, int page, int saved, const char *error,
     sb_puts(&b, "<table>\n");
     in_select(&b, "Netstalgia's numbers", F_SVCNET, c->svc_netstalgia, n_v92, t_svcnet, 2);
     in_select(&b, "Terminal menu", F_SVCMENU, c->svc_menu, n_v92, t_svcmenu, 2);
+    {   /* the servers' names as the log has them (cfg_webtv_name) */
+        const char *t[CFG_WTV_COUNT]; int i;
+        for (i = 0; i < CFG_WTV_COUNT - 1; i++) t[i] = cfg_webtv_name(i);
+        t[CFG_WTV_OTHER] = "Other: the address below";
+        in_select(&b, "WebTV server", F_WTV, c->webtv_server, n_wtv, t, CFG_WTV_COUNT);
+    }
+    in_addr(&b, "Its address", F_WTVADDR, c->webtv_server == CFG_WTV_OTHER ? c->webtv_addr : 0, "");
     sb_puts(&b, "</table>\n<p>A caller who dials one of these numbers, on either port and whatever its"
                 " service, is connected straight to the host: no PPP, the call carries what the modems"
                 " send. Raw passes the octets both ways as they are, for a game or program with a protocol"
@@ -605,6 +613,7 @@ typedef struct {
     char        svc[S_COLS][CFG_MAX_SERVICES][VAL_MAX + 1];   /* the service rows as posted */
     int         sw[F_COUNT];                /* the 0/1 fields: -1 = not posted */
     char        admin_pw[CFG_SECRET_MAX + 1];
+    char        wtv_addr[VAL_MAX + 1];      /* the WebTV server's address as posted (F_WTVADDR) */
     int         invalid;
     int         port2;                      /* the line and modem fields are port 2's */
     int         add;                        /* the Add button: a new empty row after saving */
@@ -827,6 +836,8 @@ static void set_field(form_t *f, int fi, const char *v, size_t len)
     case F_UPDATE_CHECK: set_enum(f, fi, &c->update_check, v, n_v92, 2, "on, off"); break;
     case F_SVCNET:  set_enum(f, fi, &c->svc_netstalgia, v, n_v92, 2, "on, off"); break;
     case F_SVCMENU: set_enum(f, fi, &c->svc_menu, v, n_v92, 2, "on, off"); break;
+    case F_WTV:     set_enum(f, fi, &c->webtv_server, v, n_wtv, CFG_WTV_COUNT, "redialed, hacktv, zefie, other"); break;
+    case F_WTVADDR: snprintf(f->wtv_addr, sizeof f->wtv_addr, "%s", v); break;
     case F_DNSRELAY: set_enum(f, fi, &c->dns_relay, v, n_v92, 2, "on, off"); break;
     case F_IPV6:    set_enum(f, fi, &c->ipv6, v, n_v92, 2, "on, off"); break;
     case F_ADD:     f->add = 1; break;          /* the button's label, whatever it is */
@@ -1045,6 +1056,22 @@ int settings_apply(const cfg_t *cur, const char *body, size_t len, cfg_t *out,
 
     build_users(&f, cur);
     build_services(&f, cur);
+    /* the WebTV server: the address counts only for Other (and then must be
+     * one it can use); a bad one is named as the server's, the key it is
+     * saved under */
+    if ((f.seen >> F_WTV) & 1u) {
+        if (out->webtv_server != CFG_WTV_OTHER) out->webtv_addr = 0;
+        else if ((f.seen >> F_WTVADDR) & 1u) {
+            const char *v = f.wtv_addr; char t[16], sv[41]; size_t n; uint32_t a = 0;
+            while (*v == ' ') v++;
+            n = strlen(v);
+            while (n && v[n - 1] == ' ') n--;
+            if (n < sizeof t) { memcpy(t, v, n); t[n] = '\0'; }
+            if (n >= sizeof t || cfg_parse_ip(t, &a) || !cfg_webtv_usable(a))
+                fail(&f, "[services] webtv_server: the address '%s' cannot be a WebTV server", safe(v, sv));
+            else out->webtv_addr = a;
+        }
+    }
 
     last_add = f.add;
     if (f.port2) { cfg_t view = *out; cfg_for_port(&view, 1, out); }
