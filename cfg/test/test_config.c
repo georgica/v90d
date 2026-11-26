@@ -1116,7 +1116,7 @@ static void test_services(void)
     CHECK_EQ_I(c.svc_netstalgia, 0); CHECK_EQ_I(c.n_services, 2);
     CHECK_EQ_S(c.services[1].host, "192.168.1.20"); CHECK_EQ_S(c.services[1].name, "My board");
     CHECK(cfg_write(&c, 1, a, sizeof a) > 0);
-    CHECK(strstr(a, "\n[services]\nnetstalgia = off\nmenu = off\nservice = 13855961775 nwnrevival.com:5000 raw AOL NWN\n"
+    CHECK(strstr(a, "\n[services]\nnetstalgia = off\nmenu = off\nwebtv = on\nservice = 13855961775 nwnrevival.com:5000 raw AOL NWN\n"
                     "service = 5551234 192.168.1.20:23 telnet My board\n") != NULL);
     { cfg_t d; CHECK_EQ_I(parse(&d, a), CFG_OK); CHECK(memcmp(&c, &d, sizeof c) == 0); }
     cfg_default(&c); CHECK_EQ_I(c.svc_netstalgia, 1); CHECK_EQ_I(c.n_services, 0);
@@ -1125,6 +1125,15 @@ static void test_services(void)
     CHECK_EQ_I(c.svc_menu, 1);
     CHECK(cfg_write(&c, 1, a, sizeof a) > 0);
     CHECK(strstr(a, "\n[services]\nnetstalgia = on\nmenu = on\n") != NULL);
+    /* the WebTV numbers (srv.h): on unless turned off */
+    cfg_default(&c); CHECK_EQ_I(c.svc_webtv, 1);
+    CHECK_EQ_I(parse(&c, "[services]\nwebtv = off\n"), CFG_OK);
+    CHECK_EQ_I(c.svc_webtv, 0);
+    CHECK(cfg_write(&c, 1, a, sizeof a) > 0);
+    CHECK(strstr(a, "\n[services]\nnetstalgia = on\nmenu = off\nwebtv = off\n") != NULL);
+    { cfg_t d; CHECK_EQ_I(parse(&d, a), CFG_OK); CHECK_EQ_I(d.svc_webtv, 0); }
+    CHECK_EQ_I(parse(&c, "[services]\nwebtv = maybe\n"), CFG_ERR);
+    CHECK(strstr(err, "webtv: 'maybe' is not one of: on, off") != NULL);
     CHECK_EQ_I(parse(&c, "[services]\nmenu = maybe\n"), CFG_ERR);
     CHECK_EQ_I(parse(&c, "[services]\nservice = 555 h:1 raw\n"), CFG_ERR);
     CHECK(strstr(err, "t.conf:2: [services] service: missing name") != NULL);

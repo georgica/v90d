@@ -121,6 +121,11 @@ update_check = off
 # on (default) or off: also answer the numbers of Netstalgia's signed list,
 # which the box fetches once a day. Off means it never asks for it.
 netstalgia = on
+# on (default) or off: answer a WebTV or MSN TV box's own numbers
+# (800-932-8800, 800-613-8199 and 484-820-1337) on an internet or archive
+# port, as a dial-up call whose WebTV service goes to WebTV Redialed
+# (community.webtv.zone). The box logs in with any name and password.
+webtv = on
 # service = NUMBER HOST:PORT raw|telnet NAME, up to 16. NUMBER is 3 to 15
 # digits as dialled; raw passes the octets as they are, telnet says
 # "Calling NAME ..." and speaks telnet. The host may be on your network.

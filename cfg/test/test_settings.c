@@ -1303,11 +1303,13 @@ static void test_services_page(void)
     CHECK(has(html, "<select name=\"netstalgia\"><option value=\"off\">Off") && has(html, "<option value=\"on\" selected>On"));
     CHECK(has(html, "No list."));
     CHECK(has(html, "<select name=\"menu\"><option value=\"off\" selected>Off: every call"));
+    CHECK(has(html, "<select name=\"webtv\"><option value=\"off\">Off") && has(html, "WebTV"));
 
     /* a post from the page */
     CHECK_EQ_I(apply(&c, "snum0=13855961775&shost0=nwnrevival.com&sport0=5000&smode0=raw&sname0=AOL+Neverwinter+Nights"
-                         "&snum1=+5559876+&shost1=192.168.1.20&sport1=23&smode1=telnet&sname1=My+%22board%22&netstalgia=off&menu=on", &out), SETTINGS_OK);
+                         "&snum1=+5559876+&shost1=192.168.1.20&sport1=23&smode1=telnet&sname1=My+%22board%22&netstalgia=off&menu=on&webtv=off", &out), SETTINGS_OK);
     CHECK_EQ_I(out.n_services, 2); CHECK_EQ_I(out.svc_netstalgia, 0); CHECK_EQ_I(out.svc_menu, 1);
+    CHECK_EQ_I(out.svc_webtv, 0);
     CHECK(strcmp(out.services[0].name, "AOL Neverwinter Nights") == 0 && out.services[0].port == 5000);
     CHECK(strcmp(out.services[1].number, "5559876") == 0 && out.services[1].mode == CFG_SVC_TELNET);
     CHECK(strcmp(out.services[1].name, "My \"board\"") == 0);
