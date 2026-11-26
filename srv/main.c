@@ -508,6 +508,12 @@ static void log_last_call(int port)
         if (k.proj_bps || k.ask_bps)
             logf_(CFG_LOG_INFO, "%s  V.34: the caller projected %d bit/s for us, asked %d; %s",
                   who, k.proj_bps, k.ask_bps, k.capped ? "kept to the projection" : "not capped");
+        /* an answered K56flex offer: which version the client chose, and
+         * whether we took it (a version-1 client is declined and goes on
+         * as V.34 or V.90) */
+        v90m_k56 f; char t[160];
+        v90m_get_k56(S[port].dce.modem, &f);
+        if (srv_k56_text(&f, t, sizeof t)) logf_(CFG_LOG_INFO, "%s  %s", who, t);
     }
 }
 

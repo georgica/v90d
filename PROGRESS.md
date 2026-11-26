@@ -3125,3 +3125,21 @@ caught it.
   ours, are recorded with who began them; none before), ns_call (a V.90
   caller renegotiating at its rate on a WebTV port: the line is in the
   daemon's log).
+
+## 0.13.2: libv90modem 0.7.2, and the K56flex choice in the log (2026-11-26)
+
+- **libv90modem 0.7.2** (from 0.7.1; additive, the same ABI): K56flex's
+  V.8bis CL offers versions 1 and 2 (it offered 2 alone). A version-2
+  client gets the call it got before; a version-1 client (an early
+  Rockwell modem, the WebTV Plus) is declined and goes on as V.90 or
+  V.34, as before. v90m_get_k56 tells what was offered and chosen.
+- After each call where K56flex was offered, the log says what the caller
+  chose and whether we took it, for example `K56flex: we offered versions
+  1 and 2; the caller chose version 1, declined: the call went on without
+  K56flex` (srv_k56_text).
+- README: a WebTV Plus renegotiating about every 22 s is its modem's
+  automatic fall-forward (factory default); `AT%E1` in its TellyScript
+  stops it (found by the libv90modem work).
+- Tests: srv (the K56flex line for each case: nothing offered, offered and
+  not chosen, version 2 agreed, version 1 declined, version-2-only and
+  version-1-only offers, an undefined version, a short buffer, NULL).

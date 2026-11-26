@@ -187,6 +187,11 @@ void    srv_set_protoweb(srv_t *s, int on);
  * while such a call is in progress (the daemon then sends its WebTV
  * service to the WebTV server, [services] webtv_server). */
 int     srv_webtv(const srv_t *s);
+/* the K56flex line of a call's log, from libv90modem's v90m_k56: what our
+ * V.8bis CL offered and what the client chose (a declined client is one
+ * that would have run K56flex version 1). "" and 0 when no CL went out (or
+ * k is NULL); otherwise the length, the text cut to fit n. */
+size_t  srv_k56_text(const v90m_k56 *k, char *buf, size_t n);
 /* Unpredictable octets (the daemon reads them from /dev/urandom) for the
  * next call's PPP: its magic numbers and challenges. Give fresh ones after
  * each call; the server keeps at most 32. */

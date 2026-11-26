@@ -149,7 +149,10 @@ more and then fails error control); the log shows both rates after the
 call. A box whose call-waiting detection is on can hang up after a short
 stop of the data that it takes for call waiting; every stop is in the log
 (`data stopped ...`), and turning that detection off in the box's dialing
-settings is the fix. The call is a dial-up
+settings is the fix. A WebTV Plus whose log shows a rate renegotiation
+begun by the caller about every 22 s is running its modem's automatic
+fall-forward (the factory default); `AT%E1` in its TellyScript turns that
+off. The call is a dial-up
 connection, but the box logs in with its own built-in name and password,
 so any is taken, with no encryption and no terminal menu. For that call
 the box's old service addresses (10.0.0.1, 10.0.0.2, 10.0.128.1 and
@@ -262,7 +265,7 @@ binary in the image and no closed blob.
 
 The modem is [libv90modem](https://github.com/georgica/libv90modem)
 (GPL-2.0-only), a library in a repository of its own that v90d builds
-against. `fw/setup.sh` fetches a pinned release of it (0.7.1, checked by
+against. `fw/setup.sh` fetches a pinned release of it (0.7.2, checked by
 SHA-256, like the other dependencies) and unpacks it next to this tree
 (`fw/setup-libv90m.sh` does that part alone); to
 build against a working copy instead, say where it is with `LIBV90M=`
@@ -328,7 +331,12 @@ take x2 up is left with V.90 or V.34 as before.
 K56flex is experimental and has not been tried on a real K56flex modem yet
 (a Zoom 2948 is on the way); it has only been proven against Motorola's SM56
 soft modem run under emulation, which connects at 32000 to 52000 down and
-28800 up. Leave it off unless you are testing it. Neither scheme was ever
+28800 up. Leave it off unless you are testing it. The box offers K56flex
+versions 1 and 2 and takes version 2; a modem that chooses version 1 (an
+early Rockwell one, such as a WebTV Plus) is declined and goes on as V.90
+or V.34. After each such call the log shows what the caller chose
+(`K56flex: we offered versions 1 and 2; the caller chose version 1,
+declined ...`). Neither scheme was ever
 published; see libv90modem/DESIGN.md, 4.2b.
 
 The bulletin board calls were made with the Conexant: a board's own
