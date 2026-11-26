@@ -2088,6 +2088,8 @@ static void test_webtv(void)
     CHECK(S.dce.cfg.ppp.pap_cb != NULL && S.dce.cfg.ppp.pap_cb(S.dce.cfg.ppp.ctx, u, 3, pw, 6));
     CHECK(S.link != SRV_LINK_MENU);
     CHECK((S.dce.cfg.modulations & V90M_MOD_V90) != 0);
+    /* V.34 towards a box no faster than its own line probe said */
+    CHECK((S.dce.cfg.modulations & V90M_OPT_V34_TX_CAP) != 0);
     /* a box's own login, nobody's on this port: connected */
     c.encryption = 0;
     hang_up();
@@ -2105,6 +2107,7 @@ static void test_webtv(void)
     CHECK_EQ_I(srv_webtv(&S), 1);
     CHECK_EQ_I((int)(S.dce.cfg.modulations & fast), 0);
     CHECK((S.dce.cfg.modulations & V90M_MOD_V34) != 0);
+    CHECK((S.dce.cfg.modulations & V90M_OPT_V34_TX_CAP) != 0);
     CHECK_EQ_I(S.heavy_held, 0); CHECK_EQ_I(slot, 0);
     hang_up();
     webtv_call(&c, &slot, "8006138199");
@@ -2132,6 +2135,7 @@ static void test_webtv(void)
     c.service = CFG_SERVICE_INTERNET;
     webtv_call(&c, NULL, "18009328800");
     CHECK_EQ_I(srv_webtv(&S), 0);
+    CHECK_EQ_I((int)(S.dce.cfg.modulations & V90M_OPT_V34_TX_CAP), 0);
     hang_up();
     c.service = CFG_SERVICE_ARCHIVE;
     webtv_call(&c, NULL, "5551234");

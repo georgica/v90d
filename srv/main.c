@@ -468,6 +468,16 @@ static void log_last_call(int port)
         log_ppp_comp(who, &S[port].dce.ppp);
         log_ppp_end(who, &S[port].dce);
     }
+    if (S[port].dce.modem) {
+        /* an answered V.34 call: what the caller projected for our transmit
+         * against what its MP asked (a box that asks above its projection
+         * and fails error control is what the cap is for) */
+        v90m_v34_cap k;
+        v90m_get_v34_cap(S[port].dce.modem, &k);
+        if (k.proj_bps || k.ask_bps)
+            logf_(CFG_LOG_INFO, "%s  V.34: the caller projected %d bit/s for us, asked %d; %s",
+                  who, k.proj_bps, k.ask_bps, k.capped ? "kept to the projection" : "not capped");
+    }
 }
 
 /* fresh randomness for port p's next call (its PPP challenges and magic
