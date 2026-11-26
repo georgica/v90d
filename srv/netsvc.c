@@ -16,6 +16,7 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <netdb.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -29,6 +30,7 @@
 #include "upnp.h"
 #include "settings.h"
 #include "vpn.h"
+#include "webtv.h"
 
 #define STR_(x) #x
 #define STR(x) STR_(x)
@@ -51,7 +53,26 @@ static uint32_t arch_next_ms;       /* not before this: a gateway that dies is n
 static int   pw_used;                   /* a PROTOWEB call has been: the gateway stays */
 static int   arch_on[PORTS];            /* what the NAT plan in force gives each port */
 static pid_t natr_pid; static int natr_again;
-static int port_archive(int i) { return S[i].cfg.service == CFG_SERVICE_ARCHIVE || srv_protoweb(&S[i]); }
+/* a WebTV call (srv_webtv) on an archive port is not the archive's: its
+ * names must reach WebTV Redialed's, not the gateway */
+static int port_archive(int i) { return (S[i].cfg.service == CFG_SERVICE_ARCHIVE && !srv_webtv(&S[i])) || srv_protoweb(&S[i]); }
+/* WebTV (srv.h, SRV_WEBTV*; webtv.h): a call to one of a box's numbers has
+ * 10.0.0.1 sent to WebTV Redialed and the box's fixed name server to the
+ * port's, while it lasts (pw_poll, like PROTOWEB's). The address of WebTV
+ * Redialed is looked up by a child (wt_poll) every 10 minutes while a port
+ * can take such calls; a lookup that fails keeps the last good address.
+ * -Q gives one instead (no lookup), -Q "" neither. */
+static uint32_t wt_addr;                /* WebTV Redialed, host order; 0 = not known */
+static const char *wt_fixed;            /* -Q */
+static pid_t    wt_pid; static int wt_fd = -1; static uint32_t wt_next_ms, wt_kill_ms; static int wt_started, wt_failed;
+static uint8_t  wt_got[4]; static size_t wt_len;
+static int      wt_on[PORTS];           /* what the NAT plan in force gives each port */
+static int any_webtv(void)
+{
+    int i;
+    for (i = 0; i < n_ports; i++) if (srv_webtv(&S[i])) return 1;
+    return 0;
+}
 static int any_archive(void)
 {
     int i;
@@ -443,12 +464,17 @@ static int build_plan(nat_plan *p)
 {
     int i;
     memset(p, 0, sizeof *p);
-    if (!(S[0].cfg.nat || any_archive() || any_console())) return 0;
+    if (!(S[0].cfg.nat || any_archive() || any_console() || any_webtv())) return 0;
     p->peer[0] = S[0].cfg.ppp_peer; p->peer[1] = n_ports > 1 ? S[1].cfg.ppp_peer : 0;
     p->masquerade = S[0].cfg.nat;
     for (i = 0; i < n_ports; i++) p->archive[i] = port_archive(i);
     for (i = 0; i < n_ports; i++) p->console[i] = S[i].cfg.service == CFG_SERVICE_DREAMCAST;
     for (i = 0; i < n_ports; i++) p->lan[i] = lan_wanted(i) && la[i].ip;
+    for (i = n_ports - 1; i >= 0; i--) if ((p->webtv[i] = srv_webtv(&S[i])) != 0) {
+        /* the box's names to the server the port gives its callers */
+        p->webtv_dns = S[i].cfg.dns_relay ? S[i].cfg.ppp_local : S[i].cfg.dns[0];
+    }
+    p->webtv_to = wt_addr;
     p->rewrite = dc_rw; p->n_rewrite = dc_n;
     p->n_open = dclist_ports(&p->open);
     strncpy(p->wan, lan_if, sizeof p->wan - 1);
@@ -473,6 +499,68 @@ static void nat_refresh(void)
     if (natr_pid < 0) { natr_pid = 0; logf_(CFG_LOG_ERROR, "cannot change the NAT rules: %s", strerror(errno)); }
 }
 
+static void nat_refresh(void);
+static void wt_drain(void)
+{
+    ssize_t r;
+    while (wt_fd >= 0 && wt_len < sizeof wt_got && (r = read(wt_fd, wt_got + wt_len, sizeof wt_got - wt_len)) > 0) wt_len += (size_t)r;
+}
+static void wt_poll(uint32_t now_ms)
+{
+    int i, st, can = 0;
+    char a[16];
+    if (wt_pid > 0) {
+        wt_drain();
+        if (waitpid(wt_pid, &st, WNOHANG) != wt_pid) {
+            if ((int32_t)(now_ms - wt_kill_ms) >= 0) (void)kill(wt_pid, SIGKILL);   /* a lookup that hangs */
+            return;
+        }
+        wt_drain();
+        wt_pid = 0; close(wt_fd); wt_fd = -1;
+        wt_next_ms = now_ms + WEBTV_EVERY_MS;
+        if (WIFEXITED(st) && WEXITSTATUS(st) == 0 && wt_len == 4) {
+            uint32_t got = ((uint32_t)wt_got[0] << 24) | ((uint32_t)wt_got[1] << 16) | ((uint32_t)wt_got[2] << 8) | wt_got[3];
+            wt_failed = 0;
+            if (got && got != wt_addr) {
+                struct in_addr in; in.s_addr = htonl(got);
+                wt_addr = got;
+                logf_(CFG_LOG_INFO, "WebTV Redialed (%s) is at %s", WEBTV_HOST, inet_ntop(AF_INET, &in, a, sizeof a) ? a : "?");
+                if (any_webtv()) nat_refresh();
+            }
+        } else if (!wt_failed++) {
+            logf_(CFG_LOG_WARN, "WebTV Redialed (%s) could not be looked up; %s", WEBTV_HOST,
+                  wt_addr ? "keeping the address it had" : "WebTV calls get no service until it can");
+        }
+        return;
+    }
+    if (wt_fixed) return;
+    for (i = 0; i < n_ports; i++)
+        if (S[i].cfg.svc_webtv && (S[i].cfg.service == CFG_SERVICE_INTERNET || S[i].cfg.service == CFG_SERVICE_ARCHIVE)) can = 1;
+    if (!can) return;
+    if (wt_started && (int32_t)(now_ms - wt_next_ms) < 0) return;
+    wt_started = 1; wt_next_ms = now_ms + WEBTV_EVERY_MS;
+    {
+        int pp[2];
+        if (pipe2(pp, O_CLOEXEC | O_NONBLOCK) < 0) return;
+        wt_len = 0;
+        wt_pid = fork();
+        if (wt_pid == 0) {
+            struct addrinfo hints, *res = NULL; uint32_t x = 0; uint8_t b[4];
+            (void)fcntl(pp[1], F_SETFL, 0);
+            child_plain(-1, -1, 0);
+            memset(&hints, 0, sizeof hints);
+            hints.ai_family = AF_INET; hints.ai_socktype = SOCK_STREAM;
+            if (getaddrinfo(WEBTV_HOST, NULL, &hints, &res) == 0) { x = webtv_pick(res); freeaddrinfo(res); }
+            if (!x) _exit(1);
+            b[0] = (uint8_t)(x >> 24); b[1] = (uint8_t)(x >> 16); b[2] = (uint8_t)(x >> 8); b[3] = (uint8_t)x;
+            _exit(write(pp[1], b, 4) == 4 ? 0 : 1);
+        }
+        close(pp[1]);
+        if (wt_pid < 0) { wt_pid = 0; close(pp[0]); return; }
+        wt_fd = pp[0]; wt_kill_ms = now_ms + 60000u;
+    }
+}
+
 static void pw_poll(void)
 {
     int i, changed = 0, st;
@@ -488,6 +576,18 @@ static void pw_poll(void)
         if (srv_protoweb(&S[i])) {
             pw_used = 1;
             logf_(CFG_LOG_INFO, "port %d: a call to PROTOWEB: its web, FTP and names go to the archive gateway", i + 1);
+        }
+    }
+    for (i = 0; i < n_ports; i++) {
+        int w = srv_webtv(&S[i]);
+        if (w == wt_on[i]) continue;
+        wt_on[i] = w; changed = 1;
+        if (w && wt_addr) {
+            struct in_addr in; char a[16]; in.s_addr = htonl(wt_addr);
+            logf_(CFG_LOG_INFO, "port %d: a call to WebTV: 10.0.0.1 goes to WebTV Redialed (%s)", i + 1,
+                  inet_ntop(AF_INET, &in, a, sizeof a) ? a : "?");
+        } else if (w) {
+            logf_(CFG_LOG_WARN, "port %d: a call to WebTV, but WebTV Redialed's address is not known yet", i + 1);
         }
     }
     if (changed) { nat_refresh(); arch_apply(any_archive()); }
@@ -554,6 +654,7 @@ void netsvc_poll(uint32_t now_ms)
      * it is a multiple of 100 again for months, and nothing here would run. */
     static uint32_t at100, at1000, at2000;
     if ((int32_t)(now_ms - at100) >= 0) { at100 = now_ms + 100; pw_poll(); }
+    if ((int32_t)(now_ms - at1000) >= 0) wt_poll(now_ms);
     if ((int32_t)(now_ms - at2000) >= 0) { at2000 = now_ms + 2000; arch_poll(now_ms); }
     if ((int32_t)(now_ms - at1000) >= 0) {
         at1000 = now_ms + 1000;
@@ -569,7 +670,8 @@ void netsvc_stop(void)
     arch_stop(1);
     if (natr_pid > 0) { (void)waitpid(natr_pid, NULL, 0); natr_pid = 0; }
     if (vp_pid > 0) { (void)kill(vp_pid, SIGTERM); (void)waitpid(vp_pid, NULL, 0); }
-    if (S[0].cfg.nat || any_archive() || any_console()) (void)nat_remove();
+    if (wt_pid > 0) { (void)kill(wt_pid, SIGKILL); (void)waitpid(wt_pid, NULL, 0); wt_pid = 0; }
+    if (S[0].cfg.nat || any_archive() || any_console() || any_webtv()) (void)nat_remove();
     if (any_lan()) proxy_arp(0);
     if (up_ip) {                        /* give the ports back; the child finishes by itself */
         if (up_pid > 0) (void)waitpid(up_pid, NULL, 0);
@@ -581,6 +683,12 @@ void netsvc_set_arch(const char *path)   { arch_path = path; }
 int  netsvc_has_arch(void) { return arch_path[0] && access(arch_path, X_OK) == 0; }
 void netsvc_set_dclist(const char *cmd)  { dc_cmd = cmd; }
 void netsvc_set_dcnow(const char *prog)  { dn_prog = prog; }
+void netsvc_set_webtv(const char *addr)
+{
+    struct in_addr in;
+    wt_fixed = addr;
+    wt_addr = addr[0] && inet_pton(AF_INET, addr, &in) == 1 ? ntohl(in.s_addr) : 0;
+}
 void netsvc_set_lease(const char *cmd)   { la_cmd = cmd; }
 void netsvc_set_vpnprog(const char *prog){ vp_prog = prog; }
 void netsvc_set_vpnpath(const char *path){ vp_path = path; }

@@ -1771,6 +1771,65 @@ int main(int argc, char **argv)
         CHECK_EQ_I(waitpid(pid, &st, 0), pid);
         CHECK(WIFEXITED(st) && WEXITSTATUS(st) == 0);
     }
+    /* 16b. WebTV (800 932 8800, srv.h SRV_WEBTV): the port's dial-up
+     * connection with any PAP login (no user on this port is "alice"), and
+     * 10.0.0.1 and the box's name server sent on for that call alone. -Q
+     * gives WebTV Redialed's address (no lookup here); the NAT plan is read
+     * back from the kernel. */
+    {
+        static char lanlog[300], ruleset[300], cmd[700];
+        cfg_default(&c);
+        strcpy(c.line_number, "5551234"); c.rings = 1; c.status_port = 8080;
+        c.auth = CFG_AUTH_CHAP; c.n_users = 1; strcpy(c.users[0].name, "bob"); strcpy(c.users[0].secret, "builder");
+        CHECK_EQ_I(cfg_save(&c, conf, err, sizeof err), CFG_OK);
+        CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
+        snprintf(lanlog, sizeof lanlog, "%s/ns_wtv.log", argv[2]);
+        snprintf(ruleset, sizeof ruleset, "%s/ns_wtv.rules", argv[2]);
+        unlink(lanlog);
+        pid = fork();
+        if (pid == 0) {
+            int a = fcntl(sv[1], F_DUPFD, 20), lfd = open(lanlog, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            dup2(a, 3); if (lfd >= 0) dup2(lfd, 2);
+            for (i = 4; i < 64; i++) close(i);
+            execl(argv[1], "v90d", "-c", conf, "-l", "fd:3", "-i", "lo", "-t", "ppp0", "-A", "", "-Q", "192.0.2.7",
+                  "-b", "", "-f", "", (char *)NULL);
+            _exit(127);
+        }
+        close(sv[1]);
+        line_fd = sv[0]; idle_fd = -1;
+        dead = quiet_exit = 0; hook = modem_on = 0; blk_n = 0; c_tx = 0; c_rx_pw = 0;
+        channel_init(&CH, &cc);
+        memset(prev_tx, 0xFF, sizeof prev_tx);
+        run_ms(2000);
+        snprintf(cmd, sizeof cmd, "nft list ruleset > %s 2>&1 || iptables-save -t nat > %s 2>&1", ruleset, ruleset);
+        /* (a) the number, with the 1: in, whatever the login */
+        hook = 1; run_ms(500);
+        dial("18009328800");
+        run_ms(2000 + 300);
+        start_modem(0);
+        CHECK(wait_ip(60000) >= 0);
+        for (i = 0; i < 50 && !file_has(lanlog, "a call to WebTV"); i++) { run_ms(100); usleep(10000); }
+        CHECK(file_has(lanlog, "port 1: a call to WebTV: 10.0.0.1 goes to WebTV Redialed (192.0.2.7)"));
+        for (i = 0; i < 30; i++) { if (system(cmd)) { } if (file_has(ruleset, "192.0.2.7")) break; run_ms(100); usleep(20000); }
+        CHECK(file_has(ruleset, "192.0.2.7")); CHECK(file_has(ruleset, "157.57.221.51"));
+        hang_up();
+        /* (b) the call over: no WebTV rules */
+        for (i = 0; i < 30; i++) { if (system(cmd)) { } if (!file_has(ruleset, "192.0.2.7")) break; run_ms(100); usleep(20000); }
+        CHECK(!file_has(ruleset, "192.0.2.7"));
+        /* (c) the port's own number: the port's login, so "alice" is refused */
+        hook = 1; run_ms(500);
+        dial("5551234");
+        run_ms(2000 + 300);
+        start_modem(0);
+        CHECK(wait_ip(20000) < 0);
+        hang_up();
+        quiet_exit = 1;
+        kill(pid, SIGTERM);
+        for (i = 0; i < 400 && !dead; i++) step(0);
+        close(line_fd);
+        CHECK_EQ_I(waitpid(pid, &st, 0), pid);
+        CHECK(WIFEXITED(st) && WEXITSTATUS(st) == 0);
+    }
     /* 17. the time service (303 494 4774, srv/acts.h): ACTS's format from
      * the box's clock, at V.32bis or below and without error control; '?'
      * gives the help. The lines come by the real clock, so the line is run

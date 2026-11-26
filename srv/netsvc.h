@@ -32,6 +32,7 @@ void netsvc_set_arch(const char *path);     /* -A: the archive gateway ("" = non
 int  netsvc_has_arch(void);
 void netsvc_set_dclist(const char *cmd);    /* -D: fetch the console address list ("" = none) */
 void netsvc_set_dcnow(const char *prog);    /* -G: run instead of wget for Dreamcast Now */
+void netsvc_set_webtv(const char *addr);    /* -Q: WebTV Redialed's address, not looked up ("" = none) */
 void netsvc_set_lease(const char *cmd);     /* -E: print the console's lease (instead of udhcpc) */
 void netsvc_set_vpnprog(const char *prog);  /* -O: the OpenVPN program ("" = none) */
 void netsvc_set_vpnpath(const char *path);  /* -V: where the VPN profile is kept */
