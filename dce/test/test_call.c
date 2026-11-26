@@ -989,6 +989,7 @@ static void test_v90_endings(void)
             dce_stop_t k;
             CHECK_EQ_I((int)dce_last_stop(&D, &k), 1);
             CHECK_EQ_I(k.retrain, 0);
+            CHECK_EQ_I(k.cause, V90M_CAUSE_FAR);           /* the caller began it */
             CHECK_EQ_I(k.tx_before, before); CHECK_EQ_I(k.tx_after, before - 2 * 8000 / 6);
             CHECK(k.rx_before > 0 && k.rx_after > 0);
             CHECK(k.dur_ms > 0 && k.dur_ms < 2000);
@@ -1012,6 +1013,7 @@ static void test_v90_endings(void)
         run_ms(200);
         CHECK_EQ_I((int)dce_last_stop(&D, &k), 1);
         CHECK_EQ_I(k.retrain, 1);
+        CHECK_EQ_I(k.cause, V90M_CAUSE_FAR);
         CHECK(k.dur_ms > 0 && k.since_ip_ms >= 0);
         s = status();
         printf("    caller retrains: data again after %d ms, state %d, %d bit/s down, %d up\n",
@@ -1028,10 +1030,15 @@ static void test_v90_endings(void)
     CHECK(run_until(p_ip_up, 60000) > 0);
     {
         long r[2];
+        dce_stop_t k;
         CHECK_EQ_I(answer_retrain(v90m__answer(D.modem)), 0);
         t = run_until(p_retrained, 30000);
         printf("    we retrain: data again after %d ms\n", t);
         CHECK(t > 0);
+        run_ms(200);
+        CHECK_EQ_I((int)dce_last_stop(&D, &k), 1);
+        CHECK_EQ_I(k.retrain, 1);
+        CHECK(k.cause != V90M_CAUSE_FAR && k.cause != V90M_CAUSE_NONE);   /* ours */
         CHECK_EQ_I(C.retrains, 1);
         CHECK_EQ_I(status()->state, DCE_ONLINE);
         CHECK(traffic(TEXT, 20, 20, 60000, r) > 0);

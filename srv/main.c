@@ -447,7 +447,7 @@ static void log_stops(int port)
     dce_stop_t k;
     char who[12] = "", since[40] = "";
     unsigned n = dce_last_stop(&S[port].dce, &k);
-    const char *whose = "";
+    const char *whose;
     if (n == seen[port]) return;
     seen[port] = n;
     if (n == 0) return;                 /* a new call */
@@ -455,9 +455,15 @@ static void log_stops(int port)
     if (k.since_ip_ms >= 0)
         snprintf(since, sizeof since, ", %ld.%01ld s after PPP came up",
                  (long)k.since_ip_ms / 1000, (long)k.since_ip_ms % 1000 / 100);
-    /* the modem itself renegotiates only downward (after about 1 s of bad
-     * receive error): one that kept or raised both rates was the caller's */
-    if (!k.retrain && k.tx_after >= k.tx_before && k.rx_after >= k.rx_before) whose = " (the caller's)";
+    /* who began it, as libv90modem tells (v90m_get_restarts) */
+    switch (k.cause) {
+    case V90M_CAUSE_FAR:       whose = " begun by the caller"; break;
+    case V90M_CAUSE_OURS:      whose = " begun by us"; break;
+    case V90M_CAUSE_RX_ERRORS: whose = " begun by us: too many receive errors"; break;
+    case V90M_CAUSE_RX_LOST:   whose = " begun by us: the caller's signal lost"; break;
+    case V90M_CAUSE_HOST:      whose = " begun by us: asked by v90d"; break;
+    default:                   whose = ""; break;
+    }
     logf_(CFG_LOG_INFO, "%s  data stopped %lu.%02lu s%s: %s%s, %d/%d -> %d/%d bit/s",
           who, (unsigned long)k.dur_ms / 1000, (unsigned long)k.dur_ms % 1000 / 10, since,
           k.retrain ? "a retrain" : "a rate renegotiation", whose,

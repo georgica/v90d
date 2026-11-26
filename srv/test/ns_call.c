@@ -1838,7 +1838,7 @@ int main(int argc, char **argv)
         CHECK(file_has(ruleset, "192.0.2.7"));
         hang_up();
         /* (d) a V.90 box that renegotiates at the rate it has (as a Rockwell
-         * probing for more does): the stop is in the log, the caller's */
+         * probing for more does): the stop is in the log, begun by the caller (libv90modem's v90m_get_restarts) */
         hook = 1; run_ms(500);
         dial("18009328800");
         run_ms(2000 + 300);
@@ -1847,7 +1847,7 @@ int main(int argc, char **argv)
         run_ms(1000);
         CHECK_EQ_I(p34a_renegotiate(&C.p34, C.p34.cfg.Kd, 0), 0);
         for (i = 0; i < 40 && !file_has(lanlog, "data stopped"); i++) { run_ms(100); usleep(10000); }
-        CHECK(file_has(lanlog, "after PPP came up: a rate renegotiation (the caller's), "));
+        CHECK(file_has(lanlog, "after PPP came up: a rate renegotiation begun by the caller, 50666/"));
         hang_up();
         quiet_exit = 1;
         kill(pid, SIGTERM);

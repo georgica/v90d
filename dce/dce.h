@@ -195,6 +195,8 @@ typedef struct {
     int32_t  since_ip_ms;      /* ms since PPP's IP came up; -1 = it was not up */
     uint32_t dur_ms;           /* how long no data moved */
     int      retrain;          /* 1: a retrain; 0: a rate renegotiation */
+    int      cause;            /* who began it: v90m_cause (V90M_CAUSE_FAR = the
+                                  caller; v90m_get_restarts as data moved again) */
     int      tx_before, rx_before, tx_after, rx_after;     /* bit/s */
 } dce_stop_t;
 

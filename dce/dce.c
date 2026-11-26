@@ -572,6 +572,10 @@ static int after_sample(dce_t *d)
         } else if (d->stopped) {
             if (ms.retraining) d->stop.retrain = 1;
             if (ms.moving) {
+                v90m_restarts rs;
+                v90m_get_restarts(d->modem, &rs);
+                d->stop.cause = (int)rs.last;
+                if (rs.last_retrain) d->stop.retrain = 1;
                 d->stopped = 0;
                 d->stop.dur_ms = d->call_ms - d->stop.at_ms;
                 d->stop.tx_after = ms.tx_bps; d->stop.rx_after = ms.rx_bps;

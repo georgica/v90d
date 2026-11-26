@@ -262,7 +262,7 @@ binary in the image and no closed blob.
 
 The modem is [libv90modem](https://github.com/georgica/libv90modem)
 (GPL-2.0-only), a library in a repository of its own that v90d builds
-against. `fw/setup.sh` fetches a pinned release of it (0.7.0, checked by
+against. `fw/setup.sh` fetches a pinned release of it (0.7.1, checked by
 SHA-256, like the other dependencies) and unpacks it next to this tree
 (`fw/setup-libv90m.sh` does that part alone); to
 build against a working copy instead, say where it is with `LIBV90M=`
