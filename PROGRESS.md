@@ -2987,27 +2987,35 @@ Proof on hardware for this release: the OBi200 on 0.6.1 answered a USR Sportster
 ## WebTV, built in (2026-11-25)
 
 A WebTV / MSN TV box reached WebTV Redialed through Netstalgia's dial-in
-first (2026-11-25); the box now does the same on its own, the way PROTOWEB
-is done (design and plan in `docs/superpowers/`).
+first (2026-11-25); the box now does the same on its own (design and plan
+in `docs/superpowers/`). First built as three numbers answered on internet
+and archive ports under `[services] webtv`; at the owner's word, WebTV is
+now a service of its own per port instead, and that switch is gone.
 
-- `[services] webtv` (on by default, on the Services page).
-- The numbers 800-932-8800, 800-613-8199 (V.34 at most) and 484-820-1337,
-  with or without the 1, on internet and archive ports: PAP with any login,
-  no encryption, no terminal menu; calls show as "WebTV (PPP)".
+- `[line] service = webtv` (and `[line2]`), on the Line page.
+- On such a port every call is the box's, whatever number: PAP with any
+  login, no encryption, no terminal menu; calls show as "WebTV (PPP)". The
+  numbers 800-932-8800, 800-613-8199 (V.34 at most) and 484-820-1337 end
+  the dialling at once (the telephony layer's `more` question now also ends
+  dialling on a port that takes any number), any other after 3 s.
 - For the call: 10.0.0.1 to WebTV Redialed and the box's fixed name server
   (157.57.221.51) to the port's, in both NAT back ends.
 - WebTV Redialed's address looked up from community.webtv.zone every
-  10 minutes; public IPv4 only; a failed lookup keeps the last one.
-- Tests: cfg (the setting), test_srv (numbers, login, modulations, the
-  cases that are not WebTV), test_webtv (the address picked), ns_nat (the
-  rewrites, both ports), ns_call (a whole call through the daemon).
+  10 minutes while a port is a WebTV port; public IPv4 only; a failed
+  lookup keeps the last one.
+- On the way: the port's own number dialed with the 1 in front is now the
+  port's own for the BBS, service, PROTOWEB and ACTS numbers as well.
+- Tests: cfg (the service), tel (a known number ends dialling on an
+  any-number port), test_srv (any number, the known ones, login,
+  modulations, other services), test_webtv (the address picked), ns_nat
+  (the rewrites, both ports), ns_call (whole calls through the daemon).
 - Not yet tried with a real box on a v90d port.
 
 ## 0.12.0: WebTV and the HT802 V2.1A (2026-11-25)
 
-Everything merged since 0.11.0 (#23 to #28):
+Everything merged since 0.11.0 (#23 to #29):
 
-- **WebTV** (#28): a WebTV / MSN TV box dialing its own numbers (800-932-8800, 800-613-8199, 484-820-1337) on an internet or archive port reaches WebTV Redialed; `[services] webtv`, on by default. The port's own number dialed with the 1 in front is now the port's own for every special number.
+- **WebTV** (#28, #29): a port whose service is WebTV takes a WebTV / MSN TV box to WebTV Redialed, whatever number it dials. The port's own number dialed with the 1 in front is now the port's own for every special number.
 - **The HT802 V2.1A** (#27, issue #26), confirmed by its owner on the v0.11.1-rc1 pre-release.
 - **1-800-BBS-DIAL shows the BBS directory** and keeps the typing (#23).
 - **The libv90modem fetch** is its own script, `fw/setup-libv90m.sh` (#24 by marrold, #25).

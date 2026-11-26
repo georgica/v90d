@@ -53,14 +53,12 @@ static uint32_t arch_next_ms;       /* not before this: a gateway that dies is n
 static int   pw_used;                   /* a PROTOWEB call has been: the gateway stays */
 static int   arch_on[PORTS];            /* what the NAT plan in force gives each port */
 static pid_t natr_pid; static int natr_again;
-/* a WebTV call (srv_webtv) on an archive port is not the archive's: its
- * names must reach WebTV Redialed's, not the gateway */
-static int port_archive(int i) { return (S[i].cfg.service == CFG_SERVICE_ARCHIVE && !srv_webtv(&S[i])) || srv_protoweb(&S[i]); }
-/* WebTV (srv.h, SRV_WEBTV*; webtv.h): a call to one of a box's numbers has
- * 10.0.0.1 sent to WebTV Redialed and the box's fixed name server to the
- * port's, while it lasts (pw_poll, like PROTOWEB's). The address of WebTV
+static int port_archive(int i) { return S[i].cfg.service == CFG_SERVICE_ARCHIVE || srv_protoweb(&S[i]); }
+/* WebTV (srv.h, srv_webtv; webtv.h): a call on a WebTV port has 10.0.0.1
+ * sent to WebTV Redialed and the box's fixed name server to the port's,
+ * while it lasts (pw_poll, like PROTOWEB's). The address of WebTV
  * Redialed is looked up by a child (wt_poll) every 10 minutes while a port
- * can take such calls; a lookup that fails keeps the last good address.
+ * is a WebTV port; a lookup that fails keeps the last good address.
  * -Q gives one instead (no lookup), -Q "" neither. */
 static uint32_t wt_addr;                /* WebTV Redialed, host order; 0 = not known */
 static const char *wt_fixed;            /* -Q */
@@ -535,7 +533,7 @@ static void wt_poll(uint32_t now_ms)
     }
     if (wt_fixed) return;
     for (i = 0; i < n_ports; i++)
-        if (S[i].cfg.svc_webtv && (S[i].cfg.service == CFG_SERVICE_INTERNET || S[i].cfg.service == CFG_SERVICE_ARCHIVE)) can = 1;
+        if (S[i].cfg.service == CFG_SERVICE_WEBTV) can = 1;
     if (!can) return;
     if (wt_started && (int32_t)(now_ms - wt_next_ms) < 0) return;
     wt_started = 1; wt_next_ms = now_ms + WEBTV_EVERY_MS;

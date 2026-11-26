@@ -50,3 +50,12 @@ NAT.
 ## Left to the builder
 
 - Command-line override for the address in tests (no lookup).
+
+## Changed (2026-11-25, owner's word)
+
+After the first build the owner chose approach B instead: WebTV is a
+service per port (`[line] service = webtv`), on which every call is the
+box's whatever it dials; the three numbers end the dialling at once, the
+toll-free one still V.34 at most. `[services] webtv` and the numbers on
+internet and archive ports are gone. The NAT, the lookup and the login
+rules are unchanged.

@@ -43,7 +43,8 @@ typedef struct {
     uint32_t seed;              /* random generator seed (0 is replaced) */
     /* more numbers that connect, asked of the owner: what has been dialled
      * so far gives 2 = it is one of them, 1 = it begins one, 0 = neither.
-     * NULL = none. */
+     * On a port that takes any number (number ""), a 2 ends the dialling
+     * at once instead of after the pause. NULL = none. */
     int    (*more)(void *ctx, const char *dialed);
     void    *more_ctx;
 } tel_cfg;

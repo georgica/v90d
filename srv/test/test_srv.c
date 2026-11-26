@@ -1506,6 +1506,7 @@ static void test_bbs_call(void)
 
     printf("bbs: a terminal program calls\n");
     for (svc = 0; svc < CFG_SERVICE_COUNT; svc++) {
+        if (svc == CFG_SERVICE_WEBTV) continue;     /* every call there is the box's (test_webtv) */
         base_cfg(&c); c.rings = 0; c.service = svc;
         line_init();
         srv_init(&S, &c, 95 + (uint32_t)svc, lan_rx, NULL);
@@ -2055,8 +2056,9 @@ static void test_heavy_guard(void)
     hang_up();
 }
 
-/* the WebTV numbers (srv.h, SRV_WEBTV*): the port's dial-up connection, any
- * PAP login, no encryption or menu; the toll-free number at V.34 at most */
+/* a WebTV port ([line] service = webtv, srv.h srv_webtv): every call is the
+ * box's, whatever it dials: any PAP login, no encryption or menu; its three
+ * numbers answer at once, the toll-free one at V.34 at most */
 static void webtv_call(const cfg_t *c, int *slot, const char *num)
 {
     line_init();
@@ -2072,10 +2074,11 @@ static void test_webtv(void)
     static const uint8_t u[] = "box", pw[] = "secret";
     uint32_t fast = V90M_MOD_V90 | V90M_MOD_V92 | V90M_MOD_X2 | V90M_MOD_K56;
     base_cfg(&c);
+    c.service = CFG_SERVICE_WEBTV;
     c.modulations |= CFG_MOD_V90 | CFG_MOD_V34;
     c.v92 = 1; c.x2 = 1;
-    c.encryption = 1;                   /* MPPE required on the port: not for a WebTV box */
-    c.svc_menu = 1;                     /* the terminal menu on the port: not for a WebTV box */
+    c.encryption = 1;                   /* MPPE asked for: not for a WebTV box */
+    c.svc_menu = 1;                     /* the terminal menu: not for a WebTV box */
 
     webtv_call(&c, &slot, "18009328800");
     CHECK_EQ_I(S.tel.state, TEL_ANSWERED);
@@ -2108,30 +2111,31 @@ static void test_webtv(void)
     CHECK_EQ_I(srv_webtv(&S), 1); CHECK_EQ_I((int)(S.dce.cfg.modulations & fast), 0);
     hang_up();
     /* the TellyScript's number: the port's own modulations */
-    webtv_call(&c, &slot, "4848201337");
-    CHECK_EQ_I(srv_webtv(&S), 1); CHECK((S.dce.cfg.modulations & V90M_MOD_V90) != 0);
-    hang_up();
     webtv_call(&c, &slot, "14848201337");
-    CHECK_EQ_I(srv_webtv(&S), 1);
+    CHECK_EQ_I(srv_webtv(&S), 1); CHECK((S.dce.cfg.modulations & V90M_MOD_V90) != 0);
     hang_up();
     CHECK_EQ_I(slot, 0);
 
-    /* not WebTV: the port's own number, the switch off, a console port */
-    strcpy(c.line_number, "8009328800");
-    webtv_call(&c, NULL, "8009328800");
-    CHECK_EQ_I(S.tel.state, TEL_ANSWERED); CHECK_EQ_I(srv_webtv(&S), 0);
+    /* any other number, the port's own, a board's: still the box's */
+    webtv_call(&c, NULL, "5550000");
+    CHECK_EQ_I(S.tel.state, TEL_ANSWERED); CHECK_EQ_I(srv_webtv(&S), 1);
     hang_up();
-    webtv_call(&c, NULL, "18009328800");      /* the own number with the 1, as dialed_is takes it */
-    CHECK_EQ_I(S.tel.state, TEL_ANSWERED); CHECK_EQ_I(srv_webtv(&S), 0);
+    webtv_call(&c, NULL, "5551234");
+    CHECK_EQ_I(S.tel.state, TEL_ANSWERED); CHECK_EQ_I(srv_webtv(&S), 1);
     hang_up();
-    strcpy(c.line_number, "5551234");
-    c.svc_webtv = 0;
+    webtv_call(&c, NULL, "18002273425");
+    CHECK_EQ_I(S.tel.state, TEL_ANSWERED); CHECK_EQ_I(srv_webtv(&S), 1);
+    CHECK(S.link != SRV_LINK_BBS);
+    hang_up();
+
+    /* not a WebTV port: its numbers are nobody's */
+    c.service = CFG_SERVICE_INTERNET;
     webtv_call(&c, NULL, "18009328800");
     CHECK_EQ_I(srv_webtv(&S), 0);
     hang_up();
-    c.svc_webtv = 1; c.service = CFG_SERVICE_DREAMCAST;
-    webtv_call(&c, NULL, "18009328800");
-    CHECK_EQ_I(srv_webtv(&S), 0);
+    c.service = CFG_SERVICE_ARCHIVE;
+    webtv_call(&c, NULL, "5551234");
+    CHECK_EQ_I(S.tel.state, TEL_ANSWERED); CHECK_EQ_I(srv_webtv(&S), 0);
     hang_up();
 }
 

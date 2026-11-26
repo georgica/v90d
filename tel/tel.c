@@ -211,6 +211,8 @@ static void digit(tel_t *t, char k)
      * (the settings are taken on hook), and the owner's question (cfg.more)
      * may look through a long list */
     t->match = want ? dialed_is(t) : 0;
+    /* any number: one the owner knows (cfg.more) is over at once */
+    if (!want && t->cfg.more && t->cfg.more(t->cfg.more_ctx, t->dialed) == 2) t->match = 2;
     if (t->match == 2) accept_number(t);
 }
 

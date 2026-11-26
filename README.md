@@ -47,6 +47,8 @@ the stock firmware stays in the box, one click away.
     mode (off by default) pairs players who dial the same game through a
     match server and works through home routers. Speaks the DreamPi
     tunnel's protocol, so the other side can be a DreamPi.
+  - **WebTV**: a WebTV or MSN TV box reaches WebTV Redialed, whatever
+    number it dials (below).
 
   The two console services are written from the DreamPi project's
   published behaviour and tested against simulations; neither has been
@@ -133,20 +135,20 @@ goes to the archive gateway (Protoweb's web as it was), as on a port set to
 Archive. The port's own number stays the internet as it is. Netstalgia
 answers the same number the same way.
 
-## 1 800 932 8800: WebTV
+## WebTV
 
-A **WebTV or MSN TV box** plugged into a port dials its own numbers, and the
-box answers them on any port whose service is the internet or the archive
-(with or without the 1): **800 932 8800** (1-800-WEBTV-00), **800 613 8199**
-(the toll-free number a box with no TellyScript dials, offered V.34 at
-most, as such a box hangs up above 33.6K) and **484 820 1337** (the number
-in WebTV Redialed's TellyScript). The call is the port's dial-up
+Set a port's service to **WebTV** (Line page, or `service = webtv`) and plug
+a **WebTV or MSN TV box** into it. Every call on that port is the box's,
+whatever number it dials; its own numbers, **800 932 8800**
+(1-800-WEBTV-00), **800 613 8199** and **484 820 1337** (with or without
+the 1), answer at once, any other after a 3 second pause. On 800 613 8199,
+the toll-free number a box with no TellyScript dials, the call is offered
+V.34 at most, as such a box hangs up above 33.6K. The call is a dial-up
 connection, but the box logs in with its own built-in name and password,
 so any is taken, with no encryption and no terminal menu. For that call
-the box's old service address (10.0.0.1) goes to
-WebTV Redialed (community.webtv.zone, looked up every
-10 minutes) and its fixed name server to the port's. Netstalgia answers the
-same numbers the same way. `[services] webtv = off` turns them off.
+the box's old service address (10.0.0.1) goes to WebTV Redialed
+(community.webtv.zone, looked up every 10 minutes) and its fixed name
+server to the port's. Netstalgia answers the same numbers the same way.
 
 ## 1 303 494 4774: the time
 

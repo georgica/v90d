@@ -380,6 +380,20 @@ static void test_any_number(void)
     CHECK_EQ_I(R.t.ndialed, 20);
     CHECK_EQ_I(R.t.overflow, 1);
     CHECK(wait_state(&R, TEL_ANSWERED, 9000) >= 0);
+    R.hook = 0; run(&R, 600);
+    /* a number the owner knows (tel_cfg.more) ends the dialling at once,
+     * any other still waits its 3 s (a WebTV port: srv.c) */
+    c.more = more_cb; c.more_ctx = NULL;
+    rig_init(&R, &c);
+    R.hook = 1; run(&R, 300);
+    dial(&R, "776");
+    CHECK_EQ_I(R.t.state, TEL_CONNECTING);
+    R.hook = 0; run(&R, 600);
+    R.hook = 1; run(&R, 300);
+    dial(&R, "77");
+    CHECK_EQ_I(R.t.state, TEL_DIALING);
+    CHECK(wait_state(&R, TEL_ANSWERED, 6000) >= 0);
+    CHECK(strcmp(R.t.dialed, "77") == 0);
 }
 
 static void test_pulse(void)
