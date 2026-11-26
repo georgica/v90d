@@ -727,7 +727,7 @@ int main(int argc, char **argv)
             /* the address list of the console service comes from a command;
              * here one that writes two lines, one of them no rule */
             execl(argv[1], "v90d", "-c", conf, "-l", "fd:3", "-l", "fd:4", "-i", "lo", "-t", "ppp0", "-L", ledp,
-                  "-G", dnsh, "-D", "printf '203.0.113.9 198.51.100.7 9500 udp\\nnonsense\\n'", (char *)NULL);
+                  "-G", dnsh, "-D", "printf '203.0.113.9 198.51.100.7 9500 udp\\nnonsense\\n'", "-Q", "192.0.2.7", (char *)NULL);
             _exit(127);
         }
         close(sv[1]); close(sv2[1]);
@@ -748,6 +748,15 @@ int main(int argc, char **argv)
         snprintf(dclog, sizeof dclog, "%s/ns_dc.log", argv[2]);
         CHECK(file_has(dclog, "console service: address list with 1 rules"));
         CHECK(file_has(dclog, "console service on port 2: 1 address rules, 24 port ranges opened from lo"));
+        /* and the Dreamcast's old service address, 10.0.1.129, to WebTV Redialed */
+        {
+            static char rs[300], rcmd[700];
+            snprintf(rs, sizeof rs, "%s/ns_dc.rules", argv[2]);
+            snprintf(rcmd, sizeof rcmd, "nft list ruleset > %s 2>&1 || iptables-save -t nat > %s 2>&1", rs, rs);
+            if (system(rcmd)) { }
+            CHECK(file_has(rs, "10.0.1.129")); CHECK(file_has(rs, "192.0.2.7"));
+            CHECK(!file_has(rs, "157.57.221.51"));
+        }
         /* port 1's number is a wrong number on port 2 */
         hook = 1; run_ms(500); dial("5551234"); run_ms(4000);
         c_rx_pw = 0; run_ms(3000);
@@ -1812,6 +1821,7 @@ int main(int argc, char **argv)
         CHECK(file_has(lanlog, "port 1: a call to WebTV: 10.0.0.1 goes to WebTV Redialed (192.0.2.7)"));
         for (i = 0; i < 30; i++) { if (system(cmd)) { } if (file_has(ruleset, "192.0.2.7")) break; run_ms(100); usleep(20000); }
         CHECK(file_has(ruleset, "192.0.2.7")); CHECK(file_has(ruleset, "157.57.221.51"));
+        CHECK(file_has(ruleset, "10.0.1.129")); CHECK(file_has(ruleset, "10.0.128.1"));
         hang_up();
         /* (b) the call over: no WebTV rules */
         for (i = 0; i < 30; i++) { if (system(cmd)) { } if (!file_has(ruleset, "192.0.2.7")) break; run_ms(100); usleep(20000); }

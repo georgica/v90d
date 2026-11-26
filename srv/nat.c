@@ -398,16 +398,19 @@ static int ipt_apply(const nat_plan *p)
         if (ipt(npre) || ipt(hpre)) { ipt_unhook(); errno = EIO; return -1; }
         for (i = 0; i < 2; i++) if (p->peer[i] && p->webtv[i]) {
             static const char *const pr[] = { "tcp", "udp" };
+            static const uint32_t wa[] = NAT_WEBTV_ADDRS;
+            int k, box = p->webtv[i] == NAT_WEBTV_BOX;
             for (j = 0; j < 2; j++) {
                 const char *r[] = { "-A", IPT_PRE, "-s", ip_str(p->peer[i], a), "-d", ip_str(NAT_WEBTV_DNS, b), "-p", pr[j],
                                     "--dport", "53", "-j", "DNAT", "--to-destination", ip_str(p->webtv_dns, c), NULL };
-                if (p->webtv_dns) bad |= ipt(r);
+                if (box && p->webtv_dns) bad |= ipt(r);
             }
-            for (j = 0; j < 2; j++) {
-                const char *r[] = { "-A", IPT_PRE, "-s", ip_str(p->peer[i], a), "-d", ip_str(NAT_WEBTV_ADDR, b), "-p", pr[j],
-                                    "-j", "DNAT", "--to-destination", ip_str(p->webtv_to, c), NULL };
-                if (p->webtv_to) bad |= ipt(r);
-            }
+            for (k = box ? 0 : NAT_WEBTV_N - 1; k < NAT_WEBTV_N; k++)
+                for (j = 0; j < 2; j++) {
+                    const char *r[] = { "-A", IPT_PRE, "-s", ip_str(p->peer[i], a), "-d", ip_str(wa[k], b), "-p", pr[j],
+                                        "-j", "DNAT", "--to-destination", ip_str(p->webtv_to, c), NULL };
+                    if (p->webtv_to) bad |= ipt(r);
+                }
         }
         for (i = 0; i < 2; i++) if (p->peer[i] && p->archive[i]) {
             static const struct { const char *proto, *port; int which; } R[] = {
@@ -509,13 +512,15 @@ static int nft_apply(const nat_plan *p)
         attr_str(&m, NFTA_CHAIN_TYPE, "nat");
         msg_end(&m, at);
         for (i = 0; i < 2; i++) if (p->peer[i] && p->webtv[i]) {
-            if (p->webtv_dns) {
+            static const uint32_t wa[] = NAT_WEBTV_ADDRS;
+            int k, box = p->webtv[i] == NAT_WEBTV_BOX;
+            if (box && p->webtv_dns) {
                 dnat_msg(&m, p->peer[i], NULL, NAT_WEBTV_DNS, 17, 53, 53, p->webtv_dns);
                 dnat_msg(&m, p->peer[i], NULL, NAT_WEBTV_DNS, 6, 53, 53, p->webtv_dns);
             }
-            if (p->webtv_to) {
-                dnat_msg(&m, p->peer[i], NULL, NAT_WEBTV_ADDR, 6, 0, 0, p->webtv_to);
-                dnat_msg(&m, p->peer[i], NULL, NAT_WEBTV_ADDR, 17, 0, 0, p->webtv_to);
+            for (k = box ? 0 : NAT_WEBTV_N - 1; p->webtv_to && k < NAT_WEBTV_N; k++) {
+                dnat_msg(&m, p->peer[i], NULL, wa[k], 6, 0, 0, p->webtv_to);
+                dnat_msg(&m, p->peer[i], NULL, wa[k], 17, 0, 0, p->webtv_to);
             }
         }
         for (i = 0; i < 2; i++) if (p->peer[i] && p->archive[i]) {

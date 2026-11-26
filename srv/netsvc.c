@@ -58,7 +58,9 @@ static int port_archive(int i) { return S[i].cfg.service == CFG_SERVICE_ARCHIVE 
  * sent to WebTV Redialed and the box's fixed name server to the port's,
  * while it lasts (pw_poll, like PROTOWEB's). The address of WebTV
  * Redialed is looked up by a child (wt_poll) every 10 minutes while a port
- * is a WebTV port; a lookup that fails keeps the last good address.
+ * is a WebTV or a Dreamcast port (a Dreamcast's 10.0.1.129 goes there too,
+ * for as long as the port has that service); a lookup that fails keeps the
+ * last good address.
  * -Q gives one instead (no lookup), -Q "" neither. */
 static uint32_t wt_addr;                /* WebTV Redialed, host order; 0 = not known */
 static const char *wt_fixed;            /* -Q */
@@ -468,9 +470,15 @@ static int build_plan(nat_plan *p)
     for (i = 0; i < n_ports; i++) p->archive[i] = port_archive(i);
     for (i = 0; i < n_ports; i++) p->console[i] = S[i].cfg.service == CFG_SERVICE_DREAMCAST;
     for (i = 0; i < n_ports; i++) p->lan[i] = lan_wanted(i) && la[i].ip;
-    for (i = n_ports - 1; i >= 0; i--) if ((p->webtv[i] = srv_webtv(&S[i])) != 0) {
-        /* the box's names to the server the port gives its callers */
-        p->webtv_dns = S[i].cfg.dns_relay ? S[i].cfg.ppp_local : S[i].cfg.dns[0];
+    for (i = n_ports - 1; i >= 0; i--) {
+        /* a WebTV box: its names to the server the port gives its callers;
+         * a Dreamcast port: its one address of the old network (nat.h) */
+        if (srv_webtv(&S[i])) {
+            p->webtv[i] = NAT_WEBTV_BOX;
+            p->webtv_dns = S[i].cfg.dns_relay ? S[i].cfg.ppp_local : S[i].cfg.dns[0];
+        } else if (S[i].cfg.service == CFG_SERVICE_DREAMCAST) {
+            p->webtv[i] = NAT_WEBTV_DC;
+        }
     }
     p->webtv_to = wt_addr;
     p->rewrite = dc_rw; p->n_rewrite = dc_n;
@@ -524,6 +532,7 @@ static void wt_poll(uint32_t now_ms)
                 wt_addr = got;
                 logf_(CFG_LOG_INFO, "WebTV Redialed (%s) is at %s", WEBTV_HOST, inet_ntop(AF_INET, &in, a, sizeof a) ? a : "?");
                 if (any_webtv()) nat_refresh();
+                if (any_console()) net_dirty = 1;   /* the Dreamcast's 10.0.1.129: when the line is idle */
             }
         } else if (!wt_failed++) {
             logf_(CFG_LOG_WARN, "WebTV Redialed (%s) could not be looked up; %s", WEBTV_HOST,
@@ -533,7 +542,7 @@ static void wt_poll(uint32_t now_ms)
     }
     if (wt_fixed) return;
     for (i = 0; i < n_ports; i++)
-        if (S[i].cfg.service == CFG_SERVICE_WEBTV) can = 1;
+        if (S[i].cfg.service == CFG_SERVICE_WEBTV || S[i].cfg.service == CFG_SERVICE_DREAMCAST) can = 1;
     if (!can) return;
     if (wt_started && (int32_t)(now_ms - wt_next_ms) < 0) return;
     wt_started = 1; wt_next_ms = now_ms + WEBTV_EVERY_MS;
@@ -544,14 +553,18 @@ static void wt_poll(uint32_t now_ms)
         wt_pid = fork();
         if (wt_pid == 0) {
             struct addrinfo hints, *res = NULL; uint32_t x = 0; uint8_t b[4];
+            /* the pipe becomes its standard output and every other
+             * descriptor is closed: this child runs no program, so nothing
+             * else would close the daemon's TUN devices and sockets, and a
+             * TUN device still open here cannot be set up again (EBUSY) */
             (void)fcntl(pp[1], F_SETFL, 0);
-            child_plain(-1, -1, 0);
+            child_plain(-1, pp[1], 1);
             memset(&hints, 0, sizeof hints);
             hints.ai_family = AF_INET; hints.ai_socktype = SOCK_STREAM;
             if (getaddrinfo(WEBTV_HOST, NULL, &hints, &res) == 0) { x = webtv_pick(res); freeaddrinfo(res); }
             if (!x) _exit(1);
             b[0] = (uint8_t)(x >> 24); b[1] = (uint8_t)(x >> 16); b[2] = (uint8_t)(x >> 8); b[3] = (uint8_t)x;
-            _exit(write(pp[1], b, 4) == 4 ? 0 : 1);
+            _exit(write(1, b, 4) == 4 ? 0 : 1);
         }
         close(pp[1]);
         if (wt_pid < 0) { wt_pid = 0; close(pp[0]); return; }

@@ -199,6 +199,25 @@ int main(void)
     CHECK(through(ppp_fd, wan_fd, pkt, n, &s, &d, &dp)); CHECK(d == NAT_WEBTV_DNS);
     n = mkpkt(pkt, 6, CALLER, 4045, IP4(203, 0, 113, 50), 80);
     CHECK(through(ppp_fd, wan_fd, pkt, n, &s, &d, &dp)); CHECK(d == IP4(203, 0, 113, 50));
+    /* the box's other fixed addresses: its fallback, the daily builds' and
+     * 10.0.1.129 (the box's as well as the Dreamcast's), all at WebTV Redialed */
+    n = mkpkt(pkt, 6, CALLER, 4060, IP4(10, 0, 0, 2), 1615);
+    CHECK(through(ppp_fd, wan_fd, pkt, n, &s, &d, &dp)); CHECK(d == IP4(198, 51, 100, 20));
+    n = mkpkt(pkt, 6, CALLER, 4061, IP4(10, 0, 128, 1), 1615);
+    CHECK(through(ppp_fd, wan_fd, pkt, n, &s, &d, &dp)); CHECK(d == IP4(198, 51, 100, 20));
+    n = mkpkt(pkt, 17, CALLER, 4062, IP4(10, 0, 1, 129), 1615);
+    CHECK(through(ppp_fd, wan_fd, pkt, n, &s, &d, &dp)); CHECK(d == IP4(198, 51, 100, 20));
+    /* a Dreamcast port (NAT_WEBTV_DC): 10.0.1.129 alone, its names untouched */
+    p.webtv[0] = NAT_WEBTV_DC;
+    CHECK_EQ_I(nat_apply(&p), 0);
+    n = mkpkt(pkt, 6, CALLER, 4063, IP4(10, 0, 1, 129), 80);
+    CHECK(through(ppp_fd, wan_fd, pkt, n, &s, &d, &dp)); CHECK(d == IP4(198, 51, 100, 20)); CHECK_EQ_I((int)dp, 80);
+    n = mkpkt(pkt, 6, CALLER, 4064, NAT_WEBTV_ADDR, 1615);
+    CHECK(through(ppp_fd, wan_fd, pkt, n, &s, &d, &dp)); CHECK(d == NAT_WEBTV_ADDR);
+    n = mkpkt(pkt, 17, CALLER, 4065, NAT_WEBTV_DNS, 53);
+    CHECK(through(ppp_fd, wan_fd, pkt, n, &s, &d, &dp)); CHECK(d == NAT_WEBTV_DNS);
+    p.webtv[0] = NAT_WEBTV_BOX;
+    CHECK_EQ_I(nat_apply(&p), 0);
     /* no address for WebTV Redialed yet: the names only */
     p.webtv_to = 0;
     CHECK_EQ_I(nat_apply(&p), 0);

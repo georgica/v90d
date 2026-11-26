@@ -383,10 +383,13 @@ password taken through `pap_cb` (a box logs in with its own built-in
 details), no MPPE and no terminal menu; on `SRV_WEBTV_TF` no V.90, V.92, x2
 or K56flex (and so no heavy slot). `srv_webtv()` says it is one.
 `pw_poll` gives such a port two rewrites in the NAT plan (`nat.h`,
-`webtv[]`): 10.0.0.1, any protocol and port, to WebTV Redialed, and DNS to
-157.57.221.51 to the name server the port gives its callers. WebTV
+`webtv[]`, `NAT_WEBTV_BOX`): 10.0.0.1, 10.0.0.2, 10.0.128.1 and
+10.0.1.129, any protocol and port, to WebTV Redialed, and DNS to
+157.57.221.51 to the name server the port gives its callers. A Dreamcast
+port (`NAT_WEBTV_DC`) has 10.0.1.129 sent there for as long as it has that
+service, its names untouched; the community address list does not carry it. WebTV
 Redialed's address is looked up from community.webtv.zone by a child
-(`wt_poll`), every 10 minutes while a port is a WebTV port; only a public
+(`wt_poll`), every 10 minutes while a port is a WebTV or Dreamcast port; only a public
 IPv4 answer is taken (`webtv_pick`), and a failed lookup keeps the last
 good address. `-Q` gives one instead. Netstalgia's own dial-in answers the
 same numbers the same way.

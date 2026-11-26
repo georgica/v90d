@@ -3021,3 +3021,28 @@ Everything merged since 0.11.0 (#23 to #29):
 - **The libv90modem fetch** is its own script, `fw/setup-libv90m.sh` (#24 by marrold, #25).
 
 Proof for this release: the host suites and the namespace suite (a whole WebTV call through the daemon); WebTV through Netstalgia's dial-in with a real box on 2026-11-25. Not yet tried: a real WebTV box on a v90d port.
+
+## WebTV's other addresses (2026-11-25)
+
+On v0.12.0, 10.0.1.129 went nowhere: a WebTV port sent only 10.0.0.1 to
+WebTV Redialed, and the Dreamcast port's community list has no entry for
+it. Now a WebTV call sends 10.0.0.1, 10.0.0.2 (the boxes' fallback),
+10.0.128.1 (the daily builds') and 10.0.1.129 there, and a Dreamcast port
+sends 10.0.1.129 (its names untouched); the lookup of WebTV Redialed runs
+while a port is either. Tests: ns_nat (every address, the Dreamcast port's
+one, both back ends' rules from one plan), ns_call (the rules of a WebTV
+call and of a Dreamcast port, read back from the kernel).
+
+Found on the way: the lookup's child process runs no program, so it kept
+every descriptor of the daemon open, the TUN devices included; while it
+ran, a port's ppp0 could not be set up again ("Device or resource busy",
+callers getting PPP with no network until the next try). It now closes
+them all but its pipe. On 0.12.0 this could hit a WebTV port; with the
+lookup also running for Dreamcast ports, ns_call's console lease test
+caught it.
+
+## 0.12.1: WebTV's other addresses (2026-11-25)
+
+- 10.0.0.2, 10.0.128.1 and 10.0.1.129 to WebTV Redialed for WebTV calls,
+  10.0.1.129 for Dreamcast ports (above).
+- The lookup's child no longer holds the daemon's TUN devices.
