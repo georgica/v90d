@@ -1995,6 +1995,36 @@ static void test_lin_scale(void)
 /* the heavy-call slot: a call reserves it when x2 or K56flex is offered and
  * gives it back at the end; while another line holds it, this line offers
  * neither (srv.c). x2 and K56flex share the one slot. */
+/* the K56flex line of a call's log (srv_k56_text): what our CL offered and
+ * what the client chose, from libv90modem's v90m_k56 */
+static void test_k56_text(void)
+{
+    v90m_k56 k; char b[160];
+    memset(&k, 0, sizeof k);
+    CHECK(srv_k56_text(&k, b, sizeof b) == 0 && b[0] == 0);         /* no CL went out: nothing to say */
+    k.offered = 3;
+    CHECK(srv_k56_text(&k, b, sizeof b) > 0);
+    CHECK(strcmp(b, "K56flex: we offered versions 1 and 2; the caller did not choose K56flex") == 0);
+    k.exchanged = 1; k.chosen = 2; k.agreed = 1;
+    srv_k56_text(&k, b, sizeof b);
+    CHECK(strcmp(b, "K56flex: we offered versions 1 and 2; the caller chose version 2, agreed") == 0);
+    k.chosen = 1; k.agreed = 0; k.declined = 1;
+    srv_k56_text(&k, b, sizeof b);
+    CHECK(strcmp(b, "K56flex: we offered versions 1 and 2; the caller chose version 1, declined: the call went on without K56flex") == 0);
+    k.offered = 2;                                                  /* V90M_OPT_K56_V2_ONLY */
+    srv_k56_text(&k, b, sizeof b);
+    CHECK(strncmp(b, "K56flex: we offered version 2; ", 31) == 0);
+    k.offered = 1;
+    srv_k56_text(&k, b, sizeof b);
+    CHECK(strncmp(b, "K56flex: we offered version 1; ", 31) == 0);
+    k.offered = 3; k.chosen = 4; k.declined = 0;                    /* a version not yet defined, neither answer */
+    srv_k56_text(&k, b, sizeof b);
+    CHECK(strcmp(b, "K56flex: we offered versions 1 and 2; the caller chose version 4") == 0);
+    srv_k56_text(&k, b, 12);                                        /* cut short, still a string */
+    CHECK(strlen(b) == 11);
+    CHECK(srv_k56_text(NULL, b, sizeof b) == 0 && b[0] == 0);
+}
+
 static void test_heavy_guard(void)
 {
     cfg_t c; int slot = 0;
@@ -2245,6 +2275,7 @@ int main(void)
     test_v34_call();
     test_v32bis_call();
     test_heavy_guard();
+    test_k56_text();
     /* the same server on a line with linear receive (srv_tick_lin): whole
      * calls of each kind, with the same expectations */
     printf("  with linear receive:\n");

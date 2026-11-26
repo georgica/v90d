@@ -1,4 +1,5 @@
 /* The dial-up server without its operating system: see srv.h. */
+#include <stdio.h>
 #include <string.h>
 #include "srv.h"
 
@@ -79,6 +80,21 @@ void srv_set_entropy(srv_t *s, const uint8_t *b, size_t n)
 }
 int  srv_protoweb(const srv_t *s) { return s->in_call && s->protoweb; }
 int  srv_webtv(const srv_t *s) { return s->in_call && s->webtv; }
+
+size_t srv_k56_text(const v90m_k56 *k, char *buf, size_t n)
+{
+    static const char *const vers[4] = { "no versions", "version 1", "version 2", "versions 1 and 2" };
+    int r;
+    if (!buf || !n) return 0;
+    buf[0] = 0;
+    if (!k || (!k->offered && !k->exchanged)) return 0;
+    if (!k->exchanged)
+        r = snprintf(buf, n, "K56flex: we offered %s; the caller did not choose K56flex", vers[k->offered & 3]);
+    else
+        r = snprintf(buf, n, "K56flex: we offered %s; the caller chose version %d%s", vers[k->offered & 3], k->chosen,
+                     k->declined ? ", declined: the call went on without K56flex" : k->agreed ? ", agreed" : "");
+    return r < 0 ? 0 : (size_t)r < n ? (size_t)r : n - 1;
+}
 static const char *const webtv_numbers[] = { SRV_WEBTV, SRV_WEBTV_TF, SRV_WEBTV_56 };
 /* a port for a WebTV box: every call on it is the box's */
 static int webtv_here(const srv_t *s) { return s->cfg.service == CFG_SERVICE_WEBTV; }
