@@ -133,6 +133,21 @@ goes to the archive gateway (Protoweb's web as it was), as on a port set to
 Archive. The port's own number stays the internet as it is. Netstalgia
 answers the same number the same way.
 
+## 1 800 932 8800: WebTV
+
+A **WebTV or MSN TV box** plugged into a port dials its own numbers, and the
+box answers them on any port whose service is the internet or the archive
+(with or without the 1): **800 932 8800** (1-800-WEBTV-00), **800 613 8199**
+(the toll-free number a box with no TellyScript dials, offered V.34 at
+most, as such a box hangs up above 33.6K) and **484 820 1337** (the number
+in WebTV Redialed's TellyScript). The call is the port's dial-up
+connection, but the box logs in with its own built-in name and password,
+so any is taken, with no encryption and no terminal menu. For that call
+the box's old service address (10.0.0.1) goes to
+WebTV Redialed (community.webtv.zone, looked up every
+10 minutes) and its fixed name server to the port's. Netstalgia answers the
+same numbers the same way. `[services] webtv = off` turns them off.
+
 ## 1 303 494 4774: the time
 
 **303 494 4774** (with or without the 1), the number of NIST's Automated

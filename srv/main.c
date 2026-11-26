@@ -521,7 +521,7 @@ int main(int argc, char **argv)
     /* tests: the loop's millisecond clock may start anywhere, so that its
      * wrap at 2^32 can be crossed in a test run */
     { const char *c0 = getenv("V90D_CLOCK0"); if (c0) now_ms = (uint32_t)strtoul(c0, NULL, 0); }
-    while ((opt = getopt(argc, argv, "c:l:d:i:t:vpow:W:L:A:N:R:P:D:G:E:O:V:M:S:XB:b:J:T:u:U:Y:F:f:K:z:Z:")) != -1) {
+    while ((opt = getopt(argc, argv, "c:l:d:i:t:vpow:W:L:A:N:R:P:D:G:E:O:V:M:S:XB:b:J:T:u:U:Y:F:f:K:z:Z:Q:")) != -1) {
         switch (opt) {
         case 'c': cfg_path = optarg; break;
         case 'l': if (n_ports >= PORTS) usage(); line_spec[n_ports++] = optarg; break;
@@ -565,6 +565,7 @@ int main(int argc, char **argv)
         case 'V': netsvc_set_vpnpath(optarg); break;  /* where the VPN profile is kept */
         case 'E': netsvc_set_lease(optarg); break;    /* prints the console's address on the network (instead of udhcpc) */
         case 'G': netsvc_set_dcnow(optarg); break;    /* run instead of wget for the Dreamcast Now report: PROG URL BODY */
+        case 'Q': netsvc_set_webtv(optarg); break;     /* WebTV Redialed's address, no lookup; "" = none */
         case 'D': netsvc_set_dclist(optarg); break;   /* the command that fetches the console address list; "" = none */
         case 'A': netsvc_set_arch(optarg); break;     /* the archive gateway program; "" = do not start one */
         case 'R': rx_formats = optarg; if (strlen(optarg) > PORTS || strspn(optarg, "lc") != strlen(optarg)) usage(); break;

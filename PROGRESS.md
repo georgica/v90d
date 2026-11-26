@@ -2983,3 +2983,22 @@ Everything merged since 0.10.0 (#8, #10 to #20):
 - **libv90modem 0.6.1** (#20): V.90 9.2.1.2.1 recovery (a caller restarting at INFO0a now connects) and the shared upstream receiver.
 
 Proof on hardware for this release: the OBi200 on 0.6.1 answered a USR Sportster (V.34 31200) with PPP, ping and HTTP. With no IPv4 route out and only IPv6 to a NAT64, the same call reached 1.0.0.1 through the translator. The HT801 V1.1A heard a router advertisement and brought its translator up.
+
+## WebTV, built in (2026-11-25)
+
+A WebTV / MSN TV box reached WebTV Redialed through Netstalgia's dial-in
+first (2026-11-25); the box now does the same on its own, the way PROTOWEB
+is done (design and plan in `docs/superpowers/`).
+
+- `[services] webtv` (on by default, on the Services page).
+- The numbers 800-932-8800, 800-613-8199 (V.34 at most) and 484-820-1337,
+  with or without the 1, on internet and archive ports: PAP with any login,
+  no encryption, no terminal menu; calls show as "WebTV (PPP)".
+- For the call: 10.0.0.1 to WebTV Redialed and the box's fixed name server
+  (157.57.221.51) to the port's, in both NAT back ends.
+- WebTV Redialed's address looked up from community.webtv.zone every
+  10 minutes; public IPv4 only; a failed lookup keeps the last one.
+- Tests: cfg (the setting), test_srv (numbers, login, modulations, the
+  cases that are not WebTV), test_webtv (the address picked), ns_nat (the
+  rewrites, both ports), ns_call (a whole call through the daemon).
+- Not yet tried with a real box on a v90d port.

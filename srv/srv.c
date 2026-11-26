@@ -78,6 +78,19 @@ void srv_set_entropy(srv_t *s, const uint8_t *b, size_t n)
     memcpy(s->entropy, b, n); s->entropy_n = n;
 }
 int  srv_protoweb(const srv_t *s) { return s->in_call && s->protoweb; }
+int  srv_webtv(const srv_t *s) { return s->in_call && s->webtv; }
+static const char *const webtv_numbers[] = { SRV_WEBTV, SRV_WEBTV_TF, SRV_WEBTV_56 };
+/* the WebTV numbers answer on this port */
+static int webtv_here(const srv_t *s)
+{
+    return s->cfg.svc_webtv && (s->cfg.service == CFG_SERVICE_INTERNET || s->cfg.service == CFG_SERVICE_ARCHIVE);
+}
+/* a WebTV box logs in with its own built-in name and password: any is taken */
+static int webtv_pap(void *ctx, const uint8_t *user, size_t ulen, const uint8_t *pass, size_t plen)
+{
+    (void)ctx; (void)user; (void)ulen; (void)pass; (void)plen;
+    return 1;
+}
 /* the PROTOWEB number answers on this port */
 static int protoweb_here(const srv_t *s)
 {
@@ -96,6 +109,8 @@ static int tel_more(void *ctx, const char *dialed)
         if ((m = cfg_svc_number_begins(c->services[i].number, dialed)) > best) best = m;
     if (best < 2 && c->svc_netstalgia && s->svc_known && (m = s->svc_known(dialed)) > best) best = m;
     if (best < 2 && protoweb_here(s) && (m = cfg_svc_number_begins(SRV_PROTOWEB, dialed)) > best) best = m;
+    for (i = 0; i < 3 && best < 2 && webtv_here(s); i++)
+        if ((m = cfg_svc_number_begins(webtv_numbers[i], dialed)) > best) best = m;
     if (best < 2 && acts_here(s) && (m = cfg_svc_number_begins(SRV_ACTS, dialed)) > best) best = m;
     return best;
 }
@@ -247,22 +262,34 @@ int srv_send_ip(srv_t *s, const uint8_t *pkt, size_t len)
     return r;
 }
 
+/* the port's own number as the telephony layer takes it (tel.c, dialed_is):
+ * a ten-digit one with the long distance 1 in front as well */
+static int own_number(const cfg_t *c, const char *dialed)
+{
+    if (strcmp(dialed, c->line_number) == 0) return 1;
+    return strlen(c->line_number) == 10 && c->line_number[0] != '1' && dialed[0] == '1' && strcmp(dialed + 1, c->line_number) == 0;
+}
+
 static void call_start(srv_t *s)
 {
     dce_cfg_t d;
     const cfg_t *c = &s->cfg;
-    int bbs, svc, acts, enc; char board[BBS_NUMBER_LEN + 1];
+    int bbs, svc, acts, enc, webtv_tf = 0, i; char board[BBS_NUMBER_LEN + 1];
     s->link = SATURN_NONE;
     s->call_start = s->clock; s->call_s = 0; s->ppp_up_once = 0; s->ppp_from_s = 0;
     /* a terminal program for a bulletin board (bbs.h), unless the number is the port's own */
-    bbs = strcmp(s->tel.dialed, c->line_number) != 0 && bbs_number(s->tel.dialed, board) != BBS_NUM_NONE;
+    bbs = !own_number(c, s->tel.dialed) && bbs_number(s->tel.dialed, board) != BBS_NUM_NONE;
     /* a number that connects straight to a service ([services]), the same way */
-    svc = !bbs && strcmp(s->tel.dialed, c->line_number) != 0 && srv_svc_number(s, s->tel.dialed);
+    svc = !bbs && !own_number(c, s->tel.dialed) && srv_svc_number(s, s->tel.dialed);
     /* the PROTOWEB number: the port's dial-up connection, with the archive */
-    s->protoweb = !bbs && !svc && protoweb_here(s) && strcmp(s->tel.dialed, c->line_number) != 0
+    s->protoweb = !bbs && !svc && protoweb_here(s) && !own_number(c, s->tel.dialed)
                   && cfg_svc_number_match(SRV_PROTOWEB, s->tel.dialed);
+    /* a WebTV box's numbers: the port's dial-up connection, for the box */
+    s->webtv = 0;
+    for (i = 0; i < 3 && !bbs && !svc && !s->protoweb && webtv_here(s) && !own_number(c, s->tel.dialed); i++)
+        if (cfg_svc_number_match(webtv_numbers[i], s->tel.dialed)) { s->webtv = 1; webtv_tf = i == 1; }
     /* the time service (SRV_ACTS): ACTS's own terms, octets at the line's rate */
-    acts = !bbs && !svc && !s->protoweb && strcmp(s->tel.dialed, c->line_number) != 0 && acts_here(s)
+    acts = !bbs && !svc && !s->protoweb && !s->webtv && !own_number(c, s->tel.dialed) && acts_here(s)
            && cfg_svc_number_match(SRV_ACTS, s->tel.dialed);
     if (bbs) s->link = SRV_LINK_BBS;
     else if (svc) s->link = SRV_LINK_SVC;
@@ -307,7 +334,7 @@ static void call_start(srv_t *s)
      * originate strip below) only when we really will offer one, so the slot
      * never leaks. */
     if ((c->x2 || c->k56) && (c->modulations & CFG_MOD_V34) && !s->originate
-        && full_options(c, bbs) && !acts
+        && full_options(c, bbs) && !acts && !webtv_tf
         && (!s->heavy_slot || *s->heavy_slot == 0)) {
         if (c->x2)  d.modulations |= V90M_MOD_X2;
         if (c->k56) d.modulations |= V90M_MOD_K56;
@@ -323,6 +350,7 @@ static void call_start(srv_t *s)
         d.originate = 1;
         d.modulations &= V90M_MOD_V34 | V90M_MOD_V32BIS | V90M_MOD_V22 | V90M_MOD_V21;
     }
+    if (webtv_tf) d.modulations &= ~(V90M_MOD_V90 | V90M_MOD_V92 | V90M_MOD_X2 | V90M_MOD_K56);
     if (!c->v42) { d.v42.detect = 1; d.v42.fallback = 1; d.v42.t400_ms = 1; }  /* straight to start-stop */
     if (acts) {
         /* ACTS's terms: up to 9600 bit/s and on (V.32bis here; no V.34 or
@@ -341,8 +369,13 @@ static void call_start(srv_t *s)
     /* [ppp] encryption, decided once so the authentication, the encryption
      * and the compression below agree: never on a console port, which can
      * do neither MS-CHAPv2 nor MPPE and keeps the port's own login */
-    enc = c->encryption && full_options(c, bbs);
-    if (enc)
+    enc = c->encryption && full_options(c, bbs) && !s->webtv;
+    if (s->webtv) {
+        /* the box's own PAP login, whoever it says it is; some boxes give
+         * up on a link that asks for none */
+        d.ppp.auth = PPP_AUTH_PAP;
+        d.ppp.pap_cb = webtv_pap;
+    } else if (enc)
         /* MPPE needs the MS-CHAPv2 keys and must not fall back: force the
          * authentication regardless of the [ppp] auth setting */
         d.ppp.auth = PPP_AUTH_MSCHAPV2;
@@ -381,7 +414,7 @@ static void call_start(srv_t *s)
      * octets with V.42 kept; a Dial-Up Networking caller's first PPP frame
      * takes it to PPP at once (dce.h, ppp_detect), anyone else gets the
      * menu, whose Start PPP does the same later (srv_start_ppp). */
-    if (c->svc_menu && !bbs && !acts && !s->protoweb && !s->originate && !for_console(c) && !for_link(c)) {
+    if (c->svc_menu && !bbs && !acts && !s->protoweb && !s->webtv && !s->originate && !for_console(c) && !for_link(c)) {
         s->link = SRV_LINK_MENU;
         d.raw_rx = raw_from_caller; d.raw_ec = 1; d.ppp_detect = 1;
     }
