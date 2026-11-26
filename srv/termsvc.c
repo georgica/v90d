@@ -136,7 +136,7 @@ const char *termsvc_where(int k)
     switch (S[k].cfg.service) {
     case CFG_SERVICE_ARCHIVE: return "the archive (PPP)";
     case CFG_SERVICE_DREAMCAST: return "a Dreamcast";
-    default: return S[k].protoweb ? "Protoweb (PPP)" : "Internet (PPP)";
+    default: return S[k].protoweb ? "Protoweb (PPP)" : S[k].webtv ? "WebTV (PPP)" : "Internet (PPP)";
     }
 }
 

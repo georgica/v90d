@@ -2055,6 +2055,83 @@ static void test_heavy_guard(void)
     hang_up();
 }
 
+/* the WebTV numbers (srv.h, SRV_WEBTV*): the port's dial-up connection, any
+ * PAP login, no encryption or menu; the toll-free number at V.34 at most */
+static void webtv_call(const cfg_t *c, int *slot, const char *num)
+{
+    line_init();
+    srv_init(&S, c, 31, lan_rx, NULL);
+    if (slot) srv_set_heavy_slot(&S, slot);
+    srv_set_clock(&S, 1000000000u);
+    run_ms(300);
+    place_call(num, 9000);
+}
+static void test_webtv(void)
+{
+    cfg_t c; int slot = 0;
+    static const uint8_t u[] = "box", pw[] = "secret";
+    uint32_t fast = V90M_MOD_V90 | V90M_MOD_V92 | V90M_MOD_X2 | V90M_MOD_K56;
+    base_cfg(&c);
+    c.modulations |= CFG_MOD_V90 | CFG_MOD_V34;
+    c.v92 = 1; c.x2 = 1;
+    c.encryption = 1;                   /* MPPE required on the port: not for a WebTV box */
+    c.svc_menu = 1;                     /* the terminal menu on the port: not for a WebTV box */
+
+    webtv_call(&c, &slot, "18009328800");
+    CHECK_EQ_I(S.tel.state, TEL_ANSWERED);
+    CHECK_EQ_I(srv_webtv(&S), 1);
+    CHECK_EQ_I((int)S.dce.cfg.ppp.auth, PPP_AUTH_PAP);
+    CHECK_EQ_I(S.dce.cfg.ppp.encrypt, 0);
+    CHECK(S.dce.cfg.ppp.pap_cb != NULL && S.dce.cfg.ppp.pap_cb(S.dce.cfg.ppp.ctx, u, 3, pw, 6));
+    CHECK(S.link != SRV_LINK_MENU);
+    CHECK((S.dce.cfg.modulations & V90M_MOD_V90) != 0);
+    /* a box's own login, nobody's on this port: connected */
+    c.encryption = 0;
+    hang_up();
+    webtv_call(&c, &slot, "8009328800");
+    CHECK_EQ_I(srv_webtv(&S), 1);
+    start_modem(0, "box", "secret");
+    CHECK(wait_ip(20000) > 0);
+    hang_up();
+    CHECK_EQ_I(srv_webtv(&S), 0);
+    CHECK_EQ_I(slot, 0);
+
+    /* the toll-free number of a box with no TellyScript: V.34 at most, and
+     * the one heavy slot is not taken for it */
+    webtv_call(&c, &slot, "18006138199");
+    CHECK_EQ_I(srv_webtv(&S), 1);
+    CHECK_EQ_I((int)(S.dce.cfg.modulations & fast), 0);
+    CHECK((S.dce.cfg.modulations & V90M_MOD_V34) != 0);
+    CHECK_EQ_I(S.heavy_held, 0); CHECK_EQ_I(slot, 0);
+    hang_up();
+    webtv_call(&c, &slot, "8006138199");
+    CHECK_EQ_I(srv_webtv(&S), 1); CHECK_EQ_I((int)(S.dce.cfg.modulations & fast), 0);
+    hang_up();
+    /* the TellyScript's number: the port's own modulations */
+    webtv_call(&c, &slot, "4848201337");
+    CHECK_EQ_I(srv_webtv(&S), 1); CHECK((S.dce.cfg.modulations & V90M_MOD_V90) != 0);
+    hang_up();
+    webtv_call(&c, &slot, "14848201337");
+    CHECK_EQ_I(srv_webtv(&S), 1);
+    hang_up();
+    CHECK_EQ_I(slot, 0);
+
+    /* not WebTV: the port's own number, the switch off, a console port */
+    strcpy(c.line_number, "8009328800");
+    webtv_call(&c, NULL, "8009328800");
+    CHECK_EQ_I(S.tel.state, TEL_ANSWERED); CHECK_EQ_I(srv_webtv(&S), 0);
+    hang_up();
+    strcpy(c.line_number, "5551234");
+    c.svc_webtv = 0;
+    webtv_call(&c, NULL, "18009328800");
+    CHECK_EQ_I(srv_webtv(&S), 0);
+    hang_up();
+    c.svc_webtv = 1; c.service = CFG_SERVICE_DREAMCAST;
+    webtv_call(&c, NULL, "18009328800");
+    CHECK_EQ_I(srv_webtv(&S), 0);
+    hang_up();
+}
+
 /* the list of services' numbers (svc.h) and what a list entry may call */
 static void test_svc_list(void)
 {
@@ -2110,6 +2187,7 @@ static void test_svc_list(void)
 int main(void)
 {
     test_lin_scale();
+    test_webtv();
     test_svc_list();
     test_line_dev();
     test_level();
