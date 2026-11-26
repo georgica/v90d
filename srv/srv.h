@@ -43,7 +43,7 @@ typedef void (*srv_raw_fn)(void *ctx, const uint8_t *oct, size_t n);
 /* a WebTV / MSN TV box's own numbers (a WebTV port, srv_webtv): 1-800-WEBTV-00;
  * the toll-free number a box with no TellyScript dials (V.34 at most: such
  * a box hangs up above 33.6K); and the TellyScript's number. All three as
- * Netstalgia has them, the WebTV service going to WebTV Redialed */
+ * Netstalgia has them, the WebTV service going to the WebTV server */
 #define SRV_WEBTV    "8009328800"
 #define SRV_WEBTV_TF "8006138199"
 #define SRV_WEBTV_56 "4848201337"
@@ -185,7 +185,7 @@ void    srv_set_protoweb(srv_t *s, int on);
  * login), no encryption and no terminal menu, whatever [ppp] and
  * [services] menu say; on SRV_WEBTV_TF no V.90, V.92, x2 or K56flex. 1
  * while such a call is in progress (the daemon then sends its WebTV
- * service to WebTV Redialed). */
+ * service to the WebTV server, [services] webtv_server). */
 int     srv_webtv(const srv_t *s);
 /* Unpredictable octets (the daemon reads them from /dev/urandom) for the
  * next call's PPP: its magic numbers and challenges. Give fresh ones after

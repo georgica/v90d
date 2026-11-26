@@ -220,7 +220,7 @@ static void test_values(void)
     CHECK(status_render_json(&s, json, sizeof json) > 0);
     CHECK(has(json, "\"service\":\"webtv\""));
     CHECK(status_render_html(&s, html, sizeof html) > 0);
-    CHECK(has(html, "<th>Service</th><td>WebTV (WebTV Redialed)</td>"));
+    CHECK(has(html, "<th>Service</th><td>WebTV</td>"));
     s.service = 0;
     /* V.92 allowed on this port: the setting, next to archive */
     CHECK(has(html, "<tr><th>V.92</th><td>off</td></tr>"));

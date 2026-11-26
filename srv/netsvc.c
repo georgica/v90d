@@ -54,36 +54,26 @@ static int   pw_used;                   /* a PROTOWEB call has been: the gateway
 static int   arch_on[PORTS];            /* what the NAT plan in force gives each port */
 static pid_t natr_pid; static int natr_again;
 static int port_archive(int i) { return S[i].cfg.service == CFG_SERVICE_ARCHIVE || srv_protoweb(&S[i]); }
-/* WebTV (srv.h, srv_webtv; webtv.h): a call on a WebTV port has 10.0.0.1
- * sent to WebTV Redialed and the box's fixed name server to the port's,
- * while it lasts (pw_poll, like PROTOWEB's). The address of WebTV
- * Redialed is looked up by a child (wt_poll) every 10 minutes while a port
- * is a WebTV or a Dreamcast port (a Dreamcast's 10.0.1.129 goes there too,
- * for as long as the port has that service); a lookup that fails keeps the
- * last good address.
- * -Q gives one instead (no lookup), -Q "" neither. */
-static uint32_t wt_addr;                /* WebTV Redialed, host order; 0 = not known */
+/* WebTV (srv.h, srv_webtv; webtv.h): a call on a WebTV port has the boxes'
+ * fixed service addresses sent to the WebTV server ([services]
+ * webtv_server) and their name server to the port's, while it lasts
+ * (pw_poll, like PROTOWEB's); a Dreamcast port has 10.0.1.129 (WebTV for
+ * Dreamcast) sent to the same server for as long as it has that service.
+ * WebTV Redialed's address is looked up by a child (wt_poll) every
+ * 10 minutes (every minute after a failure) while either kind of port has
+ * it as its server; a lookup that fails keeps the last good address, and
+ * CFG_WTV_REDIALED_ADDR stands in until one has worked. -Q gives one
+ * instead (no lookup), -Q "" leaves the stand-in. */
+static uint32_t wt_addr;                /* WebTV Redialed as looked up, host order; 0 = not yet */
 static const char *wt_fixed;            /* -Q */
 static pid_t    wt_pid; static int wt_fd = -1; static uint32_t wt_next_ms, wt_kill_ms; static int wt_started, wt_failed;
 static uint8_t  wt_got[4]; static size_t wt_len;
 static int      wt_on[PORTS];           /* what the NAT plan in force gives each port */
-/* the server WebTV calls and a Dreamcast's 10.0.1.129 go to ([services]
- * webtv_server): a fixed one, or WebTV Redialed as looked up (-Q in its
- * place), and its last known address until a lookup has worked */
+/* the WebTV server's address */
 static uint32_t wt_target(void)
 {
     uint32_t a = cfg_webtv_fixed(&S[0].cfg);
-    if (a) return a;
-    return wt_addr ? wt_addr : CFG_WTV_REDIALED_ADDR;
-}
-static const char *wt_name(void)
-{
-    switch (S[0].cfg.webtv_server) {
-    case CFG_WTV_HACKTV: return "HackTV Public Minisrv";
-    case CFG_WTV_ZEFIE:  return "ZefieTV";
-    case CFG_WTV_OTHER:  return "the WebTV server";
-    default:             return "WebTV Redialed";
-    }
+    return a ? a : wt_addr ? wt_addr : CFG_WTV_REDIALED_ADDR;
 }
 static int any_webtv(void)
 {
@@ -488,17 +478,13 @@ static int build_plan(nat_plan *p)
     for (i = 0; i < n_ports; i++) p->archive[i] = port_archive(i);
     for (i = 0; i < n_ports; i++) p->console[i] = S[i].cfg.service == CFG_SERVICE_DREAMCAST;
     for (i = 0; i < n_ports; i++) p->lan[i] = lan_wanted(i) && la[i].ip;
-    for (i = n_ports - 1; i >= 0; i--) {
-        /* a WebTV box: its names to the server the port gives its callers;
-         * a Dreamcast port: its one address of the old network (nat.h) */
-        if (srv_webtv(&S[i])) {
-            p->webtv[i] = NAT_WEBTV_BOX;
-            p->webtv_dns = S[i].cfg.dns_relay ? S[i].cfg.ppp_local : S[i].cfg.dns[0];
-        } else if (S[i].cfg.service == CFG_SERVICE_DREAMCAST) {
-            p->webtv[i] = NAT_WEBTV_DC;
-        }
-    }
+    /* a WebTV call, a Dreamcast port: the WebTV server (nat.h); a box's
+     * names to the server the port gives its callers ([network] is the
+     * same for both ports) */
+    for (i = 0; i < n_ports; i++)
+        p->webtv[i] = srv_webtv(&S[i]) ? NAT_WEBTV_BOX : S[i].cfg.service == CFG_SERVICE_DREAMCAST ? NAT_WEBTV_DC : 0;
     p->webtv_to = wt_target();
+    p->webtv_dns = S[0].cfg.dns_relay ? S[0].cfg.ppp_local : S[0].cfg.dns[0];
     p->rewrite = dc_rw; p->n_rewrite = dc_n;
     p->n_open = dclist_ports(&p->open);
     strncpy(p->wan, lan_if, sizeof p->wan - 1);
@@ -523,7 +509,6 @@ static void nat_refresh(void)
     if (natr_pid < 0) { natr_pid = 0; logf_(CFG_LOG_ERROR, "cannot change the NAT rules: %s", strerror(errno)); }
 }
 
-static void nat_refresh(void);
 static void wt_drain(void)
 {
     ssize_t r;
@@ -535,10 +520,12 @@ static void wt_poll(uint32_t now_ms)
     char a[16];
     if (wt_pid > 0) {
         wt_drain();
-        if (waitpid(wt_pid, &st, WNOHANG) != wt_pid) {
+        i = (int)waitpid(wt_pid, &st, WNOHANG);
+        if (i == 0) {
             if ((int32_t)(now_ms - wt_kill_ms) >= 0) (void)kill(wt_pid, SIGKILL);   /* a lookup that hangs */
             return;
         }
+        if (i < 0) st = 1;                  /* gone some other way: a failure */
         wt_drain();
         wt_pid = 0; close(wt_fd); wt_fd = -1;
         wt_next_ms = now_ms + WEBTV_EVERY_MS;
@@ -546,19 +533,20 @@ static void wt_poll(uint32_t now_ms)
             uint32_t got = ((uint32_t)wt_got[0] << 24) | ((uint32_t)wt_got[1] << 16) | ((uint32_t)wt_got[2] << 8) | wt_got[3];
             wt_failed = 0;
             if (got && got != wt_addr) {
-                struct in_addr in; in.s_addr = htonl(got);
                 wt_addr = got;
-                logf_(CFG_LOG_INFO, "WebTV Redialed (%s) is at %s", WEBTV_HOST, inet_ntop(AF_INET, &in, a, sizeof a) ? a : "?");
+                logf_(CFG_LOG_INFO, "WebTV Redialed (%s) is at %s", WEBTV_HOST, ip_str(got, a));
                 if (any_webtv()) nat_refresh();
-                if (any_console()) net_dirty = 1;   /* the Dreamcast's 10.0.1.129: when the line is idle */
+                if (any_console()) net_dirty = 1;   /* a Dreamcast's 10.0.1.129: when the line is idle */
             }
-        } else if (!wt_failed++) {
-            logf_(CFG_LOG_WARN, "WebTV Redialed (%s) could not be looked up; %s", WEBTV_HOST,
-                  wt_addr ? "keeping the address it had" : "using 31.97.100.150 meanwhile");
+        } else {
+            wt_next_ms = now_ms + 60000u;   /* the network may not be up yet: again in a minute */
+            if (!wt_failed++)
+                logf_(CFG_LOG_WARN, "WebTV Redialed (%s) could not be looked up; using %s meanwhile", WEBTV_HOST,
+                      ip_str(wt_addr ? wt_addr : CFG_WTV_REDIALED_ADDR, a));
         }
         return;
     }
-    if (wt_fixed || S[0].cfg.webtv_server != CFG_WTV_REDIALED) return;      /* nothing to look up */
+    if (wt_fixed || S[0].cfg.webtv_server != CFG_WTV_REDIALED) return;       /* nothing to look up */
     for (i = 0; i < n_ports; i++)
         if (S[i].cfg.service == CFG_SERVICE_WEBTV || S[i].cfg.service == CFG_SERVICE_DREAMCAST) can = 1;
     if (!can) return;
@@ -592,16 +580,16 @@ static void wt_poll(uint32_t now_ms)
 
 static void pw_poll(void)
 {
-    int i, changed = 0, st;
+    int i, changed = 0, arch = 0, st;
     if (natr_pid > 0 && waitpid(natr_pid, &st, WNOHANG) == natr_pid) {
         natr_pid = 0;
-        if (!WIFEXITED(st) || WEXITSTATUS(st) != 0) logf_(CFG_LOG_ERROR, "cannot change the NAT rules for a PROTOWEB call");
+        if (!WIFEXITED(st) || WEXITSTATUS(st) != 0) logf_(CFG_LOG_ERROR, "cannot change the NAT rules for a call");
         if (natr_again) nat_refresh();
     }
     for (i = 0; i < n_ports; i++) {
         int w = port_archive(i);
         if (w == arch_on[i]) continue;
-        arch_on[i] = w; changed = 1;
+        arch_on[i] = w; changed = arch = 1;
         if (srv_protoweb(&S[i])) {
             pw_used = 1;
             logf_(CFG_LOG_INFO, "port %d: a call to PROTOWEB: its web, FTP and names go to the archive gateway", i + 1);
@@ -612,12 +600,13 @@ static void pw_poll(void)
         if (w == wt_on[i]) continue;
         wt_on[i] = w; changed = 1;
         if (w) {
-            struct in_addr in; char a[16]; in.s_addr = htonl(wt_target());
-            logf_(CFG_LOG_INFO, "port %d: a call to WebTV: 10.0.0.1 goes to %s (%s)", i + 1, wt_name(),
-                  inet_ntop(AF_INET, &in, a, sizeof a) ? a : "?");
+            char a[16];
+            logf_(CFG_LOG_INFO, "port %d: a call to WebTV: its service goes to %s (%s)", i + 1,
+                  cfg_webtv_name(S[0].cfg.webtv_server), ip_str(wt_target(), a));
         }
     }
-    if (changed) { nat_refresh(); arch_apply(any_archive()); }
+    if (changed) nat_refresh();
+    if (arch) arch_apply(any_archive());
 }
 
 static void net_apply(void)
@@ -681,11 +670,10 @@ void netsvc_poll(uint32_t now_ms)
      * it is a multiple of 100 again for months, and nothing here would run. */
     static uint32_t at100, at1000, at2000;
     if ((int32_t)(now_ms - at100) >= 0) { at100 = now_ms + 100; pw_poll(); }
-    if ((int32_t)(now_ms - at1000) >= 0) wt_poll(now_ms);
     if ((int32_t)(now_ms - at2000) >= 0) { at2000 = now_ms + 2000; arch_poll(now_ms); }
     if ((int32_t)(now_ms - at1000) >= 0) {
         at1000 = now_ms + 1000;
-        dc_poll(now_ms); dn_poll(now_ms); la_poll(now_ms); up_poll(now_ms); vp_poll(now_ms);
+        dc_poll(now_ms); dn_poll(now_ms); la_poll(now_ms); up_poll(now_ms); vp_poll(now_ms); wt_poll(now_ms);
     }
 }
 

@@ -267,7 +267,7 @@ static void dnat_msg(nlbuf *mp, uint32_t src, const char *ifn, uint32_t dst, uin
     }
     if (src) match(mp, NFT_PAYLOAD_NETWORK_HEADER, 12, &bsrc, 4, NFT_CMP_EQ);
     if (dst) match(mp, NFT_PAYLOAD_NETWORK_HEADER, 16, &bdst, 4, NFT_CMP_EQ);
-    match(mp, NFT_PAYLOAD_NETWORK_HEADER, 9, &proto, 1, NFT_CMP_EQ);
+    if (proto) match(mp, NFT_PAYLOAD_NETWORK_HEADER, 9, &proto, 1, NFT_CMP_EQ);     /* 0: any (and no port) */
     if (lo && lo == hi) {
         match(mp, NFT_PAYLOAD_TRANSPORT_HEADER, 2, &blo, 2, NFT_CMP_EQ);
     } else if (lo) {
@@ -376,6 +376,18 @@ static const char *ip_str(uint32_t ip, char *b)
     return b;
 }
 
+/* the boxes' WebTV addresses (nat.h); the last, 10.0.1.129, is also a
+ * Dreamcast's (NAT_WEBTV_DC) */
+static const uint32_t webtv_addrs[] = NAT_WEBTV_ADDRS;
+#define NAT_WEBTV_N ((int)(sizeof webtv_addrs / sizeof webtv_addrs[0]))
+/* a peer has destination NAT: the pre-routing chain is wanted */
+static int need_pre(const nat_plan *p)
+{
+    int i;
+    for (i = 0; i < 2; i++) if (p->peer[i] && (p->archive[i] || p->console[i] || p->webtv[i])) return 1;
+    return 0;
+}
+
 static int ipt_apply(const nat_plan *p)
 {
     /* our chains first in the nat table: the system's own rules must not see the packets first */
@@ -394,23 +406,24 @@ static int ipt_apply(const nat_plan *p)
         const char *r[] = { "-A", IPT_POST, "-o", p->vpn, "-j", "MASQUERADE", NULL };
         bad |= ipt(r);
     }
-    if ((p->peer[0] && (p->archive[0] || p->console[0] || p->webtv[0])) || (p->peer[1] && (p->archive[1] || p->console[1] || p->webtv[1]))) {
+    if (need_pre(p)) {
         if (ipt(npre) || ipt(hpre)) { ipt_unhook(); errno = EIO; return -1; }
         for (i = 0; i < 2; i++) if (p->peer[i] && p->webtv[i]) {
             static const char *const pr[] = { "tcp", "udp" };
-            static const uint32_t wa[] = NAT_WEBTV_ADDRS;
-            int k, box = p->webtv[i] == NAT_WEBTV_BOX;
-            for (j = 0; j < 2; j++) {
+            char all[4 * 16];
+            int box = p->webtv[i] == NAT_WEBTV_BOX;
+            for (j = 0; j < 2 && box && p->webtv_dns; j++) {
                 const char *r[] = { "-A", IPT_PRE, "-s", ip_str(p->peer[i], a), "-d", ip_str(NAT_WEBTV_DNS, b), "-p", pr[j],
                                     "--dport", "53", "-j", "DNAT", "--to-destination", ip_str(p->webtv_dns, c), NULL };
-                if (box && p->webtv_dns) bad |= ipt(r);
+                bad |= ipt(r);
             }
-            for (k = box ? 0 : NAT_WEBTV_N - 1; k < NAT_WEBTV_N; k++)
-                for (j = 0; j < 2; j++) {
-                    const char *r[] = { "-A", IPT_PRE, "-s", ip_str(p->peer[i], a), "-d", ip_str(wa[k], b), "-p", pr[j],
-                                        "-j", "DNAT", "--to-destination", ip_str(p->webtv_to, c), NULL };
-                    if (p->webtv_to) bad |= ipt(r);
-                }
+            if (p->webtv_to) {          /* the four addresses, any protocol: one rule each, from one command */
+                const char *r[] = { "-A", IPT_PRE, "-s", ip_str(p->peer[i], a), "-d", all,
+                                    "-j", "DNAT", "--to-destination", ip_str(p->webtv_to, c), NULL };
+                all[0] = 0;
+                for (j = box ? 0 : NAT_WEBTV_N - 1; j < NAT_WEBTV_N; j++) { if (all[0]) strcat(all, ","); strcat(all, ip_str(webtv_addrs[j], b)); }
+                bad |= ipt(r);
+            }
         }
         for (i = 0; i < 2; i++) if (p->peer[i] && p->archive[i]) {
             static const struct { const char *proto, *port; int which; } R[] = {
@@ -501,7 +514,7 @@ static int nft_apply(const nat_plan *p)
     for (i = 0; i < 2; i++) if (p->masquerade && p->peer[i] && !p->lan[i]) rule_msg(&m, p->peer[i]);
     if (p->vpn[0]) masq_if_msg(&m, p->vpn);
 
-    if ((p->peer[0] && (p->archive[0] || p->console[0] || p->webtv[0])) || (p->peer[1] && (p->archive[1] || p->console[1] || p->webtv[1]))) {
+    if (need_pre(p)) {
         at = msg_begin(&m, nft(NFT_MSG_NEWCHAIN), NLM_F_CREATE | NLM_F_ACK, NFPROTO_IPV4, 0);
         attr_str(&m, NFTA_CHAIN_TABLE, TABLE);
         attr_str(&m, NFTA_CHAIN_NAME, CHAIN_PRE);
@@ -512,16 +525,12 @@ static int nft_apply(const nat_plan *p)
         attr_str(&m, NFTA_CHAIN_TYPE, "nat");
         msg_end(&m, at);
         for (i = 0; i < 2; i++) if (p->peer[i] && p->webtv[i]) {
-            static const uint32_t wa[] = NAT_WEBTV_ADDRS;
             int k, box = p->webtv[i] == NAT_WEBTV_BOX;
             if (box && p->webtv_dns) {
                 dnat_msg(&m, p->peer[i], NULL, NAT_WEBTV_DNS, 17, 53, 53, p->webtv_dns);
                 dnat_msg(&m, p->peer[i], NULL, NAT_WEBTV_DNS, 6, 53, 53, p->webtv_dns);
             }
-            for (k = box ? 0 : NAT_WEBTV_N - 1; p->webtv_to && k < NAT_WEBTV_N; k++) {
-                dnat_msg(&m, p->peer[i], NULL, wa[k], 6, 0, 0, p->webtv_to);
-                dnat_msg(&m, p->peer[i], NULL, wa[k], 17, 0, 0, p->webtv_to);
-            }
+            for (k = box ? 0 : NAT_WEBTV_N - 1; p->webtv_to && k < NAT_WEBTV_N; k++) dnat_msg(&m, p->peer[i], NULL, webtv_addrs[k], 0, 0, 0, p->webtv_to);
         }
         for (i = 0; i < 2; i++) if (p->peer[i] && p->archive[i]) {
             redirect_msg(&m, p->peer[i], 17, 53, 53, p->dns_port);

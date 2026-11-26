@@ -201,7 +201,7 @@ enum { CFG_TONES_US = 0, CFG_TONES_EU = 1 };
  *              octets of the game (srv/saturn.h). Not tried with a real
  *              console. */
 enum { CFG_SERVICE_INTERNET = 0, CFG_SERVICE_ARCHIVE = 1, CFG_SERVICE_DREAMCAST = 2, CFG_SERVICE_SATURN = 3,
-       CFG_SERVICE_WEBTV = 4,       /* a WebTV / MSN TV box: every call goes to WebTV Redialed (srv.h, srv_webtv) */
+       CFG_SERVICE_WEBTV = 4,       /* a WebTV / MSN TV box: every call goes to its server (webtv_server; srv.h, srv_webtv) */
        CFG_SERVICE_COUNT = 5 };
 enum { CFG_LISTEN_OFF = 0, CFG_LISTEN_LAN = 1 };
 enum { CFG_LOG_ERROR = 0, CFG_LOG_WARN = 1, CFG_LOG_INFO = 2, CFG_LOG_DEBUG = 3 };
@@ -374,8 +374,12 @@ enum { CFG_WTV_REDIALED = 0, CFG_WTV_HACKTV = 1, CFG_WTV_ZEFIE = 2, CFG_WTV_OTHE
 #define CFG_WTV_ZEFIE_ADDR    0xD87EE8ABu  /* 216.126.232.171: ZefieTV */
 /* the server's fixed address, host order; 0 for WebTV Redialed (looked up) */
 uint32_t cfg_webtv_fixed(const cfg_t *c);
-/* 1 when the address can be a WebTV server: not 0.0.0.0, loopback,
- * multicast or above (an address on the home network is fine) */
+/* 1 when the address can be a WebTV server: not 0/8, loopback, multicast
+ * or above, nor one of the boxes' own old addresses (10.0.0.1, 10.0.0.2,
+ * 10.0.128.1, 10.0.1.129: sent there, they would come back); an address on
+ * the home network is fine */
 int cfg_webtv_usable(uint32_t a);
+/* the server's name, for the log and the pages ("Other" for an address) */
+const char *cfg_webtv_name(int server);
 
 #endif

@@ -25,23 +25,19 @@ int nat_masquerade2(uint32_t peer_ip, uint32_t peer2_ip);
  *    ports lo..hi of protocol `proto` is passed on to the console. Only one
  *    console can have them: the first port that is one. */
 typedef struct { uint32_t from, to; uint16_t port; uint8_t proto; } nat_rewrite;
-/* For a peer with webtv[i] set: what it sends to the addresses below (TCP
- * or UDP, any port) goes to webtv_to, the port unchanged (no rule while
- * webtv_to is 0); for a WebTV box its DNS (UDP and TCP port 53) to
- * NAT_WEBTV_DNS goes to webtv_dns as well. A WebTV / MSN TV box and the
- * Dreamcast talk to these fixed addresses of their old networks. */
-#define NAT_WEBTV_ADDR 0x0A000001u      /* 10.0.0.1 */
-#define NAT_WEBTV_DNS  0x9D39DD33u      /* 157.57.221.51 */
-/* webtv[i]: NAT_WEBTV_BOX for a WebTV box (every address below, and its
- * DNS), NAT_WEBTV_DC for a Dreamcast (10.0.1.129 alone, its names as they
- * are); 0 = neither */
+/* webtv[i] = NAT_WEBTV_BOX, a peer in a WebTV call (srv.h srv_webtv): what
+ * it sends to the boxes' fixed service addresses below (any protocol and
+ * port) goes to webtv_to, the WebTV server, the port unchanged, and its DNS
+ * (UDP and TCP port 53) to NAT_WEBTV_DNS goes to webtv_dns. A WebTV / MSN
+ * TV box talks to these addresses of its old network: the service
+ * (10.0.0.1), its fallback (10.0.0.2), the daily builds' (10.0.128.1) and
+ * 10.0.1.129. webtv[i] = NAT_WEBTV_DC, a Dreamcast port: 10.0.1.129 alone
+ * (WebTV for Dreamcast's service) to the same server, its names as they
+ * are. No rule while the address it needs is 0. */
 enum { NAT_WEBTV_BOX = 1, NAT_WEBTV_DC = 2 };
-/* the old networks' fixed service addresses, all answered by WebTV
- * Redialed: the boxes' (10.0.0.1), their fallback (10.0.0.2), the daily
- * builds' (10.0.128.1) and 10.0.1.129, which WebTV boxes use as well as
- * the Dreamcast (the last: the one a NAT_WEBTV_DC peer gets) */
 #define NAT_WEBTV_ADDRS { 0x0A000001u, 0x0A000002u, 0x0A008001u, 0x0A000181u }
-#define NAT_WEBTV_N     4
+#define NAT_WEBTV_ADDR  0x0A000001u     /* 10.0.0.1, the first of them */
+#define NAT_WEBTV_DNS   0x9D39DD33u     /* 157.57.221.51 */
 typedef struct { uint8_t proto; uint16_t lo, hi; } nat_open;
 #define NAT_REWRITE_MAX 32
 #define NAT_OPEN_MAX    40
@@ -54,7 +50,7 @@ typedef struct {
     int      console[2];        /* per peer */
     int      lan[2];            /* per peer: a host on the network itself, not masqueraded, no ports opened */
     int      webtv[2];          /* per peer: NAT_WEBTV_BOX, NAT_WEBTV_DC or 0 */
-    uint32_t webtv_to, webtv_dns;   /* WebTV Redialed (0 = not known yet), the port's name server; host order */
+    uint32_t webtv_to, webtv_dns;   /* the WebTV server, the port's name server; host order, 0 = none */
     const nat_rewrite *rewrite; int n_rewrite;
     const nat_open *open; int n_open;
     char     wan[16];           /* interface name; "" = no ports opened */

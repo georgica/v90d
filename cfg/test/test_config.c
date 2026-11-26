@@ -1154,6 +1154,10 @@ static void test_services(void)
     CHECK(strstr(err, "webtv_server: 127.0.0.1 cannot be a server") != NULL);
     CHECK_EQ_I(parse(&c, "[services]\nwebtv_server = 0.0.0.0\n"), CFG_ERR);
     CHECK_EQ_I(parse(&c, "[services]\nwebtv_server = 224.0.0.1\n"), CFG_ERR);
+    CHECK_EQ_I(parse(&c, "[services]\nwebtv_server = 0.1.2.3\n"), CFG_ERR);
+    CHECK_EQ_I(parse(&c, "[services]\nwebtv_server = 10.0.0.1\n"), CFG_ERR);       /* the box's own old address */
+    CHECK_EQ_I(parse(&c, "[services]\nwebtv_server = 10.0.1.129\n"), CFG_ERR);
+    CHECK_EQ_S(cfg_webtv_name(CFG_WTV_HACKTV), "HackTV Public Minisrv");
     CHECK_EQ_I(parse(&c, "[services]\nwebtv_server = webtv.example\n"), CFG_ERR);
     CHECK(strstr(err, "webtv_server: 'webtv.example' is not one of: redialed, hacktv, zefie, or an IPv4 address") != NULL);
     cfg_default(&c); c.webtv_server = CFG_WTV_OTHER; c.webtv_addr = 0;

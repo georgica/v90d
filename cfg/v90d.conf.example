@@ -83,8 +83,8 @@ idle_timeout = 0
 # to wait, #a*b*c*d# to call the player at that address). The last two have
 # not been tried with a real console. webtv: for a WebTV or MSN TV box,
 # whatever number it dials: PPP with any login (the box's own), no
-# encryption, and its WebTV service sent to WebTV Redialed
-# (community.webtv.zone).
+# encryption, and its WebTV service sent to the WebTV server
+# ([services] webtv_server).
 service = internet
 # for service = dreamcast, all off unless asked for: tell the "Dreamcast
 # Now" site which game is being played; make the console a host of its own
@@ -124,7 +124,8 @@ update_check = off
 # on (default) or off: also answer the numbers of Netstalgia's signed list,
 # which the box fetches once a day. Off means it never asks for it.
 netstalgia = on
-# where a WebTV port's box, and a Dreamcast's 10.0.1.129, are sent:
+# the WebTV server, for a WebTV port's box and for WebTV for Dreamcast
+# (a Dreamcast port's 10.0.1.129):
 # redialed (default: WebTV Redialed, community.webtv.zone, looked up every
 # 10 minutes; 31.97.100.150 until then), hacktv (HackTV Public Minisrv,
 # 71.244.121.234), zefie (ZefieTV, 216.126.232.171), or the IPv4 address

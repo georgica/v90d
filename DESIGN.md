@@ -376,23 +376,34 @@ dial-in answers the same number the same way.
 TV box. Its telephony takes any number (as Saturn's): `SRV_WEBTV`,
 `SRV_WEBTV_TF` and `SRV_WEBTV_56` (`8009328800`, `8006138199`,
 `4848201337`, with or without the 1) end the dialling at once through
-`tel_cfg.more` (which on a port that takes any number now ends it on a 2),
+`tel_cfg.more` (which on a port that takes any number now ends it on a 2;
+srv answers 0 there except on a WebTV port),
 any other after `ANY_WAIT_MS`. Every call is the box's, BBS and service
 numbers included: the port's PPP call with PAP asked for and any name and
 password taken through `pap_cb` (a box logs in with its own built-in
 details), no MPPE and no terminal menu; on `SRV_WEBTV_TF` no V.90, V.92, x2
 or K56flex (and so no heavy slot). `srv_webtv()` says it is one.
-`pw_poll` gives such a port two rewrites in the NAT plan (`nat.h`,
+`pw_poll` gives such a port its rewrites in the NAT plan (`nat.h`,
 `webtv[]`, `NAT_WEBTV_BOX`): 10.0.0.1, 10.0.0.2, 10.0.128.1 and
-10.0.1.129, any protocol and port, to WebTV Redialed, and DNS to
-157.57.221.51 to the name server the port gives its callers. A Dreamcast
-port (`NAT_WEBTV_DC`) has 10.0.1.129 sent there for as long as it has that
-service, its names untouched; the community address list does not carry it. WebTV
-Redialed's address is looked up from community.webtv.zone by a child
-(`wt_poll`), every 10 minutes while a port is a WebTV or Dreamcast port; only a public
-IPv4 answer is taken (`webtv_pick`), and a failed lookup keeps the last
-good address. `-Q` gives one instead. Netstalgia's own dial-in answers the
-same numbers the same way.
+10.0.1.129, any protocol and port (one nftables rule each, one iptables
+command for all four), to the WebTV server, and DNS to 157.57.221.51 to
+the name server the port gives its callers. A Dreamcast port
+(`NAT_WEBTV_DC`) has 10.0.1.129 (WebTV for Dreamcast's service) sent to the
+same server for as long as it has that service, its names untouched; the
+community address list does not carry it.
+
+The WebTV server is `[services] webtv_server` (`CFG_WTV_*`,
+`cfg_webtv_fixed`): WebTV Redialed, HackTV's public minisrv, ZefieTV, or
+an address of the owner's (`cfg_webtv_usable` refuses 0/8, loopback,
+multicast and the boxes' own four addresses). WebTV Redialed's address is
+looked up from community.webtv.zone by a child (`wt_poll`, which closes the
+daemon's descriptors: it runs no program, and a TUN device it held could
+not be set up again), every 10 minutes (every minute after a failure)
+while a WebTV or Dreamcast port has it as its server; only a public IPv4
+answer is taken (`webtv_pick`), a failed lookup keeps the last good
+address, and `CFG_WTV_REDIALED_ADDR` stands in until one has worked. `-Q`
+gives one instead. Netstalgia's own dial-in answers the same numbers the
+same way.
 
 ### 5d. Numbers to services
 

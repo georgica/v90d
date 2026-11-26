@@ -769,7 +769,16 @@ static int set_int(int *field, int k, const char *v, char *msg)
 }
 
 static const char *const n_wtv[] = { "redialed", "hacktv", "zefie" };
-int cfg_webtv_usable(uint32_t a) { return a != 0 && (a >> 24) != 127 && a < 0xE0000000u; }
+int cfg_webtv_usable(uint32_t a)
+{
+    return (a >> 24) != 0 && (a >> 24) != 127 && a < 0xE0000000u
+           && a != 0x0A000001u && a != 0x0A000002u && a != 0x0A008001u && a != 0x0A000181u;
+}
+const char *cfg_webtv_name(int server)
+{
+    static const char *const t[] = { "WebTV Redialed", "HackTV Public Minisrv", "ZefieTV", "Other" };
+    return server >= 0 && server < CFG_WTV_COUNT ? t[server] : "?";
+}
 uint32_t cfg_webtv_fixed(const cfg_t *c)
 {
     switch (c->webtv_server) {

@@ -51,7 +51,7 @@ static const char *const n_lan[]   = { "static", "dhcp" };      /* the value of 
 static const char *const t_lan[]   = { "Static address", "DHCP" };
 static const char *const n_service[] = { "internet", "archive", "dreamcast", "saturn", "webtv" };
 static const char *const t_service[] = { "Internet: as it is", "Archive: the old web (Protoweb)", "Dreamcast: for the game console",
-                                         "Saturn: console to console (NetLink)", "WebTV: for a WebTV or MSN TV box (WebTV Redialed)" };
+                                         "Saturn: console to console (NetLink)", "WebTV: for a WebTV or MSN TV box" };
 static const char *const n_v92[]   = { "off", "on" };
 static const char *const t_dcnow[]  = { "Off", "On: tell the Dreamcast Now site that a console is online and which game server it asked for" };
 static const char *const t_dclan[]  = { "Off: the console is behind this box's address", "On: the console gets an address of its own on the network" };
@@ -77,8 +77,6 @@ static const char *const n_svcmode[] = { "raw", "telnet" };        /* CFG_SVC_* 
 static const char *const t_svcnet[] = { "Off: only the numbers above",
                                         "On: also Netstalgia's numbers, fetched once a day" };
 static const char *const n_wtv[] = { "redialed", "hacktv", "zefie", "other" };
-static const char *const t_wtv[] = { "WebTV Redialed (community.webtv.zone)", "HackTV Public Minisrv (71.244.121.234)",
-                                     "ZefieTV (216.126.232.171)", "Other: the address below" };
 static const char *const t_ipv6[] = { "Off: IPv4 only",
                                       "On: an address from your network's router, when it offers IPv6" };
 static const char *const t_dnsrelay[] = { "Off: the callers ask the servers below themselves",
@@ -374,7 +372,7 @@ int settings_render_page(const cfg_t *c, int page, int saved, const char *error,
                 " for this port and the console is given the name servers of the game revival"
                 " projects, whatever the other pages say. Its further switches are on the Consoles page (under Services). Saturn: two consoles that telephone each other, each on a box of its own; dial 0 to wait for the other player, #a*b*c*d# to call the one at that address. The last two have not been tried with a real"
                 " console. WebTV: for a WebTV or MSN TV box, whatever number it dials; any login, no encryption, and its"
-                " service goes to WebTV Redialed. A change takes effect when the lines are free.</p></section>\n");
+                " service goes to the WebTV server (Services page). A change takes effect when the lines are free.</p></section>\n");
 
     }
     if (ON(SETTINGS_CONSOLES)) {
@@ -518,8 +516,13 @@ int settings_render_page(const cfg_t *c, int page, int saved, const char *error,
     sb_puts(&b, "<table>\n");
     in_select(&b, "Netstalgia's numbers", F_SVCNET, c->svc_netstalgia, n_v92, t_svcnet, 2);
     in_select(&b, "Terminal menu", F_SVCMENU, c->svc_menu, n_v92, t_svcmenu, 2);
-    in_select(&b, "WebTV server", F_WTV, c->webtv_server, n_wtv, t_wtv, CFG_WTV_COUNT);
-    in_addr(&b, "Its address", F_WTVADDR, c->webtv_server == CFG_WTV_OTHER ? c->webtv_addr : 0, "for Other");
+    {   /* the servers' names as the log has them (cfg_webtv_name) */
+        const char *t[CFG_WTV_COUNT]; int i;
+        for (i = 0; i < CFG_WTV_COUNT - 1; i++) t[i] = cfg_webtv_name(i);
+        t[CFG_WTV_OTHER] = "Other: the address below";
+        in_select(&b, "WebTV server", F_WTV, c->webtv_server, n_wtv, t, CFG_WTV_COUNT);
+    }
+    in_addr(&b, "Its address", F_WTVADDR, c->webtv_server == CFG_WTV_OTHER ? c->webtv_addr : 0, "");
     sb_puts(&b, "</table>\n<p>A caller who dials one of these numbers, on either port and whatever its"
                 " service, is connected straight to the host: no PPP, the call carries what the modems"
                 " send. Raw passes the octets both ways as they are, for a game or program with a protocol"
@@ -1053,14 +1056,19 @@ int settings_apply(const cfg_t *cur, const char *body, size_t len, cfg_t *out,
 
     build_users(&f, cur);
     build_services(&f, cur);
-    /* the WebTV server: the address counts only for Other (and then must be one) */
+    /* the WebTV server: the address counts only for Other (and then must be
+     * one it can use); a bad one is named as the server's, the key it is
+     * saved under */
     if ((f.seen >> F_WTV) & 1u) {
         if (out->webtv_server != CFG_WTV_OTHER) out->webtv_addr = 0;
         else if ((f.seen >> F_WTVADDR) & 1u) {
-            uint32_t a = 0; char sv[41];
-            set_addr(&f, F_WTVADDR, &a, f.wtv_addr, 1);
-            if (!f.invalid && !cfg_webtv_usable(a))
-                fail(&f, "[services] webtv_server: '%s' cannot be a server", a ? safe(f.wtv_addr, sv) : "(no address)");
+            const char *v = f.wtv_addr; char t[16], sv[41]; size_t n; uint32_t a = 0;
+            while (*v == ' ') v++;
+            n = strlen(v);
+            while (n && v[n - 1] == ' ') n--;
+            if (n < sizeof t) { memcpy(t, v, n); t[n] = '\0'; }
+            if (n >= sizeof t || cfg_parse_ip(t, &a) || !cfg_webtv_usable(a))
+                fail(&f, "[services] webtv_server: the address '%s' cannot be a WebTV server", safe(v, sv));
             else out->webtv_addr = a;
         }
     }
