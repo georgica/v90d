@@ -262,6 +262,14 @@ int srv_send_ip(srv_t *s, const uint8_t *pkt, size_t len)
     return r;
 }
 
+/* the port's own number as the telephony layer takes it (tel.c, dialed_is):
+ * a ten-digit one with the long distance 1 in front as well */
+static int own_number(const cfg_t *c, const char *dialed)
+{
+    if (strcmp(dialed, c->line_number) == 0) return 1;
+    return strlen(c->line_number) == 10 && c->line_number[0] != '1' && dialed[0] == '1' && strcmp(dialed + 1, c->line_number) == 0;
+}
+
 static void call_start(srv_t *s)
 {
     dce_cfg_t d;
@@ -270,18 +278,18 @@ static void call_start(srv_t *s)
     s->link = SATURN_NONE;
     s->call_start = s->clock; s->call_s = 0; s->ppp_up_once = 0; s->ppp_from_s = 0;
     /* a terminal program for a bulletin board (bbs.h), unless the number is the port's own */
-    bbs = strcmp(s->tel.dialed, c->line_number) != 0 && bbs_number(s->tel.dialed, board) != BBS_NUM_NONE;
+    bbs = !own_number(c, s->tel.dialed) && bbs_number(s->tel.dialed, board) != BBS_NUM_NONE;
     /* a number that connects straight to a service ([services]), the same way */
-    svc = !bbs && strcmp(s->tel.dialed, c->line_number) != 0 && srv_svc_number(s, s->tel.dialed);
+    svc = !bbs && !own_number(c, s->tel.dialed) && srv_svc_number(s, s->tel.dialed);
     /* the PROTOWEB number: the port's dial-up connection, with the archive */
-    s->protoweb = !bbs && !svc && protoweb_here(s) && strcmp(s->tel.dialed, c->line_number) != 0
+    s->protoweb = !bbs && !svc && protoweb_here(s) && !own_number(c, s->tel.dialed)
                   && cfg_svc_number_match(SRV_PROTOWEB, s->tel.dialed);
     /* a WebTV box's numbers: the port's dial-up connection, for the box */
     s->webtv = 0;
-    for (i = 0; i < 3 && !bbs && !svc && !s->protoweb && webtv_here(s) && strcmp(s->tel.dialed, c->line_number) != 0; i++)
+    for (i = 0; i < 3 && !bbs && !svc && !s->protoweb && webtv_here(s) && !own_number(c, s->tel.dialed); i++)
         if (cfg_svc_number_match(webtv_numbers[i], s->tel.dialed)) { s->webtv = 1; webtv_tf = i == 1; }
     /* the time service (SRV_ACTS): ACTS's own terms, octets at the line's rate */
-    acts = !bbs && !svc && !s->protoweb && !s->webtv && strcmp(s->tel.dialed, c->line_number) != 0 && acts_here(s)
+    acts = !bbs && !svc && !s->protoweb && !s->webtv && !own_number(c, s->tel.dialed) && acts_here(s)
            && cfg_svc_number_match(SRV_ACTS, s->tel.dialed);
     if (bbs) s->link = SRV_LINK_BBS;
     else if (svc) s->link = SRV_LINK_SVC;

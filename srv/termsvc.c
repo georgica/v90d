@@ -133,10 +133,11 @@ const char *termsvc_where(int k)
     if (kind == SRV_LINK_SVC) return "a service";
     if (kind == SRV_LINK_ACTS) return "the time service";
     if (kind != SATURN_NONE) return "a Saturn game";
+    if (S[k].webtv) return "WebTV (PPP)";     /* on an archive port too */
     switch (S[k].cfg.service) {
     case CFG_SERVICE_ARCHIVE: return "the archive (PPP)";
     case CFG_SERVICE_DREAMCAST: return "a Dreamcast";
-    default: return S[k].protoweb ? "Protoweb (PPP)" : S[k].webtv ? "WebTV (PPP)" : "Internet (PPP)";
+    default: return S[k].protoweb ? "Protoweb (PPP)" : "Internet (PPP)";
     }
 }
 

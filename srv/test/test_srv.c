@@ -2121,6 +2121,9 @@ static void test_webtv(void)
     webtv_call(&c, NULL, "8009328800");
     CHECK_EQ_I(S.tel.state, TEL_ANSWERED); CHECK_EQ_I(srv_webtv(&S), 0);
     hang_up();
+    webtv_call(&c, NULL, "18009328800");      /* the own number with the 1, as dialed_is takes it */
+    CHECK_EQ_I(S.tel.state, TEL_ANSWERED); CHECK_EQ_I(srv_webtv(&S), 0);
+    hang_up();
     strcpy(c.line_number, "5551234");
     c.svc_webtv = 0;
     webtv_call(&c, NULL, "18009328800");
