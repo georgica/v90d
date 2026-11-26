@@ -984,6 +984,16 @@ static void test_v90_endings(void)
         CHECK_EQ_I(C.p34.renegs, 1);
         CHECK_EQ_I(s->state, DCE_ONLINE);
         CHECK_EQ_I(s->bitrate, before - 2 * 8000 / 6);
+        {
+            /* the stop is kept for the log: a renegotiation, its rates */
+            dce_stop_t k;
+            CHECK_EQ_I((int)dce_last_stop(&D, &k), 1);
+            CHECK_EQ_I(k.retrain, 0);
+            CHECK_EQ_I(k.tx_before, before); CHECK_EQ_I(k.tx_after, before - 2 * 8000 / 6);
+            CHECK(k.rx_before > 0 && k.rx_after > 0);
+            CHECK(k.dur_ms > 0 && k.dur_ms < 2000);
+            CHECK(k.since_ip_ms >= 0 && (uint32_t)k.since_ip_ms <= k.at_ms);
+        }
         CHECK(traffic(TEXT, 20, 20, 60000, r) > 0);
         CHECK_EQ_I(status()->state, DCE_ONLINE);
     }
@@ -994,8 +1004,15 @@ static void test_v90_endings(void)
     CHECK(run_until(p_ip_up, 60000) > 0);
     {
         long r[2];
+        dce_stop_t k;
+        CHECK_EQ_I((int)dce_last_stop(&D, &k), 0);     /* none yet in this call */
+        CHECK_EQ_I(k.since_ip_ms, -1);
         caller_retrain(&C);
         t = run_until(p_retrained, 30000);
+        run_ms(200);
+        CHECK_EQ_I((int)dce_last_stop(&D, &k), 1);
+        CHECK_EQ_I(k.retrain, 1);
+        CHECK(k.dur_ms > 0 && k.since_ip_ms >= 0);
         s = status();
         printf("    caller retrains: data again after %d ms, state %d, %d bit/s down, %d up\n",
                t, (int)s->state, s->bitrate, s->rx_bitrate);

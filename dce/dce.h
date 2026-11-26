@@ -187,6 +187,17 @@ typedef struct {
 #define DCE_RAW_QUEUE 2048
 #define DCE_DETECT_MS 2000
 
+/* A stop of the data in the middle of a call, after data first moved: a
+ * retrain, or a rate renegotiation (V.34 / V.90 / V.92), from either end.
+ * Kept for the log (dce_last_stop). */
+typedef struct {
+    uint32_t at_ms;            /* call_ms when the data stopped */
+    int32_t  since_ip_ms;      /* ms since PPP's IP came up; -1 = it was not up */
+    uint32_t dur_ms;           /* how long no data moved */
+    int      retrain;          /* 1: a retrain; 0: a rate renegotiation */
+    int      tx_before, rx_before, tx_after, rx_after;     /* bit/s */
+} dce_stop_t;
+
 /* The call object. Contents are private; it is defined here so the caller
  * can allocate it. */
 typedef struct dce {
@@ -209,6 +220,10 @@ typedef struct dce {
     int         modulation;
     int         bitrate, rx_bitrate;   /* transmit, receive */
     uint32_t    peer_ip;
+    uint32_t    ip_ms;         /* call_ms when PPP's IP was first seen up; 0 = not yet */
+    unsigned    stops;         /* stops finished in this call */
+    int         stopped;       /* data stopped now, after it had moved */
+    dce_stop_t  stop;          /* the one under way, or the last */
     ppp_end_t   ppp_end;
     uint64_t    line_bits_tx, line_bits_rx;
     unsigned long octets_down, octets_up;
@@ -231,6 +246,10 @@ typedef struct dce {
  * an answerer (detection, fallback to start-stop, V.42 bis both ways),
  * ppp_config_default(). Fill in cfg->ppp (auth, users, addresses, ip_rx). */
 void dce_cfg_default(dce_cfg_t *cfg);
+
+/* How many data stops have ended in this call (0 = none), and the last
+ * one in *k (zeroed, since_ip_ms -1, while there is none). */
+unsigned dce_last_stop(const dce_t *d, dce_stop_t *k);
 
 /* Start a call: the line has just been answered. cfg is copied; what
  * cfg->ppp points to (strings, user table, callbacks) must stay valid. */

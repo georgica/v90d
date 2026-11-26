@@ -146,7 +146,10 @@ the toll-free number a box with no TellyScript dials, the call is offered
 V.34 at most, as such a box hangs up above 33.6K. On V.34 the box is sent
 no faster than its own line probe projected (its modem sometimes asks for
 more and then fails error control); the log shows both rates after the
-call. The call is a dial-up
+call. A box whose call-waiting detection is on can hang up after a short
+stop of the data that it takes for call waiting; every stop is in the log
+(`data stopped ...`), and turning that detection off in the box's dialing
+settings is the fix. The call is a dial-up
 connection, but the box logs in with its own built-in name and password,
 so any is taken, with no encryption and no terminal menu. For that call
 the box's old service addresses (10.0.0.1, 10.0.0.2, 10.0.128.1 and

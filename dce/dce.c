@@ -295,7 +295,14 @@ static void ppp_snapshot_ip(dce_t *d)
 {
     ppp_status_t ps;
     ppp_get_status(&d->ppp, &ps);
-    if (ps.ip_up) d->peer_ip = ps.peer_ip;
+    if (ps.ip_up) { d->peer_ip = ps.peer_ip; if (!d->ip_ms) d->ip_ms = d->call_ms ? d->call_ms : 1; }
+}
+
+unsigned dce_last_stop(const dce_t *d, dce_stop_t *k)
+{
+    if (d->stops) *k = d->stop;
+    else { memset(k, 0, sizeof *k); k->since_ip_ms = -1; }
+    return d->stops;
 }
 
 /* --------------------------------------------------------- ending a call */
@@ -555,6 +562,22 @@ static int after_sample(dce_t *d)
          * which leaves the modem "connected" and not "retraining") */
         if (ms.moving && !d->moving && d->v42_on) v90m_ec_line_restored(d->v42);
         else if (!ms.moving && d->moving && d->v42_on) v90m_ec_line_stopped(d->v42);
+        /* for the log: each stop after data first moved, its kind and rates */
+        if (!ms.moving && d->moving && d->state != DCE_TRAINING) {
+            d->stopped = 1;
+            d->stop.at_ms = d->call_ms;
+            d->stop.since_ip_ms = d->ip_ms ? (int32_t)(d->call_ms - d->ip_ms) : -1;
+            d->stop.retrain = ms.retraining;
+            d->stop.tx_before = d->bitrate; d->stop.rx_before = d->rx_bitrate;
+        } else if (d->stopped) {
+            if (ms.retraining) d->stop.retrain = 1;
+            if (ms.moving) {
+                d->stopped = 0;
+                d->stop.dur_ms = d->call_ms - d->stop.at_ms;
+                d->stop.tx_after = ms.tx_bps; d->stop.rx_after = ms.rx_bps;
+                d->stops++;
+            }
+        }
         d->moving = ms.moving;
     }
     if (d->state != DCE_TRAINING && ms.connected
