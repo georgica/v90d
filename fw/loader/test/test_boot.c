@@ -184,6 +184,9 @@ static void test_other_hardware(void)
     ld_run(&E, &R); CHECK_EQ_I(R.action, LD_BOOT); CHECK_EQ_I(R.size, 50000);
     fresh(); install(0, 50000, 7); memcpy(S.mem + LD_BOARD_OFF, "9610003611C", 12); keep();
     ld_run(&E, &R); CHECK_EQ_I(R.action, LD_BOOT); CHECK_EQ_I(R.size, 50000);
+    /* the HT802 V2.1A (issue #26), on the reference unit's flash */
+    fresh(); install(0, 50000, 7); memcpy(S.mem + LD_BOARD_OFF, "9610003721A", 12); keep();
+    ld_run(&E, &R); CHECK_EQ_I(R.action, LD_BOOT); CHECK_EQ_I(R.size, 50000);
     /* a Winbond W25Q128FV flash (issue #4's HT802 V1.6A, board 9610003716A):
      * the loader must set the quad-enable bit and enter QPI itself, then boot */
     fresh(); install(0, 50000, 7); memcpy(S.mem + LD_BOARD_OFF, "9610003716A", 12);
