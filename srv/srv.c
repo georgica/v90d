@@ -355,6 +355,10 @@ static void call_start(srv_t *s)
         d.modulations &= V90M_MOD_V34 | V90M_MOD_V32BIS | V90M_MOD_V22 | V90M_MOD_V21;
     }
     if (webtv_tf) d.modulations &= ~(V90M_MOD_V90 | V90M_MOD_V92);      /* (x2 and K56flex: not offered above) */
+    /* a WebTV box's modem asks V.34 for more than its own line probe
+     * projected and then fails error control: our transmit kept to the
+     * box's projection (libv90modem's V.34 transmit cap; answering only) */
+    if (s->webtv) d.modulations |= V90M_OPT_V34_TX_CAP;
     if (!c->v42) { d.v42.detect = 1; d.v42.fallback = 1; d.v42.t400_ms = 1; }  /* straight to start-stop */
     if (acts) {
         /* ACTS's terms: up to 9600 bit/s and on (V.32bis here; no V.34 or

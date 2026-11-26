@@ -3083,3 +3083,23 @@ caught it.
 - Tests: cfg (the setting, its refusals, the page), srv (any-number
   ports), ns_nat (both kinds of rule), ns_call (a call's log names the
   server, a Dreamcast port's rule follows the setting).
+
+## 0.13.0: libv90modem 0.7.0, and the V.34 cap on WebTV ports (2026-11-26)
+
+- **libv90modem 0.7.0** (from 0.6.1; a new ABI, v90d rebuilt against its
+  header). What it brings to v90d's calls:
+  - x2: a strict V.34 caller on a port with x2 on no longer fails at the
+    start (the inverted JM only for the first 2 s);
+  - V.34 Phase 3/4: the time limits allow for a late echo;
+  - the modem's "still sending" signal holds until the closing flag is out,
+    so a hang-up never cuts the last frame;
+  - a USR Courier's S after Jd on tilted lines (libv90modem PR #5);
+  - HST answering and MNP class 3: in the library, off; v90d does not
+    offer them.
+- **WebTV ports:** every call has the library's V.34 transmit cap
+  (V90M_OPT_V34_TX_CAP): on V.34 the box is sent no faster than its own
+  line probe projected, as a box's modem sometimes asks for more and then
+  fails error control. After an answered V.34 call the log has the
+  caller's projection, what it asked, and whether the cap held it.
+- Tests: srv (a WebTV call has the cap, an internet port's does not); the
+  host, ARM and namespace suites and the three images built against 0.7.0.

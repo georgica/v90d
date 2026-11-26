@@ -143,7 +143,10 @@ whatever number it dials; its own numbers, **800 932 8800**
 (1-800-WEBTV-00), **800 613 8199** and **484 820 1337** (with or without
 the 1), answer at once, any other after a 3 second pause. On 800 613 8199,
 the toll-free number a box with no TellyScript dials, the call is offered
-V.34 at most, as such a box hangs up above 33.6K. The call is a dial-up
+V.34 at most, as such a box hangs up above 33.6K. On V.34 the box is sent
+no faster than its own line probe projected (its modem sometimes asks for
+more and then fails error control); the log shows both rates after the
+call. The call is a dial-up
 connection, but the box logs in with its own built-in name and password,
 so any is taken, with no encryption and no terminal menu. For that call
 the box's old service addresses (10.0.0.1, 10.0.0.2, 10.0.128.1 and
@@ -256,7 +259,7 @@ binary in the image and no closed blob.
 
 The modem is [libv90modem](https://github.com/georgica/libv90modem)
 (GPL-2.0-only), a library in a repository of its own that v90d builds
-against. `fw/setup.sh` fetches a pinned release of it (0.6.1, checked by
+against. `fw/setup.sh` fetches a pinned release of it (0.7.0, checked by
 SHA-256, like the other dependencies) and unpacks it next to this tree
 (`fw/setup-libv90m.sh` does that part alone); to
 build against a working copy instead, say where it is with `LIBV90M=`
