@@ -60,7 +60,8 @@ struct ld_board { const char *part, *model; };
                         { "9610003611C", "ht801" },  /* HT801 V1.1C: the same */ \
                         { "9610003716A", "ht802" },  /* HT802 V1.6A: issue #4, confirmed by its owner; still under the untried rule */ \
                         { "9610003610A", "ht801" },  /* HT801 V1.0A: from a unit's status page */ \
-                        { "9610003611A", "ht801" } } /* HT801 V1.1A: the bench unit, part 9610003611A */
+                        { "9610003611A", "ht801" },  /* HT801 V1.1A: the bench unit, part 9610003611A */ \
+                        { "9610003721A", "ht802" } } /* HT802 V2.1A: issue #26, confirmed by its owner on v0.11.1-rc1; still under the untried rule */
 /* how many at the head of LD_BOARDS a unit has run: on the others a start
  * is confirmed only once the network has been heard (fw/rcS) */
 #define LD_BOARDS_TRIED 1
