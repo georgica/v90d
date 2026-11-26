@@ -294,6 +294,8 @@ typedef struct {
     int        svc_netstalgia;  /* 1 = answer the numbers of Netstalgia's list too */
     int        svc_menu;        /* 1 = the terminal menu on the Internet service (term/tmenu.h): a
                                    terminal program gets it, Dial-Up Networking still goes straight to PPP */
+    int        webtv_server;    /* CFG_WTV_*: where a WebTV box's service goes (srv/webtv.h) */
+    uint32_t   webtv_addr;      /* CFG_WTV_OTHER: the owner's server, host order */
     int        n_services;
     cfg_service_t services[CFG_MAX_SERVICES];
     /* [system] */
@@ -364,5 +366,16 @@ int cfg_svc_number_taken(const char *number);
 /* One dotted IPv4 address, nothing around it, into host byte order.
  * Returns 0, or -1 if v is not one. */
 int cfg_parse_ip(const char *v, uint32_t *out);
+/* [services] webtv_server: WebTV Redialed (followed by its name, srv/webtv.h),
+ * HackTV's public minisrv, ZefieTV, or an IPv4 address of the owner's */
+enum { CFG_WTV_REDIALED = 0, CFG_WTV_HACKTV = 1, CFG_WTV_ZEFIE = 2, CFG_WTV_OTHER = 3, CFG_WTV_COUNT = 4 };
+#define CFG_WTV_REDIALED_ADDR 0x1F616496u  /* 31.97.100.150: WebTV Redialed until its name is looked up */
+#define CFG_WTV_HACKTV_ADDR   0x47F479EAu  /* 71.244.121.234: HackTV Public Minisrv */
+#define CFG_WTV_ZEFIE_ADDR    0xD87EE8ABu  /* 216.126.232.171: ZefieTV */
+/* the server's fixed address, host order; 0 for WebTV Redialed (looked up) */
+uint32_t cfg_webtv_fixed(const cfg_t *c);
+/* 1 when the address can be a WebTV server: not 0.0.0.0, loopback,
+ * multicast or above (an address on the home network is fine) */
+int cfg_webtv_usable(uint32_t a);
 
 #endif

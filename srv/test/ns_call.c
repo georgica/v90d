@@ -690,6 +690,7 @@ int main(int argc, char **argv)
         strcpy(c.line_number, "5551234"); c.rings = 1;
         strcpy(c.port2.line_number, "777"); c.port2.rings = 1;
         c.port2.service = CFG_SERVICE_DREAMCAST;   /* port 2 is a game console's */
+        c.webtv_server = CFG_WTV_ZEFIE;            /* a server of the owner's choosing: no lookup, -Q aside */
         c.port2.dc_now = 1;                         /* and reports to Dreamcast Now */
         c.auth = CFG_AUTH_CHAP; c.n_users = 1; strcpy(c.users[0].name, "alice"); strcpy(c.users[0].secret, "wonderland");
         c.status_port = 8080;
@@ -748,13 +749,13 @@ int main(int argc, char **argv)
         snprintf(dclog, sizeof dclog, "%s/ns_dc.log", argv[2]);
         CHECK(file_has(dclog, "console service: address list with 1 rules"));
         CHECK(file_has(dclog, "console service on port 2: 1 address rules, 24 port ranges opened from lo"));
-        /* and the Dreamcast's old service address, 10.0.1.129, to WebTV Redialed */
+        /* and the Dreamcast's old service address, 10.0.1.129, to the WebTV server chosen */
         {
             static char rs[300], rcmd[700];
             snprintf(rs, sizeof rs, "%s/ns_dc.rules", argv[2]);
             snprintf(rcmd, sizeof rcmd, "nft list ruleset > %s 2>&1 || iptables-save -t nat > %s 2>&1", rs, rs);
             if (system(rcmd)) { }
-            CHECK(file_has(rs, "10.0.1.129")); CHECK(file_has(rs, "192.0.2.7"));
+            CHECK(file_has(rs, "10.0.1.129")); CHECK(file_has(rs, "216.126.232.171")); CHECK(!file_has(rs, "192.0.2.7"));
             CHECK(!file_has(rs, "157.57.221.51"));
         }
         /* port 1's number is a wrong number on port 2 */

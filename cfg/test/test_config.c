@@ -1122,7 +1122,7 @@ static void test_services(void)
     CHECK_EQ_I(c.svc_netstalgia, 0); CHECK_EQ_I(c.n_services, 2);
     CHECK_EQ_S(c.services[1].host, "192.168.1.20"); CHECK_EQ_S(c.services[1].name, "My board");
     CHECK(cfg_write(&c, 1, a, sizeof a) > 0);
-    CHECK(strstr(a, "\n[services]\nnetstalgia = off\nmenu = off\nservice = 13855961775 nwnrevival.com:5000 raw AOL NWN\n"
+    CHECK(strstr(a, "\n[services]\nnetstalgia = off\nmenu = off\nwebtv_server = redialed\nservice = 13855961775 nwnrevival.com:5000 raw AOL NWN\n"
                     "service = 5551234 192.168.1.20:23 telnet My board\n") != NULL);
     { cfg_t d; CHECK_EQ_I(parse(&d, a), CFG_OK); CHECK(memcmp(&c, &d, sizeof c) == 0); }
     cfg_default(&c); CHECK_EQ_I(c.svc_netstalgia, 1); CHECK_EQ_I(c.n_services, 0);
@@ -1131,6 +1131,35 @@ static void test_services(void)
     CHECK_EQ_I(c.svc_menu, 1);
     CHECK(cfg_write(&c, 1, a, sizeof a) > 0);
     CHECK(strstr(a, "\n[services]\nnetstalgia = on\nmenu = on\n") != NULL);
+    /* the WebTV server (srv/webtv.h): WebTV Redialed unless another is named */
+    cfg_default(&c); CHECK_EQ_I(c.webtv_server, CFG_WTV_REDIALED); CHECK(cfg_webtv_fixed(&c) == 0);
+    CHECK_EQ_I(parse(&c, "[services]\nwebtv_server = hacktv\n"), CFG_OK);
+    CHECK_EQ_I(c.webtv_server, CFG_WTV_HACKTV); CHECK(cfg_webtv_fixed(&c) == 0x47F479EAu);       /* 71.244.121.234 */
+    CHECK(cfg_write(&c, 1, a, sizeof a) > 0);
+    CHECK(strstr(a, "\nmenu = off\nwebtv_server = hacktv\n") != NULL);
+    CHECK_EQ_I(parse(&c, "[services]\nwebtv_server = zefie\n"), CFG_OK);
+    CHECK_EQ_I(c.webtv_server, CFG_WTV_ZEFIE); CHECK(cfg_webtv_fixed(&c) == 0xD87EE8ABu);        /* 216.126.232.171 */
+    /* an address of the owner's own, on the home network too */
+    CHECK_EQ_I(parse(&c, "[services]\nwebtv_server = 192.168.1.50\n"), CFG_OK);
+    CHECK_EQ_I(c.webtv_server, CFG_WTV_OTHER); CHECK(cfg_webtv_fixed(&c) == 0xC0A80132u);
+    CHECK(cfg_write(&c, 1, a, sizeof a) > 0);
+    CHECK(strstr(a, "\nwebtv_server = 192.168.1.50\n") != NULL);
+    { cfg_t d; CHECK_EQ_I(parse(&d, a), CFG_OK); CHECK(memcmp(&c, &d, sizeof c) == 0); }
+    CHECK_EQ_I(parse(&c, "[services]\nwebtv_server = redialed\n"), CFG_OK);
+    CHECK_EQ_I(c.webtv_server, CFG_WTV_REDIALED);
+    CHECK(cfg_write(&c, 1, a, sizeof a) > 0);
+    CHECK(strstr(a, "\nwebtv_server = redialed\n") != NULL);
+    /* not a server: loopback, nothing, multicast and above, a name */
+    CHECK_EQ_I(parse(&c, "[services]\nwebtv_server = 127.0.0.1\n"), CFG_ERR);
+    CHECK(strstr(err, "webtv_server: 127.0.0.1 cannot be a server") != NULL);
+    CHECK_EQ_I(parse(&c, "[services]\nwebtv_server = 0.0.0.0\n"), CFG_ERR);
+    CHECK_EQ_I(parse(&c, "[services]\nwebtv_server = 224.0.0.1\n"), CFG_ERR);
+    CHECK_EQ_I(parse(&c, "[services]\nwebtv_server = webtv.example\n"), CFG_ERR);
+    CHECK(strstr(err, "webtv_server: 'webtv.example' is not one of: redialed, hacktv, zefie, or an IPv4 address") != NULL);
+    cfg_default(&c); c.webtv_server = CFG_WTV_OTHER; c.webtv_addr = 0;
+    CHECK_EQ_I(cfg_validate(&c, err, sizeof err), CFG_ERR);
+    cfg_default(&c); c.webtv_server = CFG_WTV_COUNT;
+    CHECK_EQ_I(cfg_validate(&c, err, sizeof err), CFG_ERR);
     CHECK_EQ_I(parse(&c, "[services]\nmenu = maybe\n"), CFG_ERR);
     CHECK_EQ_I(parse(&c, "[services]\nservice = 555 h:1 raw\n"), CFG_ERR);
     CHECK(strstr(err, "t.conf:2: [services] service: missing name") != NULL);

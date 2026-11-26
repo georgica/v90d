@@ -124,6 +124,12 @@ update_check = off
 # on (default) or off: also answer the numbers of Netstalgia's signed list,
 # which the box fetches once a day. Off means it never asks for it.
 netstalgia = on
+# where a WebTV port's box, and a Dreamcast's 10.0.1.129, are sent:
+# redialed (default: WebTV Redialed, community.webtv.zone, looked up every
+# 10 minutes; 31.97.100.150 until then), hacktv (HackTV Public Minisrv,
+# 71.244.121.234), zefie (ZefieTV, 216.126.232.171), or the IPv4 address
+# of a server of your own (one on your network is fine).
+webtv_server = redialed
 # service = NUMBER HOST:PORT raw|telnet NAME, up to 16. NUMBER is 3 to 15
 # digits as dialled; raw passes the octets as they are, telnet says
 # "Calling NAME ..." and speaks telnet. The host may be on your network.
