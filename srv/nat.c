@@ -394,8 +394,21 @@ static int ipt_apply(const nat_plan *p)
         const char *r[] = { "-A", IPT_POST, "-o", p->vpn, "-j", "MASQUERADE", NULL };
         bad |= ipt(r);
     }
-    if ((p->peer[0] && (p->archive[0] || p->console[0])) || (p->peer[1] && (p->archive[1] || p->console[1]))) {
+    if ((p->peer[0] && (p->archive[0] || p->console[0] || p->webtv[0])) || (p->peer[1] && (p->archive[1] || p->console[1] || p->webtv[1]))) {
         if (ipt(npre) || ipt(hpre)) { ipt_unhook(); errno = EIO; return -1; }
+        for (i = 0; i < 2; i++) if (p->peer[i] && p->webtv[i]) {
+            static const char *const pr[] = { "tcp", "udp" };
+            for (j = 0; j < 2; j++) {
+                const char *r[] = { "-A", IPT_PRE, "-s", ip_str(p->peer[i], a), "-d", ip_str(NAT_WEBTV_DNS, b), "-p", pr[j],
+                                    "--dport", "53", "-j", "DNAT", "--to-destination", ip_str(p->webtv_dns, c), NULL };
+                if (p->webtv_dns) bad |= ipt(r);
+            }
+            for (j = 0; j < 2; j++) {
+                const char *r[] = { "-A", IPT_PRE, "-s", ip_str(p->peer[i], a), "-d", ip_str(NAT_WEBTV_ADDR, b), "-p", pr[j],
+                                    "-j", "DNAT", "--to-destination", ip_str(p->webtv_to, c), NULL };
+                if (p->webtv_to) bad |= ipt(r);
+            }
+        }
         for (i = 0; i < 2; i++) if (p->peer[i] && p->archive[i]) {
             static const struct { const char *proto, *port; int which; } R[] = {
                 { "udp", "53", 0 }, { "tcp", "80", 1 }, { "tcp", "21", 2 } };
@@ -485,7 +498,7 @@ static int nft_apply(const nat_plan *p)
     for (i = 0; i < 2; i++) if (p->masquerade && p->peer[i] && !p->lan[i]) rule_msg(&m, p->peer[i]);
     if (p->vpn[0]) masq_if_msg(&m, p->vpn);
 
-    if ((p->peer[0] && (p->archive[0] || p->console[0])) || (p->peer[1] && (p->archive[1] || p->console[1]))) {
+    if ((p->peer[0] && (p->archive[0] || p->console[0] || p->webtv[0])) || (p->peer[1] && (p->archive[1] || p->console[1] || p->webtv[1]))) {
         at = msg_begin(&m, nft(NFT_MSG_NEWCHAIN), NLM_F_CREATE | NLM_F_ACK, NFPROTO_IPV4, 0);
         attr_str(&m, NFTA_CHAIN_TABLE, TABLE);
         attr_str(&m, NFTA_CHAIN_NAME, CHAIN_PRE);
@@ -495,6 +508,16 @@ static int nft_apply(const nat_plan *p)
         nest_end(&m, hook);
         attr_str(&m, NFTA_CHAIN_TYPE, "nat");
         msg_end(&m, at);
+        for (i = 0; i < 2; i++) if (p->peer[i] && p->webtv[i]) {
+            if (p->webtv_dns) {
+                dnat_msg(&m, p->peer[i], NULL, NAT_WEBTV_DNS, 17, 53, 53, p->webtv_dns);
+                dnat_msg(&m, p->peer[i], NULL, NAT_WEBTV_DNS, 6, 53, 53, p->webtv_dns);
+            }
+            if (p->webtv_to) {
+                dnat_msg(&m, p->peer[i], NULL, NAT_WEBTV_ADDR, 6, 0, 0, p->webtv_to);
+                dnat_msg(&m, p->peer[i], NULL, NAT_WEBTV_ADDR, 17, 0, 0, p->webtv_to);
+            }
+        }
         for (i = 0; i < 2; i++) if (p->peer[i] && p->archive[i]) {
             redirect_msg(&m, p->peer[i], 17, 53, 53, p->dns_port);
             redirect_msg(&m, p->peer[i], 6, 80, 80, p->http_port);

@@ -25,6 +25,13 @@ int nat_masquerade2(uint32_t peer_ip, uint32_t peer2_ip);
  *    ports lo..hi of protocol `proto` is passed on to the console. Only one
  *    console can have them: the first port that is one. */
 typedef struct { uint32_t from, to; uint16_t port; uint8_t proto; } nat_rewrite;
+/* For a peer in a WebTV call (webtv[i] set, srv.h srv_webtv): what it sends
+ * to NAT_WEBTV_ADDR (TCP or UDP, any port) goes to webtv_to, the port
+ * unchanged (no rule while webtv_to is 0); its DNS (UDP and TCP port 53) to
+ * NAT_WEBTV_DNS goes to webtv_dns. A WebTV / MSN TV box talks to these
+ * fixed addresses of its old network. */
+#define NAT_WEBTV_ADDR 0x0A000001u      /* 10.0.0.1 */
+#define NAT_WEBTV_DNS  0x9D39DD33u      /* 157.57.221.51 */
 typedef struct { uint8_t proto; uint16_t lo, hi; } nat_open;
 #define NAT_REWRITE_MAX 32
 #define NAT_OPEN_MAX    40
@@ -36,6 +43,8 @@ typedef struct {
     uint16_t http_port, ftp_port, dns_port, pasv_lo, pasv_hi;
     int      console[2];        /* per peer */
     int      lan[2];            /* per peer: a host on the network itself, not masqueraded, no ports opened */
+    int      webtv[2];          /* per peer: in a WebTV call */
+    uint32_t webtv_to, webtv_dns;   /* WebTV Redialed (0 = not known yet), the port's name server; host order */
     const nat_rewrite *rewrite; int n_rewrite;
     const nat_open *open; int n_open;
     char     wan[16];           /* interface name; "" = no ports opened */
