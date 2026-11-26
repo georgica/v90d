@@ -3103,3 +3103,25 @@ caught it.
   caller's projection, what it asked, and whether the cap held it.
 - Tests: srv (a WebTV call has the cap, an internet port's does not); the
   host, ARM and namespace suites and the three images built against 0.7.0.
+
+## 0.13.1: libv90modem 0.7.1, and a log line for every stop of the data in a call (2026-11-26)
+
+- A WebTV box sometimes drops the call and shows its call-waiting message:
+  its TellyScript turns on the modem's call-waiting detection, and the box
+  takes a short stop of the data for a call-waiting interruption. On
+  Netstalgia a box's modem renegotiated every ~22 s at the rate it had and
+  hung up 8 to 10 s after one of those stops. v90d logged none of them.
+- **libv90modem 0.7.1** (from 0.7.0; additive, the same ABI): it tells who
+  began each retrain and rate renegotiation (v90m_get_restarts).
+- Now each stop, as data moves again, is a log line: how long the data was
+  stopped, how long after PPP came up, a retrain or a rate renegotiation,
+  who began it (the caller, or us and why), and the rates before and
+  after, for example `data stopped 0.36 s, 1.0 s after PPP came up: a rate
+  renegotiation begun by the caller, 50666/28800 -> 50666/28800 bit/s`.
+  dce keeps the last stop for this (dce_last_stop).
+- The member-side fix for such a box: call-waiting detection off in its
+  dialing settings.
+- Tests: dce (a renegotiation and a retrain by the caller, and one of
+  ours, are recorded with who began them; none before), ns_call (a V.90
+  caller renegotiating at its rate on a WebTV port: the line is in the
+  daemon's log).

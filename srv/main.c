@@ -439,6 +439,37 @@ static void log_ppp_end(const char *who, const dce_t *d)
     logf_(CFG_LOG_INFO, "%s  PPP ended: %s%s", who, why[d->ppp_end], mppe);
 }
 
+/* each stop of the data in a call, as it ends: a box that renegotiates on
+ * a timer, or hangs up after a stop it took for call waiting, shows here */
+static void log_stops(int port)
+{
+    static unsigned seen[PORTS];
+    dce_stop_t k;
+    char who[12] = "", since[40] = "";
+    unsigned n = dce_last_stop(&S[port].dce, &k);
+    const char *whose;
+    if (n == seen[port]) return;
+    seen[port] = n;
+    if (n == 0) return;                 /* a new call */
+    if (n_ports > 1) snprintf(who, sizeof who, "port %d: ", port + 1);
+    if (k.since_ip_ms >= 0)
+        snprintf(since, sizeof since, ", %ld.%01ld s after PPP came up",
+                 (long)k.since_ip_ms / 1000, (long)k.since_ip_ms % 1000 / 100);
+    /* who began it, as libv90modem tells (v90m_get_restarts) */
+    switch (k.cause) {
+    case V90M_CAUSE_FAR:       whose = " begun by the caller"; break;
+    case V90M_CAUSE_OURS:      whose = " begun by us"; break;
+    case V90M_CAUSE_RX_ERRORS: whose = " begun by us: too many receive errors"; break;
+    case V90M_CAUSE_RX_LOST:   whose = " begun by us: the caller's signal lost"; break;
+    case V90M_CAUSE_HOST:      whose = " begun by us: asked by v90d"; break;
+    default:                   whose = ""; break;
+    }
+    logf_(CFG_LOG_INFO, "%s  data stopped %lu.%02lu s%s: %s%s, %d/%d -> %d/%d bit/s",
+          who, (unsigned long)k.dur_ms / 1000, (unsigned long)k.dur_ms % 1000 / 10, since,
+          k.retrain ? "a retrain" : "a rate renegotiation", whose,
+          k.tx_before, k.rx_before, k.tx_after, k.rx_after);
+}
+
 static void log_last_call(int port)
 {
     const st_call_t *h = status_call(&S[port].status, 0);
@@ -689,6 +720,7 @@ int main(int argc, char **argv)
             }
             if (is_lin) for (i = 0; i < LINE_BLOCK; i++) tx[i] = srv_tick_lin(&S[p], offhook, lin[i]);
             else for (i = 0; i < LINE_BLOCK; i++) tx[i] = srv_tick(&S[p], offhook, rx[i]);
+            log_stops(p);
             if (p == cap_port && cap_path) {
                 /* 80 codewords heard, then the 80 sent in answer, per block; 8 MB at most */
                 if (offhook && cap_fd < 0 && cap_n == 0) {
