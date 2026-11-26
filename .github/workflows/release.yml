@@ -98,7 +98,7 @@ jobs:
           import re, sys
           u = sys.argv[1]
           sums = dict(reversed(l.split()) for l in open("SHA256SUMS") if l.strip())
-          rows = [("v90d-ht802fw.bin", "Grandstream HT802 (V2.5A, V1.6A)"),
+          rows = [("v90d-ht802fw.bin", "Grandstream HT802 (V2.5A, V1.6A, V2.1A)"),
                   ("v90d-ht801fw.bin", "Grandstream HT801 (V1.0A confirmed, V1.1A boots; BOARDS.md)"),
                   ("v90d-obi200.fw", "Obihai OBi200 on the community firmware (fw/obi/README.md)"),
                   ("SHA256SUMS", "the checksums")]

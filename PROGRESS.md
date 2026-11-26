@@ -3002,3 +3002,14 @@ is done (design and plan in `docs/superpowers/`).
   cases that are not WebTV), test_webtv (the address picked), ns_nat (the
   rewrites, both ports), ns_call (a whole call through the daemon).
 - Not yet tried with a real box on a v90d port.
+
+## 0.12.0: WebTV and the HT802 V2.1A (2026-11-25)
+
+Everything merged since 0.11.0 (#23 to #28):
+
+- **WebTV** (#28): a WebTV / MSN TV box dialing its own numbers (800-932-8800, 800-613-8199, 484-820-1337) on an internet or archive port reaches WebTV Redialed; `[services] webtv`, on by default. The port's own number dialed with the 1 in front is now the port's own for every special number.
+- **The HT802 V2.1A** (#27, issue #26), confirmed by its owner on the v0.11.1-rc1 pre-release.
+- **1-800-BBS-DIAL shows the BBS directory** and keeps the typing (#23).
+- **The libv90modem fetch** is its own script, `fw/setup-libv90m.sh` (#24 by marrold, #25).
+
+Proof for this release: the host suites and the namespace suite (a whole WebTV call through the daemon); WebTV through Netstalgia's dial-in with a real box on 2026-11-25. Not yet tried: a real WebTV box on a v90d port.
