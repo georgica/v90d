@@ -260,6 +260,16 @@ static uint32_t if_address(const char *name)
     return a;
 }
 
+/* whether an interface is up and running (pppd sets the address first) */
+static int if_running(const char *name)
+{
+    struct ifreq ifr; int s = socket(AF_INET, SOCK_DGRAM, 0), up = 0;
+    memset(&ifr, 0, sizeof ifr); strncpy(ifr.ifr_name, name, IFNAMSIZ - 1);
+    if (ioctl(s, SIOCGIFFLAGS, &ifr) == 0) up = (ifr.ifr_flags & (IFF_UP | IFF_RUNNING)) == (IFF_UP | IFF_RUNNING);
+    close(s);
+    return up;
+}
+
 /* ---- the far end: its own network namespace, pppd, and the file client ---- */
 typedef struct { int ip_up, connected, down_ok, up_ok; unsigned long got; char ack; } far_t;
 
@@ -298,10 +308,11 @@ static void far_end(int ppp_fd, int res_fd, const char *log, const char *opts)
         _exit(127);
     }
     close(ppp_fd);
-    /* wait for ppp0 to have the address the server hands out */
+    /* wait for ppp0 to have the address the server hands out, and to be up:
+     * pppd sets the address, runs ip-pre-up, and only then brings it up */
     for (i = 0; i < 600 && !r.ip_up; i++) {
         if (waitpid(pd, NULL, WNOHANG) == pd) { pd = -1; break; }
-        if (if_address("ppp0") == PPP_PEER) r.ip_up = 1;
+        if (if_address("ppp0") == PPP_PEER && if_running("ppp0")) r.ip_up = 1;
         else usleep(50000);
     }
     if (r.ip_up) {
@@ -531,6 +542,15 @@ int main(int argc, char **argv)
         mount("none", "/run", "tmpfs", 0, NULL) != 0) {
         printf("  ns_pppd: cannot cover /etc/ppp and /run (%s): not a mount namespace of our own? Nothing tried\n", strerror(errno));
         return 0;
+    }
+    {
+        /* pppd gives ppp0 its address, runs ip-pre-up and waits for it, and
+         * only then brings ppp0 up: a caller that connects as soon as the
+         * address shows can find no route yet (seen under load). Our
+         * ip-pre-up takes half a second, so every call meets that gap. */
+        FILE *f = fopen("/etc/ppp/ip-pre-up", "w");
+        if (f) { fputs("#!/bin/sh\nsleep 0.5\n", f); fclose(f); }
+        chmod("/etc/ppp/ip-pre-up", 0755);
     }
     snprintf(conf, sizeof conf, "%s/nsp_v90d.conf", argv[2]);
     snprintf(log, sizeof log, "%s/nsp_pppd.log", argv[2]);
