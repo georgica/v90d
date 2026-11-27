@@ -400,6 +400,16 @@ static void ppp_trace_log(void *ctx, int out, uint32_t ms, uint16_t proto, const
     logf_(CFG_LOG_DEBUG, "%s%s", who, t);
 }
 
+/* the call that ended came from Windows 98 (its first LCP request said so):
+ * MS-CHAP v1 was offered first, which its encryption needs */
+static void log_ppp_win98(const char *who, const ppp_t *ppp)
+{
+    ppp_status_t ps;
+    ppp_get_status(ppp, &ps);
+    if (ps.counters.win98)
+        logf_(CFG_LOG_INFO, "%s  PPP: the caller is Windows 98 (by its first LCP request): MS-CHAP v1 offered first", who);
+}
+
 /* PPP compression (CCP) of the call that ended: one line, only if it was used */
 static void log_ppp_comp(const char *who, const ppp_t *ppp)
 {
@@ -515,6 +525,7 @@ static void log_last_call(int port)
         logf_(CFG_LOG_INFO, "%s  link: k %d/%d, N401 %d/%d, %s; I frames %lu sent (%lu again), %lu received (%lu dropped), REJ %lu sent %lu received, T401 ran out %lu times; compressor %lu -> %lu octets, expander %lu -> %lu",
               who, v.k_tx, v.k_rx, v.n401_tx, v.n401_rx, comp,
               v.tx_i, v.tx_i_retx, v.rx_i, v.rx_i_dropped, v.tx_rej, v.rx_rej, v.t401_expiries, v.comp_in, v.comp_out, v.decomp_in, v.decomp_out);
+        log_ppp_win98(who, &S[port].dce.ppp);
         log_ppp_comp(who, &S[port].dce.ppp);
         {
             ppp_status_t ps; char t[200];

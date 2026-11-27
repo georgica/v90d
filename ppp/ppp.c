@@ -32,6 +32,7 @@
 #define CHAP_SUCCESS     3
 #define CHAP_FAILURE     4
 #define CHAP_ALG_MD5     5
+#define CHAP_ALG_MSCHAP1 0x80   /* MS-CHAP v1 (RFC 2433) */
 #define CHAP_ALG_MSCHAP2 0x81
 
 /* CCP codes beyond the common seven (RFC 1962 section 3) and the options
@@ -63,6 +64,17 @@
 static uint16_t get16(const uint8_t *p)
 {
     return (uint16_t)(((unsigned)p[0] << 8) | p[1]);
+}
+
+/* the three CHAP variants: MD5, MS-CHAP v1, MS-CHAPv2 */
+static int is_chap(unsigned a)
+{
+    return a == PPP_AUTH_CHAP || a == PPP_AUTH_MSCHAPV1 || a == PPP_AUTH_MSCHAPV2;
+}
+
+static uint8_t chap_alg(unsigned a)
+{
+    return a == PPP_AUTH_MSCHAPV1 ? CHAP_ALG_MSCHAP1 : a == PPP_AUTH_MSCHAPV2 ? CHAP_ALG_MSCHAP2 : CHAP_ALG_MD5;
 }
 
 static uint32_t get32(const uint8_t *p)
@@ -434,6 +446,35 @@ static int negotiate(ppp_t *p, ppp_fsm_t *f, judge_fn judge,
 /* ---------------------------------------------------------------- */
 /* LCP */
 
+/* Windows 98 SE Dial-Up Networking's first LCP request, and only it: ACCM,
+ * magic number, PFC, ACFC and callback by CBCP (13, operation 6), in that
+ * order, nothing else. (Windows ME, 2000 and XP add options; pppd asks for
+ * no callback.) */
+static int is_win98_lcp(const uint8_t *o, size_t len)
+{
+    static const uint8_t want[5][2] = {
+        { LCP_OPT_ACCM, 6 }, { LCP_OPT_MAGIC, 6 }, { LCP_OPT_PFC, 2 }, { LCP_OPT_ACFC, 2 }, { 13, 3 } };
+    size_t pos = 0, vlen, i = 0;
+    uint8_t type;
+    const uint8_t *val;
+
+    while (ppp_fsm_next_option(o, len, &pos, &type, &val, &vlen)) {
+        if (i == 5 || type != want[i][0] || vlen + 2 != want[i][1])
+            return 0;
+        if (type == 13 && val[0] != 6)
+            return 0;
+        i++;
+    }
+    return i == 5 && pos == len;
+}
+
+/* our first LCP request goes out: the caller's came (or none in time) */
+static void lcp_release(ppp_t *p)
+{
+    p->lcp_wait_ms = 0;
+    ppp_fsm_up(&p->lcp);
+}
+
 static void lcp_reset(ppp_fsm_t *f)
 {
     ppp_t *p = (ppp_t *)f->ctx;
@@ -446,7 +487,13 @@ static void lcp_reset(ppp_fsm_t *f)
     p->magic = p->w_magic ? new_magic(p, 0) : 0;
     p->w_pfc = !p->cfg.no_pfc;
     p->w_acfc = !p->cfg.no_acfc;
-    if (p->cfg.auth & PPP_AUTH_MSCHAPV2)
+    /* MS-CHAPv2 first; MS-CHAP v1 first for Windows 98 (it logs in with v2,
+     * then cannot make MPPE keys from it and hangs up: error 742), or where
+     * v1 is the only one allowed; then CHAP-MD5, PAP */
+    if ((p->cfg.auth & PPP_AUTH_MSCHAPV1) &&
+        (p->cnt.win98 || !(p->cfg.auth & PPP_AUTH_MSCHAPV2)))
+        p->w_auth = PPP_AUTH_MSCHAPV1;
+    else if (p->cfg.auth & PPP_AUTH_MSCHAPV2)
         p->w_auth = PPP_AUTH_MSCHAPV2;
     else if (p->cfg.auth & PPP_AUTH_CHAP)
         p->w_auth = PPP_AUTH_CHAP;
@@ -476,12 +523,12 @@ static size_t lcp_build_cr(ppp_fsm_t *f, uint8_t *o, size_t max)
         put32(o + n, p->accm);
         n += 4;
     }
-    if (p->w_auth == PPP_AUTH_CHAP || p->w_auth == PPP_AUTH_MSCHAPV2) {
+    if (is_chap(p->w_auth)) {
         o[n++] = LCP_OPT_AUTH;
         o[n++] = 5;
         o[n++] = (uint8_t)(PPP_PROTO_CHAP >> 8);
         o[n++] = (uint8_t)PPP_PROTO_CHAP;
-        o[n++] = p->w_auth == PPP_AUTH_MSCHAPV2 ? CHAP_ALG_MSCHAP2 : CHAP_ALG_MD5;
+        o[n++] = chap_alg(p->w_auth);
     } else if (p->w_auth == PPP_AUTH_PAP) {
         o[n++] = LCP_OPT_AUTH;
         o[n++] = 4;
@@ -620,6 +667,8 @@ static void lcp_auth_refused(ppp_t *p, unsigned suggestion)
      * PAP (a password in clear) while CHAP-MD5 is still to be tried */
     if (suggestion & left)
         next = suggestion;
+    else if (left & PPP_AUTH_MSCHAPV1)
+        next = PPP_AUTH_MSCHAPV1;
     else if (left & PPP_AUTH_MSCHAPV2)
         next = PPP_AUTH_MSCHAPV2;
     else if (left & PPP_AUTH_CHAP)
@@ -668,8 +717,10 @@ static void lcp_recv_nak(ppp_fsm_t *f, const uint8_t *opts, size_t len)
                 else if (vlen == 3 && val[0] == 0xc2 && val[1] == 0x23 &&
                          val[2] == CHAP_ALG_MSCHAP2)
                     sug = PPP_AUTH_MSCHAPV2;
-                /* anything else (MS-CHAP v1, 0x80, which we do not do;
-                 * EAP) is no suggestion we can take */
+                else if (vlen == 3 && val[0] == 0xc2 && val[1] == 0x23 &&
+                         val[2] == CHAP_ALG_MSCHAP1)
+                    sug = PPP_AUTH_MSCHAPV1;
+                /* anything else (EAP, say) is no suggestion we can take */
                 lcp_auth_refused(p, sug);
             }
             break;
@@ -761,6 +812,8 @@ static void lcp_down(ppp_fsm_t *f)
     /* the keys of this login do not outlive it */
     ppp_wipe(p->mppe_send, sizeof p->mppe_send);
     ppp_wipe(p->mppe_recv, sizeof p->mppe_recv);
+    ppp_wipe(p->mppe_short_send, sizeof p->mppe_short_send);
+    ppp_wipe(p->mppe_short_recv, sizeof p->mppe_short_recv);
     ppp_wipe(p->mschap2_resp, sizeof p->mschap2_resp);
     ppp_mppe_reset(&p->mppe);
     /* back to the default framing */
@@ -821,8 +874,7 @@ static int lcp_ext_code(ppp_fsm_t *f, uint8_t code, uint8_t id,
             /* it will not take compressed datagrams after all */
             ppp_fsm_close(&p->ccp);
         } else if ((proto == PPP_PROTO_PAP && p->auth_proto == PPP_AUTH_PAP) ||
-                   (proto == PPP_PROTO_CHAP && (p->auth_proto == PPP_AUTH_CHAP ||
-                                                p->auth_proto == PPP_AUTH_MSCHAPV2))) {
+                   (proto == PPP_PROTO_CHAP && is_chap(p->auth_proto))) {
             if (!p->auth_ok)
                 request_close(p, PPP_END_AUTH_REFUSED);
         }
@@ -932,9 +984,12 @@ static void chap_send_challenge(ppp_t *p)
     uint8_t v[17];
     const char *name = p->cfg.hostname;
 
-    v[0] = 16;
-    memcpy(v + 1, p->challenge, 16);
-    tx_cp(p, PPP_PROTO_CHAP, CHAP_CHALLENGE, p->auth_id, v, 17,
+    /* MS-CHAP v1's challenge is 8 octets (RFC 2433 section 5), the others' 16 */
+    size_t cl = p->auth_proto == PPP_AUTH_MSCHAPV1 ? 8 : 16;
+
+    v[0] = (uint8_t)cl;
+    memcpy(v + 1, p->challenge, cl);
+    tx_cp(p, PPP_PROTO_CHAP, CHAP_CHALLENGE, p->auth_id, v, 1 + cl,
           (const uint8_t *)name, strlen(name));
 }
 
@@ -942,7 +997,7 @@ static void auth_start(ppp_t *p)
 {
     p->auth_timer = p->lcp.restart_ms;
     p->auth_tries = 1;
-    if (p->auth_proto == PPP_AUTH_CHAP || p->auth_proto == PPP_AUTH_MSCHAPV2) {
+    if (is_chap(p->auth_proto)) {
         /* RFC 1994 4.1: a new identifier and an unpredictable value for
          * every new challenge (the 16-octet MS-CHAPv2 authenticator
          * challenge is sent the same way) */
@@ -965,7 +1020,7 @@ static void auth_tick(ppp_t *p, uint32_t ms)
             return;
         }
         p->auth_tries++;
-        if (p->auth_proto == PPP_AUTH_CHAP || p->auth_proto == PPP_AUTH_MSCHAPV2)
+        if (is_chap(p->auth_proto))
             chap_send_challenge(p);   /* retransmission: same id and value */
     }
     p->auth_timer -= ms;
@@ -999,6 +1054,14 @@ static void auth_reply(ppp_t *p, uint8_t id)
             }
             tx_cp(p, PPP_PROTO_CHAP, CHAP_FAILURE, id, (const uint8_t *)e, sizeof e - 1, NULL, 0);
         }
+    } else if (p->auth_proto == PPP_AUTH_MSCHAPV1) {
+        /* RFC 2433 section 5: Success carries any text; Failure
+         * "E=<error> R=<retry>" (no retry offered) */
+        static const char e[] = "E=691 R=0";
+        if (p->auth_ok)
+            tx_cp(p, PPP_PROTO_CHAP, CHAP_SUCCESS, id, (const uint8_t *)msg, ml, NULL, 0);
+        else
+            tx_cp(p, PPP_PROTO_CHAP, CHAP_FAILURE, id, (const uint8_t *)e, sizeof e - 1, NULL, 0);
     } else if (p->auth_proto == PPP_AUTH_CHAP) {
         tx_cp(p, PPP_PROTO_CHAP, p->auth_ok ? CHAP_SUCCESS : CHAP_FAILURE, id,
               (const uint8_t *)msg, ml, NULL, 0);
@@ -1131,6 +1194,42 @@ static void chap_input(ppp_t *p, const uint8_t *pkt, size_t n)
                 ppp_mschap2_auth_response(secret, (size_t)sl, ntr, peer, p->challenge,
                                           user, ul, p->mschap2_resp);
                 ppp_mppe_master_keys(secret, (size_t)sl, ntr, 16, p->mppe_send, p->mppe_recv);
+                /* RFC 3079 3.3: the short keys are the first 8 octets */
+                memcpy(p->mppe_short_send, p->mppe_send, 8);
+                memcpy(p->mppe_short_recv, p->mppe_recv, 8);
+                p->mppe_have = 1;
+            }
+        }
+    } else if (p->auth_proto == PPP_AUTH_MSCHAPV1) {
+        /* RFC 2433 section 5: the 49-octet value is LM-Response[24],
+         * NT-Response[24], Flags[1]. Only the NT response (flag 1) is
+         * taken: the LM one alone (flag 0) proves only the password
+         * upper-cased and cut to 14 octets. The keys (RFC 3079 section 2)
+         * are the same both ways: 16 octets from the NT hash's hash and the
+         * challenge, 8 for the short ones from the LAN Manager hash (which
+         * has no challenge in it: Microsoft's design, and all Windows 98
+         * does for 40/56-bit MPPE). */
+        size_t k = ul;
+        while (k > 0 && user[k - 1] != '\\') k--;
+        if (k > 0) {
+            if (sl < 0) sl = lookup_secret(p, user + k, ul - k, secret, sizeof secret);
+            user += k; ul -= k;
+        }
+        if (vs == 49) {
+            const uint8_t *ntr = d + 1 + 24;
+            int use_nt = d[1 + 48] & 1;
+            uint8_t h[16];
+            ppp_nt_password_hash(secret, sl >= 0 ? (size_t)sl : 0, h);
+            ppp_mschap1_response(p->challenge, h, want);
+            ok = sl >= 0 && use_nt && same_bytes(want, ntr, 24);
+            ppp_wipe(h, sizeof h);
+            if (ok) {
+                ppp_mschap1_mppe_start(secret, (size_t)sl, p->challenge, 16, p->mppe_send);
+                memcpy(p->mppe_recv, p->mppe_send, 16);
+                ppp_mschap1_mppe_start(secret, (size_t)sl, p->challenge, 8, h);
+                memcpy(p->mppe_short_send, h, 8);
+                memcpy(p->mppe_short_recv, h, 8);
+                ppp_wipe(h, sizeof h);
                 p->mppe_have = 1;
             }
         }
@@ -1410,15 +1509,14 @@ static int ccp_wanted(const ppp_t *p)
 }
 
 /* On request: does this option-18 value ask for encryption? It names an
- * MPPE key length, and the keys are in hand. A request that also asks for
- * MPPC (Windows' "optional encryption", 0x61) takes either, and we do not
- * do both at once: it keeps MPPC (in the clear, as text is far quicker
- * compressed) where we do MPPC, and gets MPPE only where we do not. */
+ * MPPE key length, and the keys are in hand. MPPC asked as well does not
+ * change that: Windows XP with "Require data encryption" and software
+ * compression asks 0xe1, Windows 98 0x21, and both hang up (error 742) when
+ * Nak'd toward MPPC alone; Windows' optional encryption asks for MPPC only.
+ * We do not do both at once, so such a caller gets MPPE. */
 static int mppe_asks(const ppp_t *p, uint32_t v)
 {
-    if (!(v & MPPE_KEYS) || !p->mppe_have)
-        return 0;
-    return !((v & MPPC_BIT) && (p->cfg.comp & PPP_COMP_MPPC));
+    return (v & MPPE_KEYS) && p->mppe_have;
 }
 
 /* MPPE is what our request carries and what we take: encryption required,
@@ -1726,7 +1824,8 @@ static void ccp_up(ppp_fsm_t *f)
         }
         /* RFC 3079 3.3: the short keys are the first 8 octets of the
          * master start keys, their first octets then forced (3.4) */
-        ppp_mppe_begin(&p->mppe, p->mppe_send, p->mppe_recv,
+        ppp_mppe_begin(&p->mppe, p->mppe_key == MPPE_BIT_S ? p->mppe_send : p->mppe_short_send,
+                       p->mppe_key == MPPE_BIT_S ? p->mppe_recv : p->mppe_short_recv,
                        p->mppe_key == MPPE_BIT_S ? 16 : 8,
                        p->mppe_key == MPPE_BIT_M ? PPP_MPPE_FORCE_56
                        : p->mppe_key == MPPE_BIT_L ? PPP_MPPE_FORCE_40 : PPP_MPPE_FORCE_NONE);
@@ -2263,6 +2362,18 @@ static void handle_frame(ppp_t *p)
     n = p->rx.len - off;
     trace(p, 0, proto, info, n, NULL, 0, NULL, 0);
 
+    if (p->lcp_wait_ms) {
+        /* the caller's first frame while ours waits: its LCP request says
+         * whether it is Windows 98 (MS-CHAP v1 first); anything else lets
+         * ours go as it is */
+        if (proto == PPP_PROTO_LCP && n >= 4 && info[0] == PPP_CONF_REQ) {
+            size_t l = ((size_t)info[2] << 8) | info[3];
+            if (l >= 4 && l <= n)
+                p->cnt.win98 = (uint8_t)is_win98_lcp(info + 4, l - 4);
+        }
+        lcp_release(p);
+    }
+
     if (proto == PPP_PROTO_LCP) {
         int was_open = p->lcp.state == PPP_FSM_OPENED;
 
@@ -2280,7 +2391,7 @@ static void handle_frame(ppp_t *p)
     if (proto == PPP_PROTO_PAP || proto == PPP_PROTO_CHAP) {
         int match = proto == PPP_PROTO_PAP
                         ? p->auth_proto == PPP_AUTH_PAP
-                        : (p->auth_proto == PPP_AUTH_CHAP || p->auth_proto == PPP_AUTH_MSCHAPV2);
+                        : is_chap(p->auth_proto);
 
         if (match) {
             if (proto == PPP_PROTO_PAP)
@@ -2440,7 +2551,14 @@ void ppp_lower_up(ppp_t *p)
 
     set_phase(p, PPP_PHASE_ESTABLISH);
     ppp_fsm_open(&p->lcp);
-    ppp_fsm_up(&p->lcp);
+    p->lcp_wait_ms = 0;
+    if ((p->cfg.auth & PPP_AUTH_MSCHAPV1) && (p->cfg.auth & PPP_AUTH_MSCHAPV2))
+        /* which MS-CHAP goes first depends on who calls (lcp_reset): ours
+         * waits for the caller's first request, which says, up to a second
+         * (callers send theirs at once; Windows retries after 3 s) */
+        p->lcp_wait_ms = 1000;
+    else
+        ppp_fsm_up(&p->lcp);
 }
 
 void ppp_lower_down(ppp_t *p)
@@ -2450,6 +2568,7 @@ void ppp_lower_down(ppp_t *p)
     ppp_fsm_down(&p->lcp);        /* This-Layer-Down if it was Opened */
     network_stop(p);
     ppp_fsm_close(&p->lcp);       /* settle in Initial */
+    p->lcp_wait_ms = 0;
     p->pending_close = PPP_END_NONE;
     p->tx_head = p->tx_tail = 0;  /* nothing can be sent any more */
     set_phase(p, PPP_PHASE_DEAD);
@@ -2666,6 +2785,12 @@ void ppp_tick(ppp_t *p, uint32_t ms)
     if (p->phase == PPP_PHASE_DEAD)
         return;
     p->uptime_ms += ms;
+    if (p->lcp_wait_ms) {
+        if (ms >= p->lcp_wait_ms)
+            lcp_release(p);         /* no request from the caller: ours */
+        else
+            p->lcp_wait_ms -= ms;
+    }
     if (p->ccp_wait_ms) {
         if (ms >= p->ccp_wait_ms)
             ccp_start(p);           /* the caller sent no request: ours */

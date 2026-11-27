@@ -326,7 +326,7 @@ static void adopt(srv_t *s, const cfg_t *cfg)
     s->status.service = cfg->service;
     s->status.v92 = cfg->v92 && full_options(cfg, 0);
     s->status.ppp_compression = cfg->compression && full_options(cfg, 0);
-    /* MPPE for a caller that asks: a login offers MS-CHAPv2 first
+    /* MPPE for a caller that asks: a login offers MS-CHAP first
      * (call_start), never on a console or WebTV port */
     s->status.ppp_encryption = cfg->auth != CFG_AUTH_NONE && full_options(cfg, 0) && cfg->service != CFG_SERVICE_WEBTV;
     for (i = 0; i < CFG_MAX_USERS; i++) {
@@ -504,8 +504,10 @@ static void call_start(srv_t *s)
         d.v42.lapm.v44_tx = 0; d.v42.lapm.v44_rx = 0;
     }
     /* Encryption on request: with a login (CHAP or PAP), MS-CHAPv2 is
-     * offered first, then CHAP-MD5, then (a PAP port) PAP, each for a
-     * caller that Naks or Rejects the one before; so a caller that wants
+     * offered first (MS-CHAP v1 first to Windows 98, recognised by its first
+     * LCP request: it logs in with v2 but makes MPPE keys from v1 only), then
+     * the other MS-CHAP, CHAP-MD5 and (a PAP port) PAP, each for a caller
+     * that Naks or Rejects the one before; so a caller that wants
      * MPPE has the keys for it and gets it (ppp.h, encrypt 0), and one
      * that does not ask is served in the clear. Never on a console port,
      * which keeps the port's own login, nor for a WebTV box. */
@@ -517,7 +519,7 @@ static void call_start(srv_t *s)
         d.ppp.pap_cb = webtv_pap;
         d.ppp.no_vj = 1;            /* no VJ header compression either: not tried with a box */
     } else if (enc)
-        d.ppp.auth = PPP_AUTH_MSCHAPV2 | PPP_AUTH_CHAP | (c->auth == CFG_AUTH_PAP ? PPP_AUTH_PAP : 0);
+        d.ppp.auth = PPP_AUTH_MSCHAPV1 | PPP_AUTH_MSCHAPV2 | PPP_AUTH_CHAP | (c->auth == CFG_AUTH_PAP ? PPP_AUTH_PAP : 0);
     else
         d.ppp.auth = c->auth == CFG_AUTH_CHAP ? PPP_AUTH_CHAP : c->auth == CFG_AUTH_PAP ? PPP_AUTH_PAP : PPP_AUTH_NONE;
     d.ppp.encrypt = 0;              /* on request, never required */

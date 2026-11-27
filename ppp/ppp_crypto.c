@@ -356,6 +356,55 @@ void ppp_mschap2_nt_response(const uint8_t auth_chal[16], const uint8_t peer_cha
     ppp_wipe(pwhash, sizeof pwhash);
 }
 
+/* ---- MS-CHAP v1 (RFC 2433) ---- */
+
+void ppp_mschap1_response(const uint8_t chal[8], const uint8_t pwhash[16], uint8_t out[24])
+{
+    challenge_response(chal, pwhash, out);
+}
+
+/* RFC 2433 A.2/A.3: the password upper-cased (ASCII letters; anything else
+ * as it is), zero-padded or cut to 14 octets, each 7-octet half the DES key
+ * for "KGS!@#$%" */
+void ppp_lm_password_hash(const uint8_t *pass, size_t plen, uint8_t out[16])
+{
+    static const uint8_t std[8] = { 'K','G','S','!','@','#','$','%' };
+    uint8_t u[14], k[8];
+    size_t i;
+    memset(u, 0, sizeof u);
+    for (i = 0; i < plen && i < sizeof u; i++)
+        u[i] = (uint8_t)(pass[i] >= 'a' && pass[i] <= 'z' ? pass[i] - 32 : pass[i]);
+    ppp_des_key_from_7(u + 0, k); ppp_des_encrypt(k, std, out + 0);
+    ppp_des_key_from_7(u + 7, k); ppp_des_encrypt(k, std, out + 8);
+    ppp_wipe(u, sizeof u); ppp_wipe(k, sizeof k);
+}
+
+/* RFC 3079 section 2: 40/56-bit, the first 8 octets of the LAN Manager
+ * hash; 128-bit, GetStartKey: SHA-1 of the NT hash's hash twice and the
+ * challenge, 16 octets. The same both ways. */
+void ppp_mschap1_mppe_start(const uint8_t *pass, size_t plen, const uint8_t chal[8],
+                            size_t keylen, uint8_t start[16])
+{
+    uint8_t h[16], hh[16], d[20];
+    ppp_sha1_t s;
+    memset(start, 0, 16);
+    if (keylen == 8) {
+        ppp_lm_password_hash(pass, plen, h);
+        memcpy(start, h, 8);
+    } else {
+        ppp_nt_password_hash(pass, plen, h);
+        ppp_md4(h, 16, hh);
+        ppp_sha1_init(&s);
+        ppp_sha1_update(&s, hh, 16);
+        ppp_sha1_update(&s, hh, 16);
+        ppp_sha1_update(&s, chal, 8);
+        ppp_sha1_final(&s, d);
+        memcpy(start, d, 16);
+        ppp_wipe(&s, sizeof s); ppp_wipe(hh, sizeof hh); ppp_wipe(d, sizeof d);
+    }
+    ppp_wipe(h, sizeof h);
+}
+
 static const char MAGIC1[] = "Magic server to client signing constant";
 static const char MAGIC2[] = "Pad to make it do more than one iteration";
 

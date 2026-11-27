@@ -161,8 +161,52 @@ static void test_nt_hash_utf8(void)
     }
 }
 
+/* MS-CHAP v1 (RFC 2433) and its MPPE keys (RFC 3079 section 2): RFC
+ * 2433 Appendix B's NT response for "MyPw", RFC 3079 2.5's keys for
+ * "clientPass" (40-bit from the LAN Manager hash; 128-bit from the
+ * hash of the NT hash and the challenge) */
+static void test_mschap1(void)
+{
+    static const uint8_t chal[8] = { 0x10,0x2D,0xB5,0xDF,0x08,0x5D,0x30,0x41 };
+    static const uint8_t nth[16] = { 0xFC,0x15,0x6A,0xF7,0xED,0xCD,0x6C,0x0E,0xDD,0xE3,0x33,0x7D,0x42,0x7F,0x4E,0xAC };
+    static const uint8_t ntr[24] = { 0x4E,0x9D,0x3C,0x8F,0x9C,0xFD,0x38,0x5D,0x5B,0xF4,0xD3,0x24,0x67,0x91,0x95,0x6C,
+                                     0xA4,0xC3,0x51,0xAB,0x40,0x9A,0x3D,0x61 };
+    static const uint8_t lmh[8]  = { 0x76,0xa1,0x52,0x93,0x60,0x96,0xd7,0x83 };
+    static const uint8_t k40[8]  = { 0xd1,0x26,0x9e,0x53,0x8c,0xec,0x4a,0x08 };
+    static const uint8_t k56[8]  = { 0xd1,0x08,0x01,0x53,0x8c,0xec,0x4a,0x08 };
+    /* RFC 3079 2.5.3 prints this InitialSessionKey with "ac ca" at octets 7
+     * and 8 but copies it on with "ac c1", from which its final key (k128
+     * below) follows: "ca" is a typo in the RFC */
+    static const uint8_t st128[16] = { 0xa8,0x94,0x78,0x50,0xcf,0xc0,0xac,0xc1,0xd1,0x78,0x9f,0xb6,0x2d,0xdc,0xdd,0xb0 };
+    static const uint8_t k128[16]  = { 0x59,0xd1,0x59,0xbc,0x09,0xf7,0x6f,0x1d,0xa2,0xa8,0x6a,0x28,0xff,0xec,0x0b,0x1e };
+    uint8_t h[16], r[24], st[16], k[16];
+
+    ppp_nt_password_hash((const uint8_t *)"MyPw", 4, h);
+    CHECK(memcmp(h, nth, 16) == 0);
+    ppp_mschap1_response(chal, h, r);
+    CHECK(memcmp(r, ntr, 24) == 0);
+
+    ppp_lm_password_hash((const uint8_t *)"clientPass", 10, h);
+    CHECK(memcmp(h, lmh, 8) == 0);
+    ppp_lm_password_hash((const uint8_t *)"CLIENTPASS", 10, k);   /* case does not matter */
+    CHECK(memcmp(h, k, 16) == 0);
+
+    ppp_mschap1_mppe_start((const uint8_t *)"clientPass", 10, chal, 8, st);
+    CHECK(memcmp(st, lmh, 8) == 0);
+    ppp_mppe_initial_key(st, k, 8, PPP_MPPE_FORCE_40);
+    CHECK(memcmp(k, k40, 8) == 0);
+    ppp_mppe_initial_key(st, k, 8, PPP_MPPE_FORCE_56);
+    CHECK(memcmp(k, k56, 8) == 0);
+
+    ppp_mschap1_mppe_start((const uint8_t *)"clientPass", 10, chal, 16, st);
+    CHECK(memcmp(st, st128, 16) == 0);
+    ppp_mppe_initial_key(st, k, 16, PPP_MPPE_FORCE_NONE);
+    CHECK(memcmp(k, k128, 16) == 0);
+}
+
 int main(void)
 {
+    test_mschap1();
     test_md4();
     test_sha1();
     test_des_keys();

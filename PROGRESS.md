@@ -3193,9 +3193,7 @@ bug and no way past authentication were found.
   clear either way. Windows' "optional encryption" asks for MPPC and MPPE
   in one request (0x61); we do not do both at once, so it keeps MPPC in
   the clear where the port compresses (text is far quicker that way), and
-  only "require data encryption" (MPPE alone) is taken as asking. With the keys in hand CCP waits up to a Restart period
-  for the caller's request before sending ours, so ours can be MPPE from
-  the start (pppd with require-mppe gives up on any other first request). Both logins (CHAP and PAP) offer MS-CHAPv2 first, which
+  only "require data encryption" (MPPE alone) is taken as asking. (0.14.1: any request with an MPPE bit gets MPPE; see below.)
   MPPE needs, then CHAP-MD5, then (a PAP port) PAP: a caller moves on with
   a Nak, or now also a Configure-Reject (old stacks that Reject a method
   they do not know), and only a Reject of the last method ends the link.
@@ -3272,3 +3270,38 @@ bug and no way past authentication were found.
   The test now sends a packet each way and lets a reset complete before it
   judges, and checks recovery in each direction that lost frames (which
   ways a burst hits is chance). No change to the PPP code: recovery worked.
+
+## 0.14.1: Windows 98 and XP encrypt (2026-11-27)
+
+- Netstalgia ticket #84: Windows 98 SE with "Require data encryption" got
+  error 742. Its own PPP log showed it Acks MS-CHAPv2, logs in, then hangs
+  up before any NCP: its Dial-Up Networking makes MPPE keys from MS-CHAP v1
+  only. (An earlier guess, that it wanted our CCP request at once, was
+  wrong; that change is undone and 0.14.0's short wait for the caller's
+  CCP request is back, which pppd's require-mppe needs.)
+- MS-CHAP v1 (RFC 2433) and its MPPE keys (RFC 3079 section 2): 8-octet
+  challenge, the NT response only, keys the same both ways, the 40/56-bit
+  ones from the LAN Manager hash. `PPP_AUTH_MSCHAPV1`.
+- MS-CHAPv2 stays first for everyone; v1 goes first to Windows 98 alone,
+  known by its first LCP request (ACCM, magic, PFC, ACFC and callback 0d 03
+  06, nothing else). With both MS-CHAP versions allowed our first LCP
+  request waits for the caller's, up to a second (callers send theirs at
+  once). `ppp_counters_t.win98`; v90d logs "the caller is Windows 98 ...:
+  MS-CHAP v1 offered first". Linux pppd keeps v2: 2.5.0 to 2.5.4 cannot
+  encrypt after v1 (a pppd bug, fixed in 2.5.5).
+- A caller that asks for MPPE gets it even when it asks MPPC too. Windows XP
+  with "Require data encryption" and software compression on (the
+  default) asks 0xe1 and hung up with 742 on 0.14.0's Nak toward MPPC (that
+  rule took such a request for "optional encryption"). Unticked "Require
+  data encryption" asks MPPC only, on 98 and XP alike, and keeps
+  compression.
+- Run on the ISP's rig with real clients: Windows 98 SE with and without
+  "Require data encryption" (MS-CHAP v1, MPPE 40-bit or MPPC) and Windows
+  XP the same (MS-CHAPv2, MPPE 128-bit or MPPC), pings and a web page
+  across. Not run: Windows ME (its VM has no serial port in Windows), XP's
+  Advanced "Optional encryption".
+- Tests: crypto (RFC 2433 B, RFC 3079 2.5), ppp (v1 login, LM-only refused,
+  Nak to v2, MPPE round trips at 40 and 128 bits after v1, the Windows 98
+  fingerprint against pppd, XP and near-miss requests, the one-second
+  wait), ccp (MPPE+MPPC gets MPPE), ns_pppd (require-mppe 128, 40 and
+  stateful back, and require-mppe-128 alone, which now gets MS-CHAPv2).

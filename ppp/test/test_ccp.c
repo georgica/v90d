@@ -162,6 +162,8 @@ static void up_mru(const ppp_config_t *c, unsigned mru)
         S.mppe_have = 1;
         memcpy(S.mppe_send, inj_s, 16);
         memcpy(S.mppe_recv, inj_r, 16);
+        memcpy(S.mppe_short_send, inj_s, 8);     /* as MS-CHAPv2 has them (RFC 3079 3.3) */
+        memcpy(S.mppe_short_recv, inj_r, 8);
     }
     ppp_hdlc_rx_init(&dec, PPP_HDLC_BUF);
     dec.rx_accm = 0;
@@ -1878,23 +1880,28 @@ static void test_mppe_on_request(void)
     CHECK_EQ_I(status()->comp_tx, PPP_COMP_MPPE);
     CHECK_EQ_I(status()->comp_rx, PPP_COMP_MPPE);
 
-    /* (e) Windows' "optional encryption" asks for MPPC and MPPE in one
-     * request (0x61): we do not do both at once, and it takes either, so it
-     * keeps MPPC in the clear (text pages are much faster compressed) */
+    /* (e) MPPE and MPPC asked in one request: Windows XP with "Require data
+     * encryption" and software compression on asks 0xe1, Windows 98 0x21,
+     * and both hang up (error 742) on a Nak toward MPPC alone; XP does not
+     * ask twice. We do not do both at once: a caller that asks for MPPE at
+     * all gets MPPE (Windows' optional encryption asks for MPPC only) */
     {
-        static const uint8_t opt61[6] = { 18, 6, 0, 0, 0, 0x61 }, mppc[6] = { 18, 6, 0, 0, 0, 0x01 };
+        static const uint8_t xp_e1[6] = { 18, 6, 0, 0, 0, 0xe1 };
         base_cfg(&cfg);
         cfg.comp = BOTH;
         inject_mppe = 1;
         up(&cfg);
         inject_mppe = 0;
-        push_cp(P_CCP, PPP_CONF_REQ, 5, opt61, 6);
+        push_cp(P_CCP, PPP_CONF_REQ, 5, xp_e1, 6);
         pull();
-        CHECK(scr_new && scr.n > 4 && scr.d[4] == 26);             /* ours: compression (Deflate first) */
         f = find(P_CCP, PPP_CONF_NAK);
-        CHECK(f && same(f, mppc, 6));                              /* its: toward MPPC alone */
-        CHECK_EQ_I(ppp_send_ip(&S, ip, sizeof ip), 0);            /* not held: no encryption asked */
-        /* with no MPPC to give (compression off), it gets MPPE instead */
+        CHECK(f && same(f, s128, 6));                              /* toward 128-bit, its mode */
+        CHECK(scr_new && same(&scr, s128, 6));                     /* ours MPPE from the first */
+        CHECK(ppp_send_ip(&S, ip, sizeof ip) != 0);                /* nothing in the clear */
+    }
+    {
+        static const uint8_t opt61[6] = { 18, 6, 0, 0, 0, 0x61 };
+        /* and with no MPPC to give (compression off) the same */
         base_cfg(&cfg);
         cfg.comp = 0;
         inject_mppe = 1;
@@ -2180,8 +2187,9 @@ static int win_decrypt(win_dir_t *d, const uint8_t *in, size_t n, uint8_t *out)
 
 /* CCP as a Windows dial-up client negotiates it; `ask` is what its
  * Configure-Request carries on option 18 (0x60: 40 or 128 bit, "require
- * encryption"; 0x40: "maximum strength"; 0x61: "optional", with software
- * compression on), `nak` what it answers a request for stateless with */
+ * encryption"; 0x40: "maximum strength"; 0x61 or, on XP, 0xe1 the same
+ * with software compression on), `nak` what it answers a request for
+ * stateless with */
 static void win_ccp(uint32_t ask, uint32_t nak)
 {
     static const uint8_t s128[6] = { 18, 6, 0, 0, 0, 0x40 };   /* stateful 128 */
@@ -2223,7 +2231,7 @@ static void test_mppe_windows(void)
     static const uint32_t asks[3][2] = {
         { 0x00000060, 0x00000040 },     /* XP / 11 "require encryption" */
         { 0x00000040, 0x00000040 },     /* "require maximum strength" */
-        { 0x00000061, 0x00000041 },     /* "optional encryption", MPPC asked too */
+        { 0x00000061, 0x00000041 },     /* MPPC asked too (software compression on) */
     };
     ppp_config_t cfg;
     win_dir_t wtx, wrx;     /* the client's send and receive directions */

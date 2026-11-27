@@ -89,6 +89,8 @@ typedef enum {
 #define PPP_AUTH_PAP   1u
 #define PPP_AUTH_CHAP  2u          /* CHAP-MD5 (RFC 1994) */
 #define PPP_AUTH_MSCHAPV2 4u       /* MS-CHAPv2 (RFC 2759), for MPPE keys */
+#define PPP_AUTH_MSCHAPV1 8u       /* MS-CHAP v1 (RFC 2433), for MPPE keys; offered
+                                      first when allowed (Windows 98 needs it) */
 
 /* why the link ended (or is ending) */
 typedef enum {
@@ -265,6 +267,8 @@ typedef struct {
     uint8_t  mppe_seen;
     uint8_t  mppe_stateful;    /* MPPE agreed stateful: 1 towards, 2 from the peer */
     uint8_t  mppe_keybits;     /* MPPE key length agreed: 40, 56 or 128 (0: none) */
+    uint8_t  win98;            /* the caller's first LCP request was Windows 98's
+                                  (MS-CHAP v1 offered first) */
     /* Van Jacobson header compression: slots agreed towards / from the peer
      * (0: not in use that way), and the TCP packets each way */
     uint8_t  vj_tx_slots, vj_rx_slots;
@@ -334,6 +338,7 @@ typedef struct ppp {
      * master start keys derived from it (RFC 3079), for CCP to key MPPE */
     uint8_t  mschap2_resp[42];
     uint8_t  mppe_send[16], mppe_recv[16];
+    uint8_t  mppe_short_send[8], mppe_short_recv[8];   /* the 40/56-bit start keys */
     uint8_t  mppe_have;
 
     /* IPCP */
@@ -371,6 +376,9 @@ typedef struct ppp {
     uint8_t  mppe_redos;       /* CCP renegotiated for want of MPPE both ways */
     uint32_t ccp_wait_ms;      /* on request: CCP not opened yet, waiting this
                                   much longer for the caller's request */
+    uint32_t lcp_wait_ms;      /* both MS-CHAP versions allowed: our first LCP
+                                  request waits this much longer for the
+                                  caller's, which says whether it is Windows 98 */
     uint8_t  ccp_redo;         /* the two directions came up at different key
                                   lengths: negotiate CCP again (not keyed yet) */
     uint8_t  mppe_started;     /* MPPE was keyed once this authentication; a CCP

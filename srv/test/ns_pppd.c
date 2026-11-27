@@ -613,6 +613,27 @@ int main(int argc, char **argv)
                 40000, 10000, 15000, "mppe", "mppe", "MPPE 40-bit stateless compression enabled" };
             one_call((int)i + 2, &mppe3, log);
         }
+        /* pppd as most set it up: require-mppe-128 and nothing else, MS-CHAP
+         * v1 accepted too. It gets MS-CHAPv2 first (v1 goes first to Windows
+         * 98 only), so pppd 2.5.0-2.5.4's broken v1 keys (below) never
+         * come into it. */
+        if (!dead) {
+            static const call_t plain = {
+                "require-mppe-128 only (MS-CHAP v1 not refused: v2 offered first)",
+                "require-mppe-128",
+                40000, 10000, 15000, "mppe", "mppe", "MPPE 128-bit stateless compression enabled" };
+            one_call((int)i + 3, &plain, log);
+        }
+        /* MS-CHAP v1 (offered first to Windows 98 only) is not run against
+         * pppd: pppd 2.5.0 to 2.5.4 cannot encrypt after it. Its
+         * mppe_set_chapv1() hands one buffer to mppe_set_keys() as both
+         * keys, and that zeroes the send key's buffer before it copies the
+         * receive key, so pppd receives with an all-zero key (fixed in
+         * 2.5.5). And pppd does no 40-bit MPPE after MS-CHAP v1 at all
+         * ("MS-CHAP LM not supported"). The calls above refuse MS-CHAP v1,
+         * Nak toward MS-CHAPv2 and get it; ppp/test/test_ppp.c has v1's keys
+         * against RFC 3079 and a round trip at 40 and 128 bits, and Windows
+         * 98 was run against them on the ISP's rig. */
     }
 
     CHECK_EQ_I(dead, 0);
