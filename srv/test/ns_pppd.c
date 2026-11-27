@@ -576,18 +576,53 @@ int main(int argc, char **argv)
     for (i = 0; i < sizeof calls / sizeof calls[0] && !dead; i++)
         one_call((int)i, &calls[i], log);
 
-    /* Encryption on request: offered (the port's login offers MS-CHAPv2
-     * first) with no setting. pppd itself is not a caller that can get it
-     * since 0.14.1: it asks for MPPE only with require-mppe, which ends the
-     * link on a server whose first CCP request is not MPPE, and ours goes
-     * out at once, with IPCP's, as Windows 98 needs. The MPPE packet path
-     * was run against the kernel's ppp_mppe at 40, 56 and 128 bits up to
-     * 0.14.0 and is unchanged; ppp/test/test_ccp.c has the negotiation and
-     * a Windows client modelled apart. */
+    /* Encryption on request, against the Linux kernel's ppp_mppe (what
+     * Windows clients were matched against) and pppd's MS-CHAPv2, which
+     * also checks our authenticator response. No setting: the port's CHAP
+     * login offers MS-CHAPv2 first, and a caller that asks for MPPE gets
+     * it (the calls above asked for none and were served in the clear). */
     if (!dead) {
+        static const call_t mppe = {
+            "require-mppe-128 (MS-CHAPv2 and 128-bit MPPE, nothing else)",
+            "require-mppe-128 refuse-pap refuse-chap refuse-mschap refuse-eap",
+            80000, 20000, 30000, "mppe", "mppe", "MPPE 128-bit stateless compression enabled" };
         static char resp[40000];
         CHECK(http("GET /status.json HTTP/1.0\r\n\r\n", resp, sizeof resp) > 0);
         CHECK(strstr(resp, "\"ppp_encryption\":true") != NULL);
+        one_call((int)i, &mppe, log);
+        /* a caller that asks for more than one key length and would take
+         * stateful mode too (as Windows asks): its request is Nak'd down to
+         * 128-bit in the mode it asked for, and pppd still settles on
+         * stateless. (The kernel's stateful mode is not what Windows does,
+         * so stateful itself is checked against a Windows model in
+         * ppp/test/test_ccp.c, not here.) */
+        if (!dead) {
+            static const call_t mppe2 = {
+                "require-mppe-40 require-mppe-128 mppe-stateful (Nak'd down to 128-bit)",
+                "require-mppe-40 require-mppe-128 mppe-stateful refuse-pap refuse-chap refuse-mschap refuse-eap",
+                40000, 10000, 15000, "mppe", "mppe", "MPPE 128-bit stateless compression enabled" };
+            one_call((int)i + 1, &mppe2, log);
+        }
+        /* a caller with 40-bit keys only (as Windows 9x/ME without the
+         * 128-bit upgrade): our first request waits for its, so it is
+         * 40-bit too, and the call runs on the kernel's 40-bit ppp_mppe */
+        if (!dead) {
+            static const call_t mppe3 = {
+                "require-mppe-40 (40-bit keys only)",
+                "require-mppe-40 refuse-pap refuse-chap refuse-mschap refuse-eap",
+                40000, 10000, 15000, "mppe", "mppe", "MPPE 40-bit stateless compression enabled" };
+            one_call((int)i + 2, &mppe3, log);
+        }
+        /* MS-CHAP v1 (offered first, for Windows 98) is not run against
+         * pppd: pppd 2.5.0 to 2.5.4 cannot encrypt after it. Its
+         * mppe_set_chapv1() hands one buffer to mppe_set_keys() as both
+         * keys, and that zeroes the send key's buffer before it copies the
+         * receive key, so pppd receives with an all-zero key (fixed in
+         * 2.5.5). And pppd does no 40-bit MPPE after MS-CHAP v1 at all
+         * ("MS-CHAP LM not supported"). The calls above refuse MS-CHAP v1,
+         * Nak toward MS-CHAPv2 and get it; ppp/test/test_ppp.c has v1's keys
+         * against RFC 3079 and a round trip at 40 and 128 bits, and Windows
+         * 98 was run against them on the ISP's rig. */
     }
 
     CHECK_EQ_I(dead, 0);

@@ -763,48 +763,54 @@ static void test_mschap1(void)
     v = cr ? opt(cr, 3, &vl) : NULL;
     CHECK(v && vl == 3 && v[2] == 0x81);
 
-    /* MPPE at 40 bits after a v1 login: the LM-hash keys, against a far end
-     * keyed the same way */
+    /* MPPE after a v1 login, 40-bit (the LM-hash keys) and 128-bit (from
+     * the NT hash's hash and the challenge), each against a far end keyed
+     * the same way */
     {
         static ppp_mppe_t peer;
         static const uint8_t ip[40] = { 0x45, 0, 0, 40 };
-        uint8_t ccp40[6] = { 18, 6, 0, 0, 0, 0x20 }, st[16], pt[128];
-        start(&c);
-        lcp_up(peer_lcp, sizeof peer_lcp);
-        ch = find(PPP_PROTO_CHAP, 1);
-        if (!ch) return;
-        memcpy(chal, ch->d + 5, 8);
-        mschap1_answer(ch, "alice", "wonderland", 1);
-        ppp_mschap1_mppe_start((const uint8_t *)"wonderland", 10, chal, 8, st);
-        pull();
-        ipcp_up();
-        push_cp(P_CCP_ID, PPP_CONF_REQ, 7, ccp40, 6);         /* the caller: 40-bit, stateful */
-        pull();
-        {
-            /* our request now (the last one sent): MPPE 40-bit stateful */
-            frame_t *last = NULL; int q;
-            uint8_t want40[6] = { 18, 6, 0, 0, 0, 0x20 };
-            for (q = 0; q < n_out; q++)
-                if (out[q].proto == P_CCP_ID && out[q].d[0] == PPP_CONF_REQ) last = &out[q];
-            CHECK(last && last->n == 10 && memcmp(last->d + 4, want40, 6) == 0);
-            if (last) push_cp(P_CCP_ID, PPP_CONF_ACK, last->d[1], last->d + 4, last->n - 4);
-        }
-        pull();
-        if (status()->ccp_state != PPP_FSM_OPENED) {
-            /* our CCP started afresh with MPPE; the caller asks again (as it
-             * does on its Restart timer) */
-            push_cp(P_CCP_ID, PPP_CONF_REQ, 8, ccp40, 6);
+        int k;
+        for (k = 0; k < 2; k++) {
+            uint8_t bit = k ? 0x40 : 0x20;
+            size_t kl = k ? 16 : 8;
+            uint8_t ccpv[6] = { 18, 6, 0, 0, 0, 0 }, st[16], pt[128];
+            ccpv[5] = bit;
+            start(&c);
+            lcp_up(peer_lcp, sizeof peer_lcp);
+            ch = find(PPP_PROTO_CHAP, 1);
+            if (!ch) return;
+            memcpy(chal, ch->d + 5, 8);
+            mschap1_answer(ch, "alice", "wonderland", 1);
+            ppp_mschap1_mppe_start((const uint8_t *)"wonderland", 10, chal, kl, st);
             pull();
+            ipcp_up();
+            push_cp(P_CCP_ID, PPP_CONF_REQ, 7, ccpv, 6);          /* the caller: stateful */
+            pull();
+            {
+                /* our request now (the last one sent): MPPE, the same */
+                frame_t *last = NULL; int q;
+                for (q = 0; q < n_out; q++)
+                    if (out[q].proto == P_CCP_ID && out[q].d[0] == PPP_CONF_REQ) last = &out[q];
+                CHECK(last && last->n == 10 && memcmp(last->d + 4, ccpv, 6) == 0);
+                if (last) push_cp(P_CCP_ID, PPP_CONF_ACK, last->d[1], last->d + 4, last->n - 4);
+            }
+            pull();
+            if (status()->ccp_state != PPP_FSM_OPENED) {
+                /* our CCP started afresh with MPPE; the caller asks again (as
+                 * it does on its Restart timer) */
+                push_cp(P_CCP_ID, PPP_CONF_REQ, 8, ccpv, 6);
+                pull();
+            }
+            CHECK_EQ_I(status()->comp_tx, PPP_COMP_MPPE);
+            CHECK_EQ_I(status()->counters.mppe_keybits, k ? 128 : 40);
+            ppp_mppe_begin(&peer, st, st, kl, k ? PPP_MPPE_FORCE_NONE : PPP_MPPE_FORCE_40);
+            ppp_mppe_stateful(&peer, 1, 1);
+            CHECK_EQ_I(ppp_send_ip(&S, ip, sizeof ip), 0);
+            pull();
+            f = find(0x00fd, 0);
+            CHECK(f && ppp_mppe_decrypt(&peer, f->d, f->n, pt, sizeof pt) == (int)sizeof ip + 2 &&
+                  memcmp(pt + 2, ip, sizeof ip) == 0);
         }
-        CHECK_EQ_I(status()->comp_tx, PPP_COMP_MPPE);
-        CHECK_EQ_I(status()->counters.mppe_keybits, 40);
-        ppp_mppe_begin(&peer, st, st, 8, PPP_MPPE_FORCE_40);
-        ppp_mppe_stateful(&peer, 1, 1);
-        CHECK_EQ_I(ppp_send_ip(&S, ip, sizeof ip), 0);
-        pull();
-        f = find(0x00fd, 0);
-        CHECK(f && ppp_mppe_decrypt(&peer, f->d, f->n, pt, sizeof pt) == (int)sizeof ip + 2 &&
-              memcmp(pt + 2, ip, sizeof ip) == 0);
     }
 }
 

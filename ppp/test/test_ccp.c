@@ -1766,24 +1766,22 @@ static void test_mppe_on_request(void)
 
     for (i = 0; i < 16; i++) { inj_s[i] = (uint8_t)(i + 1); inj_r[i] = (uint8_t)(i + 101); }
 
-    /* (a) Windows: asks for stateful MPPE. Our CCP request goes out with
-     * IPCP's, at once after the login (Windows 98 with "require data
-     * encryption" hangs up on a server that starts IPCP with no CCP): it
-     * asks for compression, and turns to MPPE when the caller asks for it */
+    /* (a) Windows: asks for stateful MPPE. With the keys in hand CCP waits
+     * for the caller's request first (pppd with require-mppe gives up on a
+     * server whose first request is not MPPE): ours then matches it */
     base_cfg(&cfg);
     cfg.comp = BOTH;
     inject_mppe = 1;
     up(&cfg);
     inject_mppe = 0;
-    CHECK(scr_new && scr.n > 4 && scr.d[4] == 26);                 /* ours at once: Deflate */
+    CHECK(!scr_new);                                               /* nothing of ours yet */
     CHECK_EQ_I(ppp_send_ip(&S, ip, sizeof ip), 0);                /* the clear, until it asks */
     pull();
-    scr_new = 0;
     push_cp(P_CCP, PPP_CONF_REQ, 5, w60, 6);
     pull();
+    CHECK(scr_new && same(&scr, s128, 6));                         /* ours: MPPE, stateful, 128 */
     f = find(P_CCP, PPP_CONF_NAK);
     CHECK(f && same(f, s128, 6));                                  /* its: toward one key length */
-    CHECK(scr_new && same(&scr, s128, 6));                         /* ours, again at once: MPPE, stateful */
     CHECK_EQ_I(ppp_send_ip(&S, ip, sizeof ip), PPP_ERR_DOWN);     /* asked: no cleartext now */
     push_cp(P_CCP, PPP_CONF_ACK, scr.d[1], scr.d + 4, scr.n - 4);
     push_cp(P_CCP, PPP_CONF_REQ, 6, s128, 6);
@@ -1803,26 +1801,26 @@ static void test_mppe_on_request(void)
     push(PPP_PROTO_IP, ip, sizeof ip);
     CHECK_EQ_I(ip_count, 0);
 
-    /* the same with the caller's Reject of our Deflate first (Windows
-     * Rejects 26 and 24): MPPE as above */
-    base_cfg(&cfg);
-    cfg.comp = BOTH;
-    inject_mppe = 1;
-    up(&cfg);
-    inject_mppe = 0;
-    push_cp(P_CCP, PPP_CONF_REJ, scr.d[1], scr.d + 4, scr.n - 4);
-    pull();
-    scr_new = 0;
-    push_cp(P_CCP, PPP_CONF_REQ, 5, w60, 6);
-    pull();
-    CHECK(scr_new && same(&scr, s128, 6));
-    push_cp(P_CCP, PPP_CONF_ACK, scr.d[1], scr.d + 4, scr.n - 4);
-    push_cp(P_CCP, PPP_CONF_REQ, 6, s128, 6);
-    pull();
-    ppp_tick(&S, 10);
-    pull();
-    CHECK_EQ_I(status()->comp_tx, PPP_COMP_MPPE);
-    CHECK_EQ_I(status()->comp_rx, PPP_COMP_MPPE);
+    /* pppd's require-mppe-128: stateless 128 asked, ours the same at once */
+    {
+        static const uint8_t h128[6] = { 18, 6, 0x01, 0, 0, 0x40 };
+        base_cfg(&cfg);
+        cfg.comp = BOTH;
+        inject_mppe = 1;
+        up(&cfg);
+        inject_mppe = 0;
+        push_cp(P_CCP, PPP_CONF_REQ, 5, h128, 6);
+        pull();
+        CHECK(scr_new && same(&scr, h128, 6));
+        f = find(P_CCP, PPP_CONF_ACK);
+        CHECK(f && same(f, h128, 6));
+        push_cp(P_CCP, PPP_CONF_ACK, scr.d[1], scr.d + 4, scr.n - 4);
+        pull();
+        ppp_tick(&S, 10);
+        pull();
+        CHECK_EQ_I(status()->comp_tx, PPP_COMP_MPPE);
+        CHECK_EQ_I(status()->comp_rx, PPP_COMP_MPPE);
+    }
 
     /* (b) a caller that asks for no encryption (pppd, Deflate): Deflate, and
      * IP in the clear before and after */
@@ -1844,6 +1842,17 @@ static void test_mppe_on_request(void)
     CHECK_EQ_I(status()->comp_rx, PPP_COMP_DEFLATE);
     CHECK_EQ_I(status()->counters.mppe_keybits, 0);
     CHECK_EQ_I(ppp_send_ip(&S, ip, sizeof ip), 0);
+
+    /* a caller that sends no CCP request: ours goes out a Restart period on */
+    base_cfg(&cfg);
+    cfg.comp = BOTH;
+    inject_mppe = 1;
+    up(&cfg);
+    inject_mppe = 0;
+    CHECK(!scr_new);
+    for (i = 0; i < 40 && !scr_new; i++) { ppp_tick(&S, 100); pull(); }
+    CHECK(scr_new && scr.n > 4 && scr.d[4] == 26);
+    CHECK(i >= 25 && i <= 31);                                     /* the default 3 s */
 
     /* (c) a caller that asks for Deflate first, Acks ours, then asks for
      * MPPE: no Deflate one way and MPPE the other, CCP again with MPPE */
