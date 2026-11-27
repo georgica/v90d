@@ -3162,7 +3162,9 @@ bug and no way past authentication were found.
   them. CCP is negotiated again, before anything is keyed, if the two
   directions were Acked at different lengths. A Nak never takes the length
   below the strongest of the peer's own request (a review found that one
-  injected Nak could talk a 128-bit peer down to 40). `mppe_keybits` counts
+  injected Nak could talk a 128-bit peer down to 40), and that floor only
+  ever rises (a later request that claims less, one injected, say, changes
+  nothing). `mppe_keybits` counts
   it; the daemon's compression line says "40-bit keys" and so on. A
   `require-mppe-40` call runs against the kernel's ppp_mppe (ns_pppd).
 - **The caller's encryption request is always kept.** With encryption off
@@ -3194,6 +3196,10 @@ bug and no way past authentication were found.
   MPPE needs, then CHAP-MD5, then (a PAP port) PAP: a caller moves on with
   a Nak, or now also a Configure-Reject (old stacks that Reject a method
   they do not know), and only a Reject of the last method ends the link.
+  An older file with `encryption = on` (required) loads, and the daemon
+  says at start that encryption is now given on request, so a caller that
+  does not ask is served in the clear (a security review asked that the
+  change not be silent).
   A port with a login carries IP 4 octets smaller (the MPPE overhead);
   status.json's `ppp_encryption` means "given on request" now. In the
   library `cfg.encrypt` 0 is on request, 1 still means required.

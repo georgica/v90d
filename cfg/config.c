@@ -831,7 +831,10 @@ static int set_value(cfg_t *c, pctx_t *px, int k, int mk, int line, const char *
     case K_COMPRESSION: return set_enum(&c->compression, mk, v, n_onoff, 2, l_onoff, msg);
     /* gone in 0.14 (encryption is given when the caller asks): an older
      * file's line is read and set aside */
-    case K_ENCRYPTION: case K_ENCRYPTION2: { int old; return set_enum(&old, mk, v, n_onoff, 2, l_onoff, msg); }
+    case K_ENCRYPTION: case K_ENCRYPTION2: {
+        int old = 0, r = set_enum(&old, mk, v, n_onoff, 2, l_onoff, msg);
+        if (r == 0 && old) c->old_encryption = 1;     /* for the daemon to say so */
+        return r; }
     case K_USER:      return set_user(c, px, line, v, msg);
     case K_SVC:       return set_service(c, v, msg);
     case K_SVC_NETSTALGIA: return set_enum(&c->svc_netstalgia, mk, v, n_onoff, 2, l_onoff, msg);

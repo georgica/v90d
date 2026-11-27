@@ -657,6 +657,9 @@ int main(int argc, char **argv)
     if (!n_ports) usage();
     if (!force_debug) log_level = live.log_level;
     if (r == CFG_DEFAULTS) logf_(CFG_LOG_WARN, "%s not found: running on the defaults", cfg_path);
+    if (live.old_encryption)
+        logf_(CFG_LOG_WARN, "%s: encryption = on is no longer a setting (since 0.14): a caller that asks"
+              " for encryption gets it, but one that does not is served in the clear", cfg_path);
 
     memset(&sa, 0, sizeof sa);
     sa.sa_handler = on_term; sigaction(SIGTERM, &sa, NULL); sigaction(SIGINT, &sa, NULL);

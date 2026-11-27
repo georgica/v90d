@@ -103,7 +103,19 @@ static void test_port2(void)
     CHECK_EQ_I(c.port2.busy_chance, 10); CHECK_EQ_I(c.port2.drop_mean_min, 5);
     CHECK_EQ_I(c.port2.session_limit_min, 60); CHECK_EQ_I(c.port2.idle_timeout_min, 7);
     /* encryption and encryption2 (gone in 0.14: encryption on request) are
-     * read and set aside: the file still loads, and a save leaves them out */
+     * read and set aside: the file still loads, and a save leaves them out.
+     * One that asked for encryption to be required is noted, for the daemon
+     * to say that it no longer is (old_encryption) */
+    CHECK_EQ_I(c.old_encryption, 1);                /* encryption2 = on above */
+    {
+        cfg_t o;
+        CHECK_EQ_I(parse(&o, "[ppp]\nencryption = off\nencryption2 = off\n"), CFG_OK);
+        CHECK_EQ_I(o.old_encryption, 0);
+        CHECK_EQ_I(parse(&o, "[ppp]\nencryption = on\n"), CFG_OK);
+        CHECK_EQ_I(o.old_encryption, 1);
+        CHECK_EQ_I(parse(&o, "[ppp]\n"), CFG_OK);
+        CHECK_EQ_I(o.old_encryption, 0);
+    }
     {
         static char saved[16384];
         CHECK(cfg_write(&c, 1, saved, sizeof saved) > 0);
@@ -135,6 +147,8 @@ static void test_port2(void)
                        "session_limit = 60\nidle_timeout = 7\n") != NULL);
     CHECK(strstr(text, "\n[line]\nnumber = 5551111\n") != NULL);
     CHECK_EQ_I(cfg_parse(&d, "t", text, strlen(text), err, sizeof err), CFG_OK);
+    CHECK_EQ_I(d.old_encryption, 0);                /* the old line is not written back */
+    c.old_encryption = 0;
     CHECK(memcmp(&c, &d, sizeof c) == 0);
     /* a file from before there were two ports */
     CHECK_EQ_I(parse(&c, "[line]\nnumber = 42\n"), CFG_OK);

@@ -1339,8 +1339,12 @@ static void mppe_settle(ppp_t *p, uint32_t v, int request)
     if (!best)
         return;
     if (request) {
-        p->mppe_key = best;
-        p->mppe_floor = best;
+        /* the floor only ever rises: a later request that claims less
+         * than an earlier one offered (one injected, say) changes nothing */
+        if (mppe_rank(best) >= mppe_rank(p->mppe_floor)) {
+            p->mppe_key = best;
+            p->mppe_floor = best;
+        }
         return;
     }
     if (!(v & p->mppe_key) && mppe_rank(best) < mppe_rank(p->mppe_key) &&

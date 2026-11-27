@@ -254,6 +254,8 @@ typedef struct {
     int        mru;
     int        echo_interval;   /* seconds, 0 = off */
     int        compression;     /* 1 = PPP compression (CCP: Deflate, MPPC) is negotiated */
+    int        old_encryption;  /* read only: an older file had encryption or encryption2 = on
+                                   (required), which 0.14 no longer offers; never written */
     int        n_users;
     cfg_user_t users[CFG_MAX_USERS];
     /* [modem] */

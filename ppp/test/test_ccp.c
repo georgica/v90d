@@ -2379,6 +2379,24 @@ static void test_mppe_short_keys(void)
         CHECK(status()->counters.mppe_keybits != 40);
         (void)s128s;
     }
+    /* nor a later request (one injected, say) that claims only 40 after
+     * the peer asked for 128: the floor only ever rises */
+    {
+        static const uint8_t l40s[6] = { 18, 6, 0, 0, 0, 0x20 };
+        base_cfg(&cfg);
+        cfg.encrypt = 1;
+        inject_mppe = 1;
+        up(&cfg);
+        inject_mppe = 0;
+        push_cp(P_CCP, PPP_CONF_REQ, 5, s128, 6);
+        pull();
+        CHECK(find(P_CCP, PPP_CONF_ACK) != NULL);
+        push_cp(P_CCP, PPP_CONF_REQ, 6, l40s, 6);
+        pull();
+        f = find(P_CCP, PPP_CONF_NAK);
+        CHECK(f && same(f, s128, 6));                       /* 128 still, not 40 */
+        CHECK(find(P_CCP, PPP_CONF_ACK) == NULL);
+    }
     /* the order the other way: the Nak first, then the request for 128 */
     {
         static const uint8_t l40s[6] = { 18, 6, 0, 0, 0, 0x20 };
