@@ -43,6 +43,7 @@ void status_add_call(status_t *s, const st_call_t *call)
     s->call_next %= STATUS_MAX_CALLS;
     if (s->n_calls > STATUS_MAX_CALLS) s->n_calls = STATUS_MAX_CALLS;
     s->calls[s->call_next] = *call;
+    s->calls[s->call_next].number = s->calls_total + 1u;
     s->call_next = (s->call_next + 1u) % STATUS_MAX_CALLS;
     if (s->n_calls < STATUS_MAX_CALLS) s->n_calls++;
     s->calls_total++;
@@ -196,6 +197,8 @@ int status_render_json(const status_t *s, char *buf, size_t cap)
         const st_call_t *c = status_call(s, i);
         if (i) sb_putc(&b, ',');
         sb_putc(&b, '{');
+        j_num(&b, "number", c->number, ",");
+        j_key(&b, "log"); sb_puts(&b, c->neg.valid ? "true," : "false,");
         j_key(&b, "start");
         if (c->start_time) { sb_putc(&b, '"'); put_time(&b, c->start_time, 'T', "Z\","); }
         else sb_puts(&b, "null,");
@@ -325,6 +328,13 @@ static void put_call(sbuf_t *b, const st_call_t *c, int port)
     sb_u64(b, c->up_bps);
     sb_puts(b, "</td><td>");
     sb_puts(b, name_of(end_html, COUNT(end_html), (long)c->end));
+    if (port) {                 /* the page of calls: the way to the call's log */
+        sb_puts(b, "</td><td>");
+        if (c->neg.valid) {
+            sb_puts(b, "<a href=\"/calls/log?port="); sb_u64(b, (uint64_t)port);
+            sb_puts(b, "&amp;call="); sb_u64(b, c->number); sb_puts(b, "\" data-pop>Log</a>");
+        } else sb_putc(b, '-');
+    }
     sb_puts(b, "</td></tr>\n");
 }
 
@@ -445,6 +455,26 @@ int status_render_bbs(status_bbs_rows rows, void *ctx, const char *query, size_t
     return b.ovf ? -1 : (int)b.len;
 }
 
+/* The head of the page of calls: read again by the browser only without
+ * script (with it, /ui.js does that, and waits while a call's log is open),
+ * and the style of the window that log opens in. */
+#define CALLS_HEAD \
+    "<noscript><meta http-equiv=\"refresh\" content=\"15\"></noscript>\n" \
+    "<style>" \
+    ".ov{position:fixed;top:0;right:0;bottom:0;left:0;z-index:20;padding:5vh 16px;" \
+    "background:rgba(10,14,22,.6);overflow:auto}" \
+    ".pop{max-width:760px;margin:0 auto;background:var(--pn);border:1px solid var(--ln);" \
+    "border-radius:10px;box-shadow:0 12px 40px rgba(0,0,0,.4);overflow:hidden}" \
+    ".pop textarea{display:block;width:100%;height:60vh;padding:12px 14px;border:0;resize:vertical;" \
+    "background:var(--pn);color:var(--fg);font:13px/1.5 ui-monospace,monospace;white-space:pre}" \
+    ".pop p{display:flex;justify-content:flex-end;align-items:center;gap:10px;margin:0;" \
+    "padding:12px 14px;border-top:1px solid var(--ln)}" \
+    ".pop p span{margin-right:auto;color:var(--mu)}" \
+    ".pop input[type=button]{padding:9px 26px;font-weight:700;letter-spacing:.08em;" \
+    "text-transform:uppercase;background:var(--ac);border:1px solid var(--ac);color:#1f2a44;cursor:pointer}" \
+    ".pop input.no[type=button]{background:var(--lb);border-color:var(--ln);color:var(--fg)}" \
+    "</style>\n"
+
 int status_render_calls(const status_t *const ports[2], char *buf, size_t cap)
 {
     sbuf_t b;
@@ -453,10 +483,10 @@ int status_render_calls(const status_t *const ports[2], char *buf, size_t cap)
     have[0] = kept(ports[0]);
     have[1] = ports[1] ? kept(ports[1]) : 0;
     sb_init(&b, buf, cap);
-    page_top(&b, "calls", "<meta http-equiv=\"refresh\" content=\"15\">\n", PAGE_TAB_CALLS, NULL);
-    sb_puts(&b, "<section><h2>Call history</h2>\n<div class=\"x\"><table>\n"
+    page_top(&b, "calls", CALLS_HEAD, PAGE_TAB_CALLS, NULL);
+    sb_puts(&b, "<section id=\"calls\"><h2>Call history</h2>\n<div class=\"x\"><table>\n"
                 "<tr><th>Port</th><th>Start (UTC)</th><th>Duration</th><th>Dialed</th><th>Result</th>"
-                "<th>Modulation</th><th>Down bit/s</th><th>Up bit/s</th><th>Ended</th></tr>\n");
+                "<th>Modulation</th><th>Down bit/s</th><th>Up bit/s</th><th>Ended</th><th>Negotiation</th></tr>\n");
     /* each port's calls are newest first already: take the newer head */
     for (rows = 0; rows < STATUS_HISTORY && (at[0] < have[0] || at[1] < have[1]); rows++) {
         int p;
@@ -466,11 +496,116 @@ int status_render_calls(const status_t *const ports[2], char *buf, size_t cap)
         put_call(&b, status_call(ports[p], at[p]), p + 1);
         at[p]++;
     }
-    if (rows == 0) sb_puts(&b, "<tr><td colspan=\"9\">none yet</td></tr>\n");
+    if (rows == 0) sb_puts(&b, "<tr><td colspan=\"10\">none yet</td></tr>\n");
     sb_puts(&b, "</table></div>\n<p>The last ");
     sb_u64(&b, STATUS_HISTORY);
     sb_puts(&b, " calls of both ports, newest first. They are kept in memory: a restart of the box empties the list.</p>"
                 "</section>\n" PAGE_END);
+    return sb_end(&b);
+}
+
+/* ---- the negotiation log of one call --------------------------------------- */
+
+static const char *known(const char *name) { return name ? name : "unknown"; }
+
+/* the names of what was offered, fastest first */
+static void offered_list(sbuf_t *b, uint32_t offered, int json)
+{
+    static const st_mod_t order[] = { ST_MOD_V92, ST_MOD_V90, ST_MOD_X2, ST_MOD_K56FLEX, ST_MOD_V34, ST_MOD_V32BIS,
+                                      ST_MOD_V22BIS, ST_MOD_V22, ST_MOD_BELL212A, ST_MOD_V21, ST_MOD_BELL103 };
+    int i, n = 0;
+    for (i = 0; i < COUNT(order); i++) {
+        if (!(offered & (1u << order[i]))) continue;
+        if (n++) sb_puts(b, json ? "," : ", ");
+        if (json) sb_putc(b, '"');
+        sb_puts(b, json ? mod_json[order[i]] : mod_html[order[i]]);
+        if (json) sb_putc(b, '"');
+    }
+    if (!n && !json) sb_puts(b, "nothing");
+}
+
+/* seconds with one fraction digit */
+static void put_seconds(sbuf_t *b, uint32_t ms)
+{
+    sb_u64(b, ms / 1000u); sb_putc(b, '.'); sb_putc(b, (char)('0' + (int)(ms / 100u % 10u)));
+}
+
+static void call_log_text(sbuf_t *b, const st_call_t *c, int port)
+{
+    const st_neg_t *g = &c->neg;
+    unsigned i, n = g->n_events > STATUS_NEG_EVENTS ? STATUS_NEG_EVENTS : g->n_events;
+    sb_puts(b, "Port "); sb_u64(b, (uint64_t)port); sb_puts(b, ", call "); sb_u64(b, c->number);
+    if (c->start_time) { sb_puts(b, ", "); put_time(b, c->start_time, ' ', " UTC"); }
+    sb_puts(b, "\nDialed: ");
+    if (c->dialed[0]) {             /* digits from outside: printable ASCII only */
+        for (i = 0; i < sizeof c->dialed && c->dialed[i]; i++)
+            sb_putc(b, c->dialed[i] >= 0x20 && c->dialed[i] <= 0x7e ? c->dialed[i] : '?');
+    } else sb_putc(b, '-');
+    sb_puts(b, "\nResult: "); sb_puts(b, name_of(tel_html, COUNT(tel_html), (long)c->tel_result));
+    sb_puts(b, "\nEnded: "); sb_puts(b, name_of(end_html, COUNT(end_html), (long)c->end));
+    sb_puts(b, " after "); put_hms(b, c->duration_s, 0);
+    sb_puts(b, "\n\nOffered: "); offered_list(b, g->offered, 0);
+    sb_puts(b, "\nCaller used V.8: "); sb_puts(b, g->used_v8 ? "yes" : "no");
+    sb_puts(b, "\nFurthest stage: "); sb_puts(b, known(g->stage));
+    sb_puts(b, "\nModulation chosen: "); sb_puts(b, known(g->modulation));
+    sb_puts(b, "\nData mode reached: "); sb_puts(b, g->data_reached ? "yes" : "no");
+    sb_puts(b, "\nModem error: "); sb_puts(b, known(g->error));
+    sb_puts(b, "\n\nTimeline (seconds after the answer, up to data mode)\n");
+    for (i = 0; i < n; i++) {
+        const st_neg_event_t *e = &g->events[i];
+        if (g->dropped && i == n - 1u) { sb_puts(b, "  ... "); sb_u64(b, g->dropped); sb_puts(b, " changes not kept\n"); }
+        sb_puts(b, "  "); put_seconds(b, e->at_ms);
+        sb_puts(b, "  stage "); sb_puts(b, known(e->stage));
+        sb_puts(b, ", modulation "); sb_puts(b, known(e->modulation));
+        sb_puts(b, ", V.8 "); sb_puts(b, e->used_v8 ? "yes" : "no");
+        sb_putc(b, '\n');
+    }
+    if (!n) sb_puts(b, "  nothing: the call ended before the modem ran\n");
+}
+
+static void call_log_json(sbuf_t *b, const st_call_t *c, int port)
+{
+    const st_neg_t *g = &c->neg;
+    unsigned i, n = g->n_events > STATUS_NEG_EVENTS ? STATUS_NEG_EVENTS : g->n_events;
+    sb_putc(b, '{');
+    j_num(b, "port", (uint64_t)port, ",");
+    j_num(b, "number", c->number, ",");
+    j_num(b, "start_unix", c->start_time, ",");
+    j_num(b, "duration_s", c->duration_s, ",");
+    j_key(b, "dialed"); json_text(b, c->dialed, sizeof c->dialed); sb_putc(b, ',');
+    j_str(b, "tel_result", name_of(tel_json, COUNT(tel_json), (long)c->tel_result), ",");
+    j_str(b, "end", name_of(end_json, COUNT(end_json), (long)c->end), ",");
+    j_key(b, "offered"); sb_putc(b, '['); offered_list(b, g->offered, 1); sb_puts(b, "],");
+    j_key(b, "used_v8"); sb_puts(b, g->used_v8 ? "true," : "false,");
+    j_str(b, "stage", known(g->stage), ",");
+    j_str(b, "modulation", known(g->modulation), ",");
+    j_key(b, "data_reached"); sb_puts(b, g->data_reached ? "true," : "false,");
+    j_str(b, "error", known(g->error), ",");
+    j_num(b, "events_dropped", g->dropped, ",");
+    j_key(b, "events"); sb_putc(b, '[');
+    for (i = 0; i < n; i++) {
+        const st_neg_event_t *e = &g->events[i];
+        if (i) sb_putc(b, ',');
+        sb_putc(b, '{');
+        j_num(b, "at_ms", e->at_ms, ",");
+        j_str(b, "stage", known(e->stage), ",");
+        j_str(b, "modulation", known(e->modulation), ",");
+        j_key(b, "used_v8"); sb_puts(b, e->used_v8 ? "true}" : "false}");
+    }
+    sb_puts(b, "]}\n");
+}
+
+int status_render_call_log(const status_t *const ports[2], int port, uint32_t number, int json,
+                           char *buf, size_t cap)
+{
+    const st_call_t *c = NULL;
+    sbuf_t b;
+    unsigned i;
+    if ((port == 1 || port == 2) && ports[port - 1])
+        for (i = 0; (c = status_call(ports[port - 1], i)) != NULL && c->number != number; i++) { }
+    if (!c || !c->neg.valid) return STATUS_NO_CALL;
+    sb_init(&b, buf, cap);
+    if (json) call_log_json(&b, c, port); else call_log_text(&b, c, port);
     return sb_end(&b);
 }
 

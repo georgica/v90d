@@ -296,6 +296,7 @@ void status_add_call(status_t *s, const st_call_t *call);
 const st_call_t *status_call(const status_t *s, unsigned i);
 int  status_render_html(const status_t *s, char *buf, size_t cap);
 int  status_render_json(const status_t *s, char *buf, size_t cap);
+int  status_render_call_log(const status_t *const ports[2], int port, uint32_t number, int json, char *buf, size_t cap);
 
 /* settings.h */
 int  settings_render_html(const cfg_t *c, int saved, const char *error,
@@ -393,9 +394,40 @@ of port 1; `/port2` shows the tables of port 2. `/status.json` is port 1,
 `/calls` (the Calls tab) is the call history of the box: the newest 20
 finished calls of both ports in one table, newest first, each row saying
 the port the call came in on, then when it began, how long it lasted, what
-was dialed, the result, the modulation, the two rates and how it ended.
+was dialed, the result, the modulation, the two rates, how it ended and a
+link to the call's log (below).
 Every port keeps its last 20 calls (`STATUS_MAX_CALLS`); the history is in
 memory only, so a restart of the box empties it.
+
+## The log of a call
+
+Every answered call that a modem ran for keeps how its start-up went, in
+memory with its line of history. `/calls` links to it ("Log");
+`/calls/log?port=N&call=M` is the text and `/calls/log.json?port=N&call=M`
+the same as JSON (404 when the history no longer has the call, or it has no
+log). `M` is the call's `number` in the port's `status.json`, counted from 1
+since start-up, so it begins again after a restart.
+
+On `/calls` the script (/ui.js) opens the text in a window on the page, with
+Copy and Close (Esc or a click outside close it too). Copy uses the old
+`execCommand`, as the clipboard's newer interface needs https; where it does
+not work the text is left selected. Without the script, or when the text
+cannot be had (the login has ended), the link is followed as any other. The
+page of calls is read again every 15 s: by the script, which waits while a
+log is open, or without script by a `meta refresh`.
+
+It says what we offered, whether the caller used V.8, the furthest stage
+reached, the modulation chosen, whether data mode was reached and why the
+modem ended the call, then a timeline of the changes up to data mode
+(`STATUS_NEG_EVENTS`, 16; when there are more, the last place holds the
+newest and the log says how many are missing). The stage, modulation and
+error names are libv90modem's (`v90m_phase_name`, `v90m_conn_name`,
+`v90m_err_name`: see its docs/api.md, "Start-up diagnostics"), with what
+that means: a modulation is "none" until the library takes it as chosen, so
+the fallbacks tried for a caller without V.8 do not all show, and stage `v8`
+is also passed by a caller that sends no V.8. The error is "none" when the
+call ended while the modem was still running, for instance because the
+caller hung up.
 
 ## Status views
 
@@ -417,8 +449,8 @@ memory only, so a restart of the box empties it.
   compressed and the IP in them),
   `counters` (`rx_octets`, `tx_octets`, `rx_packets`, `tx_packets`,
   `rx_errors`, `tx_errors`), `calls_total` and `calls`, newest first, each
-  with `start` (ISO 8601 UTC or `null` when the clock was not set),
-  `start_unix`, `duration_s`, `dialed`, `tel_result`, `modulation`,
+  with `number`, `log` (`true` when the call has a log, above), `start`
+  (ISO 8601 UTC or `null` when the clock was not set), `start_unix`, `duration_s`, `dialed`, `tel_result`, `modulation`,
   `down_bps`, `up_bps`, `end`.
 - `GET /config` is the redacted canonical config as plain text.
 
@@ -519,9 +551,10 @@ included.
 | Request | Answer |
 |---|---|
 | `GET` or `HEAD` on `/`, `/calls`, `/status.json`, `/config` (query string ignored) | 200 |
+| `GET` or `HEAD` on `/calls/log`, `/calls/log.json` with `port=N&call=M` | 200, or 404 when there is no such log |
 | `GET` or `HEAD` on `/settings` | 200, or 401 (below) |
 | `POST` on `/settings` | 303, or one of the refusals below |
-| any view, an admin password is set, no session cookie and no `Authorization` header | 303 to `/login` for the pages, 401 for `/status.json` and for posts |
+| any view, an admin password is set, no session cookie and no `Authorization` header | 303 to `/login` for the pages, 401 for `/status.json`, `/calls/log.json` and for posts |
 | `POST /login` with the user name `admin` and the admin password | 303 to `/` with the session cookie; wrong: 401 with the page again, then 429 for a second |
 | `GET /logout` | 303 to `/`, the session of that cookie is over |
 | `POST /restart` (authorised, same origin) | 200, and `restart_asked` is set for the owner of the server |
@@ -568,8 +601,9 @@ Refusals of a `POST /settings`, in the order they are checked:
   the connection under an unread response.
 - Responses carry `Cache-Control: no-store`,
   `X-Content-Type-Options: nosniff` and a `Content-Security-Policy` that
-  allows nothing but the page's inline style, forms that post to the server
-  itself, and no framing by other pages.
+  allows nothing but the page's inline style, the box's own script and what
+  that script reads from the box, forms that post to the server itself, and
+  no framing by other pages.
 - Request headers are matched by name in any case. A header the server
   acts on (`Authorization`, `Origin`, `Host`, `Content-Type`,
   `Content-Length`) must not appear twice.

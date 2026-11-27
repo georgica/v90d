@@ -184,6 +184,28 @@ typedef struct {
     int raw;                   /* a raw_rx call still in its octet mode (not PPP yet) */
 } dce_status_t;
 
+/* How the modem's start-up went, for the call's negotiation log: what
+ * libv90modem tells (v90m_get_diag, v90m_state.used_v8) and when it
+ * changed, up to data mode. The names are the library's own, static. */
+#define DCE_NEG_EVENTS 16
+/* how often the start-up is looked at, in samples (10 ms), and once more
+ * when the call ends: a state shorter than that may not show */
+#define DCE_NEG_SAMPLES 80
+typedef struct {
+    uint32_t    at_ms;         /* call_ms when this was first seen */
+    const char *phase;         /* the furthest phase reached: v90m_phase_name */
+    const char *selected;      /* the modulation chosen: v90m_conn_name */
+    int         used_v8;
+} dce_neg_event_t;
+typedef struct {
+    int         used_v8;
+    int         data_reached;
+    const char *phase, *selected;
+    const char *error;         /* v90m_err_name; "none" while the call goes on */
+    unsigned    n_events, dropped;    /* kept in events[]; changes that found no room */
+    dce_neg_event_t events[DCE_NEG_EVENTS];
+} dce_neg_t;
+
 #define DCE_RAW_QUEUE 2048
 #define DCE_DETECT_MS 2000
 
@@ -221,6 +243,9 @@ typedef struct dce {
     uint32_t    call_ms, online_ms, connect_ms;
     int         modulation;
     int         bitrate, rx_bitrate;   /* transmit, receive */
+    dce_neg_t   neg;           /* the events only: the rest is read when asked */
+    int         neg_phase, neg_sel, neg_v8;    /* as in the last event */
+    int         neg_wait;      /* samples since the last look, modulo DCE_NEG_SAMPLES */
     uint32_t    peer_ip;
     uint32_t    ip_ms;         /* call_ms when PPP's IP was first seen up; 0 = not yet */
     unsigned    stops;         /* stops finished in this call */
@@ -305,6 +330,8 @@ void dce_ppp_watch(dce_t *d, int on);
 void dce_hangup(dce_t *d);
 
 void dce_get_status(const dce_t *d, dce_status_t *st);
+/* The call's start-up so far, or as it ended (valid from dce_init on). */
+void dce_get_neg(const dce_t *d, dce_neg_t *n);
 
 /* short English text for a dce_end_t, for logs */
 const char *dce_end_name(dce_end_t why);

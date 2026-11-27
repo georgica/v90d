@@ -246,6 +246,21 @@ static void test_v22bis_call(void)
         CHECK(strcmp(h->dialed, "5551234") == 0);
         CHECK(h->duration_s >= 8 && h->duration_s <= 40);
         CHECK(h->start_time >= 1000000003u && h->start_time <= 1000000015u);
+        /* the negotiation log: what was offered, how far it came */
+        CHECK(h->neg.valid);
+        CHECK(h->neg.offered & (1u << ST_MOD_V22BIS));
+        CHECK(h->neg.data_reached);
+        CHECK(h->neg.stage && strcmp(h->neg.stage, "data") == 0);
+        CHECK(h->neg.modulation && strcmp(h->neg.modulation, "V.22bis") == 0);
+        CHECK(h->neg.error && strcmp(h->neg.error, "none") == 0);
+        CHECK(h->neg.n_events >= 2 && h->neg.dropped == 0);
+        CHECK(h->neg.events[0].stage && strcmp(h->neg.events[0].stage, "tone") == 0);
+        CHECK(strcmp(h->neg.events[h->neg.n_events - 1].stage, "data") == 0);
+        {
+            const status_t *one[2] = { &S.status, NULL };
+            CHECK(status_render_call_log(one, 1, h->number, 0, page, sizeof page) > 0);
+            printf("%s", page);
+        }
     }
     CHECK_EQ_I(srv_send_ip(&S, lan_last, 40), PPP_ERR_DOWN);
     /* the totals survive the call */
@@ -266,6 +281,7 @@ static void test_not_answered(void)
     h = status_call(&S.status, 0);
     CHECK(h && h->tel_result == ST_TEL_BUSY && strcmp(h->dialed, "5551234") == 0);
     CHECK(h && h->modulation == ST_MOD_NONE && h->duration_s == 0);
+    CHECK(h && !h->neg.valid);
 
     place_call("5550000", 5000);
     CHECK_EQ_I(S.tel.state, TEL_INTERCEPT);
@@ -277,6 +293,32 @@ static void test_not_answered(void)
     h = status_call(&S.status, 0);
     CHECK(h && h->tel_result == ST_TEL_ABANDONED && h->dialed[0] == 0);
     CHECK_EQ_I(S.status.calls_total, 3);
+}
+
+/* a caller that sends nothing: given up on, and one that hangs up first */
+static void test_silent_caller_log(void)
+{
+    cfg_t c; const st_call_t *h; long i; static char page[STATUS_HTML_MAX];
+    const status_t *one[2] = { &S.status, NULL };
+    base_cfg(&c); c.rings = 0;
+    line_init();
+    srv_init(&S, &c, 31, lan_rx, NULL);
+    place_call("5551234", 6000);
+    CHECK_EQ_I(S.tel.state, TEL_ANSWERED);
+    for (i = 0; i < 90L * FS && S.tel.state == TEL_ANSWERED; i++) step(0);
+    CHECK_EQ_I(S.tel.state, TEL_ENDED);
+    hang_up();
+    h = status_call(&S.status, 0);
+    CHECK(h && h->neg.valid && !h->neg.used_v8 && !h->neg.data_reached);
+    CHECK(h && h->neg.error && strcmp(h->neg.error, "none") != 0);
+    if (h && status_render_call_log(one, 1, h->number, 0, page, sizeof page) > 0) printf("%s", page);
+
+    place_call("5551234", 6000);
+    run_ms(3000);
+    hang_up();
+    h = status_call(&S.status, 0);
+    CHECK(h && h->neg.valid && h->neg.n_events >= 1 && !h->neg.data_reached);
+    CHECK(h && h->neg.error && strcmp(h->neg.error, "none") == 0);   /* the caller left */
 }
 
 static void test_wrong_password_then_reconfigure(void)
@@ -2342,6 +2384,7 @@ int main(void)
     test_level();
     test_v22bis_call();
     test_not_answered();
+    test_silent_caller_log();
     test_wrong_password_then_reconfigure();
     test_drop_and_limit();
     test_v90_call();

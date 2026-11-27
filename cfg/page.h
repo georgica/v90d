@@ -175,17 +175,25 @@ static inline void page_top(sbuf_t *b, const char *title, const char *head, int 
 }
 
 /* The pages' one script, served at /ui.js (the policy allows script from
- * the box only, none inline). It does one thing: an Add button that names a
- * template (data-tpl) puts a copy of it into its table (data-rows), the IDX
- * in its field names replaced by the next row number, up to data-max rows,
- * without leaving the page. A browser without it posts the button: the page
- * is saved and comes back with one more row (settings.h). */
+ * the box only, none inline). It does three things, and without it every
+ * page still works:
+ * - an Add button that names a template (data-tpl) puts a copy of it into
+ *   its table (data-rows), the IDX in its field names replaced by the next
+ *   row number, up to data-max rows, without leaving the page. A browser
+ *   without it posts the button: the page is saved and comes back with one
+ *   more row (settings.h);
+ * - a link marked data-pop opens the text it leads to in a window on the
+ *   page, with Copy and Close. Without it, or when the text cannot be had
+ *   (a login that has ended), the link is followed as any other. Copy is the
+ *   old execCommand: the clipboard's newer interface needs https;
+ * - the page of calls (id="calls") is read again every 15 s, but not while
+ *   such a window is open (without script the page does it itself). */
 #define PAGE_JS \
     "(function(){\n" \
-    "function add(e){\n" \
-    " var b=e.target||e.srcElement;\n" \
-    " if(!b||!b.getAttribute||b.getAttribute('name')!=='add'||!b.getAttribute('data-tpl'))return;\n" \
-    " var t=document.getElementById(b.getAttribute('data-tpl')),r=document.getElementById(b.getAttribute('data-rows'));\n" \
+    "var d=document,pop=null,from=null;\n" \
+    "function add(e,b){\n" \
+    " if(b.getAttribute('name')!=='add'||!b.getAttribute('data-tpl'))return;\n" \
+    " var t=d.getElementById(b.getAttribute('data-tpl')),r=d.getElementById(b.getAttribute('data-rows'));\n" \
     " if(!t||!r||!t.innerHTML||!r.insertAdjacentHTML)return;\n" \
     " if(e.preventDefault)e.preventDefault();\n" \
     " var n=r.getElementsByTagName('tr').length,m=+b.getAttribute('data-max');\n" \
@@ -196,7 +204,61 @@ static inline void page_top(sbuf_t *b, const char *title, const char *head, int 
     " if(n+1>=m)b.disabled=true;\n" \
     " return false;\n" \
     "}\n" \
-    "if(document.addEventListener)document.addEventListener('click',add,false);\n" \
+    "function make(tag,cls,text,to){\n" \
+    " var x=d.createElement(tag);if(cls)x.className=cls;\n" \
+    " if(text)x.appendChild(d.createTextNode(text));to.appendChild(x);return x;\n" \
+    "}\n" \
+    "function button(text,to){\n" \
+    " var x=d.createElement('input');x.type='button';x.value=text;to.appendChild(x);return x;\n" \
+    "}\n" \
+    "function close(){\n" \
+    " if(!pop)return;\n" \
+    " d.body.removeChild(pop);pop=null;\n" \
+    " if(from&&from.focus)from.focus();\n" \
+    "}\n" \
+    "function show(text){\n" \
+    " close();\n" \
+    " pop=make('div','ov','',d.body);\n" \
+    " var w=make('div','pop','',pop);w.setAttribute('role','dialog');w.setAttribute('aria-modal','true');\n" \
+    " w.setAttribute('aria-label','Call log');\n" \
+    " make('h2','','Call log',w);\n" \
+    " var t=make('textarea','','',w);t.readOnly=true;t.setAttribute('wrap','off');t.value=text;\n" \
+    " var p=make('p','','',w),s=make('span','','',p),c=button('Copy',p),x=button('Close',p);x.className='no';\n" \
+    " c.onclick=function(){\n" \
+    "  var ok=false;t.focus();t.select();\n" \
+    "  try{ok=d.execCommand('copy');}catch(e){}\n" \
+    "  s.innerHTML='';s.appendChild(d.createTextNode(ok?'Copied':'Press Ctrl+C to copy'));\n" \
+    " };\n" \
+    " x.onclick=close;\n" \
+    " pop.onclick=function(e){if((e||window.event).target===pop)close();};\n" \
+    " x.focus();\n" \
+    "}\n" \
+    "function open(e,a){\n" \
+    " if(a.getAttribute('data-pop')===null||!window.XMLHttpRequest)return;\n" \
+    " if(e.button||e.ctrlKey||e.metaKey||e.shiftKey||e.altKey)return;\n" \
+    " e.preventDefault();from=a;\n" \
+    " var r=new XMLHttpRequest();\n" \
+    " r.onreadystatechange=function(){\n" \
+    "  if(r.readyState!==4)return;\n" \
+    "  if(r.status===200&&/^text\\/plain/.test(r.getResponseHeader('Content-Type')||''))show(r.responseText);\n" \
+    "  else window.location.href=a.href;\n" \
+    " };\n" \
+    " r.open('GET',a.href,true);r.send();\n" \
+    "}\n" \
+    "if(d.addEventListener){\n" \
+    " d.addEventListener('click',function(e){\n" \
+    "  var b=e.target;if(!b||!b.getAttribute)return;\n" \
+    "  if(b.tagName==='A')open(e,b);else add(e,b);\n" \
+    " },false);\n" \
+    " d.addEventListener('keydown',function(e){if(e.keyCode===27)close();},false);\n" \
+    "}\n" \
+    "function again(){\n" \
+    " setTimeout(function(){\n" \
+    "  if(!d.getElementById('calls'))return;\n" \
+    "  if(pop)again();else window.location.reload();\n" \
+    " },15000);\n" \
+    "}\n" \
+    "again();\n" \
     "})();\n"
 
 #define PAGE_END \

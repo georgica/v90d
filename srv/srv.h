@@ -85,6 +85,7 @@ typedef struct {
     int        ppp_up_once;     /* this call's PPP has had its network up (the login deadline is over) */
     uint32_t   ppp_from_s;      /* call_s when its PPP began (after the terminal menu: later than 0) */
     dce_status_t ds;            /* scratch */
+    uint32_t   neg_offered;     /* what the call's modem offered (st_neg_t); 0 = no modem ran */
     srv_raw_fn raw_out;         /* service = saturn: octets from the caller's modem */
     int        link; uint32_t link_addr;   /* the call in progress there: SATURN_*, whom to call */
     char       link_game[3];                /* matchmaking: the two-character game id */

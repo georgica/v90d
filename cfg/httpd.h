@@ -192,6 +192,7 @@ typedef struct httpd {
     int           (*diag)(void *ctx, char *buf, size_t cap); void *diag_ctx;    /* GET /log */
     status_bbs_rows bbs; void *bbs_ctx;
     const char *bbs_query; size_t bbs_qlen;     /* of the request being answered */
+    const char *query; size_t query_len;        /* the same, for the log of a call */
     void           *save_ctx;
     int             listen_fd;   /* -1 when there is none */
     uint32_t        rx_timeout_ms, tx_timeout_ms, linger_ms;
