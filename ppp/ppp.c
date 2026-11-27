@@ -1509,15 +1509,14 @@ static int ccp_wanted(const ppp_t *p)
 }
 
 /* On request: does this option-18 value ask for encryption? It names an
- * MPPE key length, and the keys are in hand. A request that also asks for
- * MPPC (Windows' "optional encryption", 0x61) takes either, and we do not
- * do both at once: it keeps MPPC (in the clear, as text is far quicker
- * compressed) where we do MPPC, and gets MPPE only where we do not. */
+ * MPPE key length, and the keys are in hand. MPPC asked as well does not
+ * change that: Windows XP with "Require data encryption" and software
+ * compression asks 0xe1, Windows 98 0x21, and both hang up (error 742) when
+ * Nak'd toward MPPC alone; Windows' optional encryption asks for MPPC only.
+ * We do not do both at once, so such a caller gets MPPE. */
 static int mppe_asks(const ppp_t *p, uint32_t v)
 {
-    if (!(v & MPPE_KEYS) || !p->mppe_have)
-        return 0;
-    return p->mppe_struck == 2 || !((v & MPPC_BIT) && (p->cfg.comp & PPP_COMP_MPPC));
+    return (v & MPPE_KEYS) && p->mppe_have;
 }
 
 /* MPPE is what our request carries and what we take: encryption required,
@@ -1709,18 +1708,6 @@ static int ccp_recv_cr(ppp_fsm_t *f, const uint8_t *opts, size_t len,
     p->cpend_wbits = 0;
     p->cpend_mppe = 0;
     p->cchosen = 0;
-    /* MPPE and MPPC asked together keep MPPC the first time ("optional
-     * encryption" takes that). Asked again with the MPPE bits still in it,
-     * after our Nak took them off, the caller requires encryption: Windows
-     * 98's "Require data encryption" with software compression on asks 0x21
-     * so, and hangs up without MPPE. Counted here, once per request. */
-    while (ppp_fsm_next_option(opts, len, &pos, &type, &val, &vlen))
-        if (type == CCP_OPT_MPPC && vlen == 4 && p->mppe_have && p->mppe_struck < 2 &&
-            (get32(val) & MPPE_KEYS) && !mppe_asks(p, get32(val))) {
-            p->mppe_struck++;
-            break;
-        }
-    pos = 0;
     while (ppp_fsm_next_option(opts, len, &pos, &type, &val, &vlen)) {
         int r = 0;
 
@@ -2111,7 +2098,6 @@ static void network_start(ppp_t *p)
     p->mppe_key = MPPE_BIT_S;   /* 128-bit until the peer shows it has less */
     p->mppe_floor = 0;          /* no request from the peer yet */
     p->mppe_asked = 0;
-    p->mppe_struck = 0;
     p->ccp_switch = 0;
     p->mppe_redos = 0;
     p->ccp_redo = 0;

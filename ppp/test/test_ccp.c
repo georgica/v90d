@@ -1880,33 +1880,28 @@ static void test_mppe_on_request(void)
     CHECK_EQ_I(status()->comp_tx, PPP_COMP_MPPE);
     CHECK_EQ_I(status()->comp_rx, PPP_COMP_MPPE);
 
-    /* (e) Windows' "optional encryption" asks for MPPC and MPPE in one
-     * request (0x61): we do not do both at once, and it takes either, so it
-     * keeps MPPC in the clear (text pages are much faster compressed) */
+    /* (e) MPPE and MPPC asked in one request: Windows XP with "Require data
+     * encryption" and software compression on asks 0xe1, Windows 98 0x21,
+     * and both hang up (error 742) on a Nak toward MPPC alone; XP does not
+     * ask twice. We do not do both at once: a caller that asks for MPPE at
+     * all gets MPPE (Windows' optional encryption asks for MPPC only) */
     {
-        static const uint8_t opt61[6] = { 18, 6, 0, 0, 0, 0x61 }, mppc[6] = { 18, 6, 0, 0, 0, 0x01 };
+        static const uint8_t xp_e1[6] = { 18, 6, 0, 0, 0, 0xe1 };
         base_cfg(&cfg);
         cfg.comp = BOTH;
         inject_mppe = 1;
         up(&cfg);
         inject_mppe = 0;
-        push_cp(P_CCP, PPP_CONF_REQ, 5, opt61, 6);
-        pull();
-        CHECK(scr_new && scr.n > 4 && scr.d[4] == 26);             /* ours: compression (Deflate first) */
-        f = find(P_CCP, PPP_CONF_NAK);
-        CHECK(f && same(f, mppc, 6));                              /* its: toward MPPC alone */
-        CHECK_EQ_I(ppp_send_ip(&S, ip, sizeof ip), 0);            /* not held: no encryption asked */
-        /* a caller that asks again with the MPPE bits still in it, after our
-         * Nak took them off, requires encryption (Windows 98 with "Require
-         * data encryption" and software compression asks 0x21 so, and hangs
-         * up without it): it gets MPPE */
-        push_cp(P_CCP, PPP_CONF_REQ, 6, opt61, 6);
+        push_cp(P_CCP, PPP_CONF_REQ, 5, xp_e1, 6);
         pull();
         f = find(P_CCP, PPP_CONF_NAK);
-        CHECK(f && same(f, s128, 6));
-        CHECK(scr_new && same(&scr, s128, 6));                     /* ours becomes MPPE too */
-        CHECK(ppp_send_ip(&S, ip, sizeof ip) != 0);                /* nothing in the clear now */
-        /* with no MPPC to give (compression off), it gets MPPE instead */
+        CHECK(f && same(f, s128, 6));                              /* toward 128-bit, its mode */
+        CHECK(scr_new && same(&scr, s128, 6));                     /* ours MPPE from the first */
+        CHECK(ppp_send_ip(&S, ip, sizeof ip) != 0);                /* nothing in the clear */
+    }
+    {
+        static const uint8_t opt61[6] = { 18, 6, 0, 0, 0, 0x61 };
+        /* and with no MPPC to give (compression off) the same */
         base_cfg(&cfg);
         cfg.comp = 0;
         inject_mppe = 1;
