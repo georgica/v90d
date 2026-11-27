@@ -28,8 +28,9 @@ echo_interval = 30
 compression = on
 # Encryption has no setting: a caller that asks for it (Windows "require
 # data encryption") gets MPPE (RFC 3078), any other is served in the clear.
-# Either login offers MS-CHAPv2 first, which MPPE needs; a caller that
-# cannot do it gets CHAP or PAP as before. (The encryption and encryption2
+# Either login offers MS-CHAP first, which MPPE needs (MS-CHAPv2; v1 to
+# Windows 98, which needs it); a caller that cannot do it gets CHAP or PAP
+# as before. (The encryption and encryption2
 # lines of older files are read and ignored.)
 # up to 16 users: name, then secret. Quote anything with blanks; inside
 # quotes use \" \\ and \xHH.

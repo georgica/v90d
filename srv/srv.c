@@ -326,7 +326,7 @@ static void adopt(srv_t *s, const cfg_t *cfg)
     s->status.service = cfg->service;
     s->status.v92 = cfg->v92 && full_options(cfg, 0);
     s->status.ppp_compression = cfg->compression && full_options(cfg, 0);
-    /* MPPE for a caller that asks: a login offers MS-CHAPv2 first
+    /* MPPE for a caller that asks: a login offers MS-CHAP first
      * (call_start), never on a console or WebTV port */
     s->status.ppp_encryption = cfg->auth != CFG_AUTH_NONE && full_options(cfg, 0) && cfg->service != CFG_SERVICE_WEBTV;
     for (i = 0; i < CFG_MAX_USERS; i++) {

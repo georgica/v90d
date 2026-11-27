@@ -429,8 +429,8 @@ int settings_render_page(const cfg_t *c, int page, int saved, const char *error,
                 " top of the modem's own: web pages and text arrive about three times as fast"
                 " as the line rate. PPP encryption needs no setting: a caller that asks for it (Windows with"
                 " \"require data encryption\", for one) gets MPPE; any other is served in the clear. Either login"
-                " offers MS-CHAPv2 first, which encryption needs, and a caller that cannot do it gets CHAP or PAP"
-                " as before.</p></section>\n");
+                " offers MS-CHAP, which encryption needs (MS-CHAPv2; v1 to Windows 98, which needs it), and a"
+                " caller that cannot do it gets CHAP or PAP as before.</p></section>\n");
 
     }
     if (ON(SETTINGS_USERS)) {

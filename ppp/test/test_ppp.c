@@ -511,7 +511,7 @@ static void test_auth_negotiation(void)
     CHECK_EQ_I(status()->end_reason, PPP_END_AUTH_REFUSED);
 
     /* MS-CHAPv2 first. A peer that Naks it toward MS-CHAP v1 (Windows 95
-     * without the v2 update), which we do not do, gets CHAP-MD5 next, and
+     * without the v2 update), not allowed here, gets CHAP-MD5 next, and
      * only then PAP: never a password in clear while CHAP-MD5 is left */
     c.auth = PPP_AUTH_MSCHAPV2 | PPP_AUTH_CHAP | PPP_AUTH_PAP;
     start(&c);

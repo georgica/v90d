@@ -1,9 +1,9 @@
 # ppp/: the PPP server
 
 HDLC framing (`ppp_hdlc.c`), the option negotiation automaton (`ppp_fsm.c`),
-LCP, PAP, CHAP-MD5, MS-CHAPv2, IPCP and CCP (`ppp.c`); the two compression
-algorithms CCP can agree on, Deflate (`ppp_deflate.c`) and MPPC
-(`ppp_mppc.c`); and encryption: MS-CHAPv2 with the MPPE cipher
+LCP, PAP, CHAP-MD5, MS-CHAP v1 and v2, IPCP and CCP (`ppp.c`); the two
+compression algorithms CCP can agree on, Deflate (`ppp_deflate.c`) and MPPC
+(`ppp_mppc.c`); and encryption: MS-CHAP v1 or v2 with the MPPE cipher
 (`ppp_crypto.c`, `ppp_mppe.c`). Portable C99, integer only, no allocation,
 no OS calls.
 
@@ -14,8 +14,8 @@ encryption readings are near the end, under "RFC 2759 / 3078 / 3079".
 ## Sources
 
 Only these, kept in `refs/rfc/`: RFC 1962 (CCP), RFC 1979 (PPP Deflate),
-RFC 1951 (the deflate format), RFC 2118 (MPPC), RFC 1994 (CHAP), RFC 2759
-(MS-CHAPv2), RFC 3078 (MPPE) and RFC 3079 (deriving the MPPE keys), together
+RFC 1951 (the deflate format), RFC 2118 (MPPC), RFC 1994 (CHAP), RFC 2433
+(MS-CHAP v1), RFC 2759 (MS-CHAPv2), RFC 3078 (MPPE) and RFC 3079 (deriving the MPPE keys), together
 with RFC 1661 for the automaton. No other implementation was read. Python's `zlib` module is
 used as a black box in `test/zlib_check.py`; a real pppd 2.5.1 is used as a
 black box in `srv/test/ns_pppd.c`, and its packet log is the source of the
@@ -44,20 +44,21 @@ the caller Acks governs what we send.
 - Encryption changes option 18. With `cfg.encrypt` 0 (the default, and
   what the daemon uses since 0.14) encryption is given on request: a caller
   whose option 18 carries MPPE key bits (0x20 / 0x40 / 0x80), and whose
-  login was MS-CHAPv2 (so the keys are in hand), gets MPPE. One whose
-  request carries MPPC's bit as well (Windows' "optional encryption",
-  0x61) takes either, and we do not do both at once: it keeps MPPC in the
-  clear, as text is far quicker compressed (it gets MPPE only where we do
-  no MPPC). "Require data encryption" (0x60, 0x40) asks for MPPE alone. That request
-  ranks above any compression in it. Our CCP request goes out at once
-  after the login, with IPCP's, asking for compression: Windows 98 with
-  "require data encryption" hangs up on a server that starts IPCP with no
-  CCP (0.14.0 waited for the caller's request first, and lost it). When
-  the caller asks for MPPE our request becomes MPPE, sent at once if CCP
-  is still negotiating, or by negotiating CCP again if our compression had
-  been Acked. pppd with require-mppe is not served: it ends the link on a
-  server whose first request is not MPPE. From then on nothing goes in the
-  clear
+  login was MS-CHAP (v1 or v2, so the keys are in hand), gets MPPE, MPPC's
+  bit asked as well or not: we do not do both at once, and Windows XP with
+  "Require data encryption" and software compression on asks 0xe1,
+  Windows 98 0x21 (or 0x31), and both hang up (error 742) on a Nak toward
+  MPPC alone (0.14.0 did that, taking such a request for "optional").
+  Windows' unticked "Require data encryption" asks MPPC only (0x01), with
+  or without "Require encrypted password", and keeps compression. That
+  request ranks above any compression in it. With the keys in hand CCP waits (a
+  Restart period at most) for the caller's first request before sending
+  ours, so ours is MPPE, in the mode and key length asked, when the caller
+  wants it: pppd with require-mppe ends the link on a server whose first
+  request is anything else. A caller that asks later still gets it: our
+  request becomes MPPE (sent at once if CCP is still negotiating, or by
+  negotiating CCP again if our compression had been Acked); and from then
+  on nothing goes in the clear
   either way, as with encryption required. A caller that asks for no MPPE
   gets compression and the clear, as before; one that asks without the
   keys (another login) is Nak'd down to MPPC's 0x00000001. With
@@ -253,11 +254,35 @@ RFC 2759 / 3078 / 3079 (MS-CHAPv2 and MPPE):
     `test/test_crypto.c`.
 28. Authentication fallback. A peer that Naks our method gets its own
     suggestion if we allow it, otherwise the strongest method left:
-    MS-CHAPv2, then CHAP-MD5, then PAP. A Nak toward MS-CHAP v1 (0x80, which
-    we do not do; Windows 95 without the v2 update) therefore leads to
-    CHAP-MD5, never straight to PAP and a password in clear. With encryption
-    required there is no fallback at all: MPPE is keyed from MS-CHAPv2, so a
-    refusal of it ends the link before any password is sent.
+    the MS-CHAP not yet tried, then CHAP-MD5, then PAP; never straight to
+    PAP and a password in clear. With encryption required there is no
+    fallback past MS-CHAP: MPPE is keyed from it, so a refusal ends the
+    link before any password is sent.
+28a. Which MS-CHAP goes first (since 0.14.1). MS-CHAPv2, except for Windows
+    98: its Dial-Up Networking Acks MS-CHAPv2 and logs in, then cannot make
+    MPPE keys from it and hangs up after the Success (error 742; its own PPP
+    log says "Login was successful" then "Remote access driver is shutting
+    down"), so a Nak-driven fallback never reaches v1 for it. It is known
+    by its first LCP request, which is exactly ACCM, magic, PFC, ACFC and
+    callback by CBCP (13, operation 6), in that order and nothing else;
+    Windows XP adds MRRU and an endpoint discriminator, pppd asks for no
+    callback. With both MS-CHAP versions allowed, our first LCP request
+    waits for the caller's (a second at most; callers send theirs at once)
+    and offers v1 first for that shape, v2 for anything else
+    (`ppp_counters_t.win98` says which). Linux pppd must get v2: 2.5.0 to
+    2.5.4 receive with an all-zero key after v1 (`mppe_set_chapv1` hands
+    one buffer to `mppe_set_keys` as both keys, which zeroes it between the
+    copies; fixed in 2.5.5) and no pppd does 40-bit MPPE after v1.
+28b. MS-CHAP v1 (RFC 2433, algorithm 0x80): an 8-octet challenge; of the
+    49-octet response only the NT one (flag 1) is taken, as the LAN Manager
+    one alone proves only the password upper-cased and cut to 14 octets; a
+    plain Success, "E=691 R=0" on a failure. Its MPPE keys (RFC 3079
+    section 2) are the same both ways: 128-bit from SHA1 of the NT hash's
+    hash twice and the challenge, 40/56-bit from the first 8 octets of the
+    LAN Manager hash (no challenge in them: Microsoft's design, and all
+    Windows 98 does). The RFC's printed 128-bit InitialSessionKey has a
+    typo ("ac ca" for "ac c1"; its own next line has c1). Vectors of RFC
+    2433 Appendix B and RFC 3079 2.5 are in `test/test_crypto.c`.
 29. The MPPE keys (RFC 3079) come from the NT-Response and the hash of the
     NT-hash: the master key, then a send and a receive start key (the
     server's assignment). Each direction's first session key is
@@ -398,9 +423,10 @@ and the behaviour described in it:
   the user demanded encryption, in which case it gives up CCP or the call;
 - it resynchronizes on the A bit and may or may not send a Reset-Ack;
 - it accepts native IP packets while MPPC is on;
-- with encryption, it authenticates with MS-CHAPv2, requests option 18 with
-  stateful MPPE (H clear; 0x60 for "require", 0x40 for "maximum strength",
-  0x61 with software compression on), Naks our stateless request down to
+- with encryption, it authenticates with MS-CHAP (v1 on Windows 98),
+  requests option 18 with stateful MPPE (H clear; 0x60 for "require",
+  0x40 for "maximum strength"; with software compression on XP asks 0xe1,
+  Windows 98 0x21), Naks our stateless request down to
   stateful, derives the same keys, and sends every IP packet encrypted with
   the ENCRYPT bit and a rising coherency count (30a). This was learnt the
   hard way: 0.8.0 offered stateless only and no Windows caller could
@@ -416,7 +442,10 @@ MS-CHAPv2 and MPPE are also checked against a peer not written here:
 `srv/test/ns_pppd.c` makes a whole call to the daemon from pppd 2.5 with
 `require-mppe-128`, through the Linux kernel's `ppp_mppe` (whose key
 schedule was itself matched against Windows), and moves files both ways
-over TCP. A real Windows client has still not been tried.
+over TCP. Since 0.14.1 real Windows 98 SE and XP clients have been run
+against the daemon (on the ISP's rig, through a modem bridge): with and
+without "Require data encryption", MPPE at 40 and 128 bits, pings and a
+web page across.
 
 ## Tests
 

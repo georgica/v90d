@@ -2187,8 +2187,9 @@ static int win_decrypt(win_dir_t *d, const uint8_t *in, size_t n, uint8_t *out)
 
 /* CCP as a Windows dial-up client negotiates it; `ask` is what its
  * Configure-Request carries on option 18 (0x60: 40 or 128 bit, "require
- * encryption"; 0x40: "maximum strength"; 0x61: "optional", with software
- * compression on), `nak` what it answers a request for stateless with */
+ * encryption"; 0x40: "maximum strength"; 0x61 or, on XP, 0xe1 the same
+ * with software compression on), `nak` what it answers a request for
+ * stateless with */
 static void win_ccp(uint32_t ask, uint32_t nak)
 {
     static const uint8_t s128[6] = { 18, 6, 0, 0, 0, 0x40 };   /* stateful 128 */
@@ -2230,7 +2231,7 @@ static void test_mppe_windows(void)
     static const uint32_t asks[3][2] = {
         { 0x00000060, 0x00000040 },     /* XP / 11 "require encryption" */
         { 0x00000040, 0x00000040 },     /* "require maximum strength" */
-        { 0x00000061, 0x00000041 },     /* "optional encryption", MPPC asked too */
+        { 0x00000061, 0x00000041 },     /* MPPC asked too (software compression on) */
     };
     ppp_config_t cfg;
     win_dir_t wtx, wrx;     /* the client's send and receive directions */
