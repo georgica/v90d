@@ -503,10 +503,11 @@ static void call_start(srv_t *s)
         d.v42.lapm.v42bis_tx = 0; d.v42.lapm.v42bis_rx = 0;
         d.v42.lapm.v44_tx = 0; d.v42.lapm.v44_rx = 0;
     }
-    /* Encryption on request: with a login (CHAP or PAP), MS-CHAP v1 is
-     * offered first (Windows 98 logs in with v2 but makes MPPE keys from v1
-     * only), then MS-CHAPv2, CHAP-MD5 and (a PAP port) PAP, each for a
-     * caller that Naks or Rejects the one before; so a caller that wants
+    /* Encryption on request: with a login (CHAP or PAP), MS-CHAPv2 is
+     * offered first (MS-CHAP v1 first to Windows 98, recognised by its first
+     * LCP request: it logs in with v2 but makes MPPE keys from v1 only), then
+     * the other MS-CHAP, CHAP-MD5 and (a PAP port) PAP, each for a caller
+     * that Naks or Rejects the one before; so a caller that wants
      * MPPE has the keys for it and gets it (ppp.h, encrypt 0), and one
      * that does not ask is served in the clear. Never on a console port,
      * which keeps the port's own login, nor for a WebTV box. */

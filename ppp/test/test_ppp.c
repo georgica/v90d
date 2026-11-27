@@ -158,20 +158,56 @@ static uint32_t lcp_up(const uint8_t *peer_opts, size_t n)
     size_t vl;
     const uint8_t *v;
 
+    int acked = 0;
+
     pull();
     cr = find(PPP_PROTO_LCP, PPP_CONF_REQ);
+    if (!cr) {
+        /* ours is held for the caller's (both MS-CHAP versions allowed):
+         * the caller's request first */
+        push_cp(PPP_PROTO_LCP, PPP_CONF_REQ, 1, peer_opts, n);
+        pull();
+        acked = find(PPP_PROTO_LCP, PPP_CONF_ACK) != NULL;
+        cr = find(PPP_PROTO_LCP, PPP_CONF_REQ);
+    }
     CHECK(cr != NULL);
     if (!cr) return 0;
     v = opt(cr, 5, &vl);
     if (v) magic = be32(v);
     push_cp(PPP_PROTO_LCP, PPP_CONF_ACK, cr->d[1], cr->d + 4, cr->n - 4);
-    push_cp(PPP_PROTO_LCP, PPP_CONF_REQ, 1, peer_opts, n);
+    if (!acked) {
+        frame_t *rej = find(PPP_PROTO_LCP, PPP_CONF_REJ);
+        if (rej) {
+            /* options of the caller's we rejected (Windows 98's callback):
+             * it asks again without them, as Windows does */
+            uint8_t again[64], rt[8];
+            size_t an = 0, pos = 0, nr = 0, i, l;
+            uint8_t t;
+            const uint8_t *val;
+            while (nr < sizeof rt && ppp_fsm_next_option(rej->d + 4, rej->n - 4, &pos, &t, &val, &l))
+                rt[nr++] = t;
+            pos = 0;
+            while (ppp_fsm_next_option(peer_opts, n, &pos, &t, &val, &l)) {
+                for (i = 0; i < nr && rt[i] != t; i++) ;
+                if (i == nr && an + l + 2 <= sizeof again) {
+                    again[an++] = t; again[an++] = (uint8_t)(l + 2);
+                    memcpy(again + an, val, l); an += l;
+                }
+            }
+            push_cp(PPP_PROTO_LCP, PPP_CONF_REQ, 2, again, an);
+        } else
+            push_cp(PPP_PROTO_LCP, PPP_CONF_REQ, 1, peer_opts, n);
+    }
     pull();
-    CHECK(find(PPP_PROTO_LCP, PPP_CONF_ACK) != NULL);
+    CHECK(acked || find(PPP_PROTO_LCP, PPP_CONF_ACK) != NULL);
     return magic;
 }
 
 static const uint8_t peer_lcp[] = { 5, 6, 0x11, 0x22, 0x33, 0x44 };
+/* Windows 98 SE Dial-Up Networking's first LCP request, as on the ISP's rig
+ * and in production: ACCM, magic, PFC, ACFC, callback (CBCP) */
+static const uint8_t win98_lcp[] = { 2, 6, 0, 0x0a, 0, 0, 5, 6, 0x00, 0x05, 0xcb, 0xc3,
+                                     7, 2, 8, 2, 0x0d, 3, 6 };
 
 static void chap_answer(const frame_t *ch, const char *user, const char *secret)
 {
@@ -689,6 +725,70 @@ static void test_chap(void)
  * first when allowed, an 8-octet challenge, the NT response (never the LM
  * one alone), a plain Success; MPPE keys of both lengths (RFC 3079
  * section 2: 40/56-bit from the LAN Manager hash) */
+/* Which MS-CHAP is offered first, when both are allowed: v1 for Windows 98
+ * (it logs in with v2, then cannot make MPPE keys and hangs up, error 742),
+ * recognised by its first LCP request; v2 for everyone else. Our request
+ * waits for the caller's, up to a second. */
+static void test_win98_detect(void)
+{
+    static const uint8_t pppd[] = { 2, 6, 0, 0, 0, 0, 5, 6, 1, 2, 3, 4, 7, 2, 8, 2 };
+    static const uint8_t xp[] = { 1, 4, 5, 0xf4, 2, 6, 0, 0, 0, 0, 5, 6, 1, 2, 3, 4, 7, 2, 8, 2,
+                                  0x0d, 3, 6, 0x11, 4, 0x06, 0x4e,
+                                  0x13, 9, 1, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff };
+    static const uint8_t cb0[] = { 2, 6, 0, 0x0a, 0, 0, 5, 6, 1, 2, 3, 4, 7, 2, 8, 2, 0x0d, 3, 0 };
+    static const uint8_t reorder[] = { 5, 6, 1, 2, 3, 4, 2, 6, 0, 0x0a, 0, 0, 7, 2, 8, 2, 0x0d, 3, 6 };
+    static const struct { const uint8_t *o; size_t n; uint8_t alg; int w98; } k[] = {
+        { win98_lcp, sizeof win98_lcp, 0x80, 1 },
+        { pppd, sizeof pppd, 0x81, 0 },
+        { xp, sizeof xp, 0x81, 0 },
+        { cb0, sizeof cb0, 0x81, 0 },          /* callback, another operation */
+        { reorder, sizeof reorder, 0x81, 0 },  /* the same options, another order */
+    };
+    ppp_config_t c;
+    frame_t *cr;
+    size_t vl, i;
+    const uint8_t *v;
+
+    base_cfg(&c);
+    c.auth = PPP_AUTH_MSCHAPV1 | PPP_AUTH_MSCHAPV2 | PPP_AUTH_CHAP | PPP_AUTH_PAP;
+    for (i = 0; i < sizeof k / sizeof k[0]; i++) {
+        start(&c);
+        pull();
+        CHECK(find(PPP_PROTO_LCP, PPP_CONF_REQ) == NULL);       /* ours held */
+        push_cp(PPP_PROTO_LCP, PPP_CONF_REQ, 1, k[i].o, k[i].n);
+        pull();
+        cr = find(PPP_PROTO_LCP, PPP_CONF_REQ);
+        v = cr ? opt(cr, 3, &vl) : NULL;
+        CHECK(v && vl == 3 && v[0] == 0xc2 && v[1] == 0x23 && v[2] == k[i].alg);
+        if (v && v[2] != k[i].alg) printf("    case %u: offered %02x\n", (unsigned)i, v[2]);
+        CHECK_EQ_I(status()->counters.win98, k[i].w98);
+    }
+
+    /* no request from the caller: ours after a second, MS-CHAPv2 first */
+    start(&c);
+    ppp_tick(&S, 999);
+    pull();
+    CHECK(find(PPP_PROTO_LCP, PPP_CONF_REQ) == NULL);
+    ppp_tick(&S, 1);
+    pull();
+    cr = find(PPP_PROTO_LCP, PPP_CONF_REQ);
+    v = cr ? opt(cr, 3, &vl) : NULL;
+    CHECK(v && vl == 3 && v[2] == 0x81);
+    CHECK_EQ_I(status()->counters.win98, 0);
+
+    /* one MS-CHAP version only: nothing to choose, nothing held */
+    c.auth = PPP_AUTH_MSCHAPV2 | PPP_AUTH_CHAP;
+    start(&c);
+    pull();
+    CHECK(find(PPP_PROTO_LCP, PPP_CONF_REQ) != NULL);
+    c.auth = PPP_AUTH_MSCHAPV1 | PPP_AUTH_CHAP;
+    start(&c);
+    pull();
+    cr = find(PPP_PROTO_LCP, PPP_CONF_REQ);
+    v = cr ? opt(cr, 3, &vl) : NULL;
+    CHECK(v && vl == 3 && v[2] == 0x80);
+}
+
 static void test_mschap1(void)
 {
     ppp_config_t c;
@@ -700,12 +800,13 @@ static void test_mschap1(void)
     base_cfg(&c);
     c.auth = PPP_AUTH_MSCHAPV1 | PPP_AUTH_MSCHAPV2 | PPP_AUTH_CHAP | PPP_AUTH_PAP;
     start(&c);
+    push_cp(PPP_PROTO_LCP, PPP_CONF_REQ, 1, win98_lcp, sizeof win98_lcp);
     pull();
     cr = find(PPP_PROTO_LCP, PPP_CONF_REQ);
     v = cr ? opt(cr, 3, &vl) : NULL;
     CHECK(v && vl == 3 && v[0] == 0xc2 && v[1] == 0x23 && v[2] == 0x80);   /* MS-CHAP v1 first */
     start(&c);
-    lcp_up(peer_lcp, sizeof peer_lcp);
+    lcp_up(win98_lcp, sizeof win98_lcp);
     CHECK_EQ_I(status()->auth, PPP_AUTH_MSCHAPV1);
     ch = find(PPP_PROTO_CHAP, 1);
     CHECK(ch != NULL);
@@ -732,7 +833,7 @@ static void test_mschap1(void)
      * the password upper-cased and cut to 14 octets, far too weak to log in
      * with (Windows 98 sends the NT response) */
     start(&c);
-    lcp_up(peer_lcp, sizeof peer_lcp);
+    lcp_up(win98_lcp, sizeof win98_lcp);
     ch = find(PPP_PROTO_CHAP, 1);
     if (ch) mschap1_answer(ch, "alice", "wonderland", 0);
     pull();
@@ -742,7 +843,7 @@ static void test_mschap1(void)
 
     /* wrong secret: Failure "E=691", link ended */
     start(&c);
-    lcp_up(peer_lcp, sizeof peer_lcp);
+    lcp_up(win98_lcp, sizeof win98_lcp);
     ch = find(PPP_PROTO_CHAP, 1);
     if (ch) mschap1_answer(ch, "alice", "Wonderland", 1);
     pull();
@@ -752,6 +853,7 @@ static void test_mschap1(void)
 
     /* a client that will not do v1 Naks toward v2: v2 */
     start(&c);
+    push_cp(PPP_PROTO_LCP, PPP_CONF_REQ, 1, win98_lcp, sizeof win98_lcp);
     pull();
     cr = find(PPP_PROTO_LCP, PPP_CONF_REQ);
     {
@@ -776,7 +878,7 @@ static void test_mschap1(void)
             uint8_t ccpv[6] = { 18, 6, 0, 0, 0, 0 }, st[16], pt[128];
             ccpv[5] = bit;
             start(&c);
-            lcp_up(peer_lcp, sizeof peer_lcp);
+            lcp_up(win98_lcp, sizeof win98_lcp);
             ch = find(PPP_PROTO_CHAP, 1);
             if (!ch) return;
             memcpy(chal, ch->d + 5, 8);
@@ -1970,6 +2072,7 @@ int main(void)
     test_chap();
     test_mschap2();
     test_mschap1();
+    test_win98_detect();
     test_encrypt_needs_keys();
     test_pap();
     test_ipcp();

@@ -446,6 +446,35 @@ static int negotiate(ppp_t *p, ppp_fsm_t *f, judge_fn judge,
 /* ---------------------------------------------------------------- */
 /* LCP */
 
+/* Windows 98 SE Dial-Up Networking's first LCP request, and only it: ACCM,
+ * magic number, PFC, ACFC and callback by CBCP (13, operation 6), in that
+ * order, nothing else. (Windows ME, 2000 and XP add options; pppd asks for
+ * no callback.) */
+static int is_win98_lcp(const uint8_t *o, size_t len)
+{
+    static const uint8_t want[5][2] = {
+        { LCP_OPT_ACCM, 6 }, { LCP_OPT_MAGIC, 6 }, { LCP_OPT_PFC, 2 }, { LCP_OPT_ACFC, 2 }, { 13, 3 } };
+    size_t pos = 0, vlen, i = 0;
+    uint8_t type;
+    const uint8_t *val;
+
+    while (ppp_fsm_next_option(o, len, &pos, &type, &val, &vlen)) {
+        if (i == 5 || type != want[i][0] || vlen + 2 != want[i][1])
+            return 0;
+        if (type == 13 && val[0] != 6)
+            return 0;
+        i++;
+    }
+    return i == 5 && pos == len;
+}
+
+/* our first LCP request goes out: the caller's came (or none in time) */
+static void lcp_release(ppp_t *p)
+{
+    p->lcp_wait_ms = 0;
+    ppp_fsm_up(&p->lcp);
+}
+
 static void lcp_reset(ppp_fsm_t *f)
 {
     ppp_t *p = (ppp_t *)f->ctx;
@@ -458,9 +487,11 @@ static void lcp_reset(ppp_fsm_t *f)
     p->magic = p->w_magic ? new_magic(p, 0) : 0;
     p->w_pfc = !p->cfg.no_pfc;
     p->w_acfc = !p->cfg.no_acfc;
-    /* MS-CHAP v1 first where it is allowed: Windows 98 logs in with v2 but
-     * can make MPPE keys from v1 only; then v2, CHAP-MD5, PAP */
-    if (p->cfg.auth & PPP_AUTH_MSCHAPV1)
+    /* MS-CHAPv2 first; MS-CHAP v1 first for Windows 98 (it logs in with v2,
+     * then cannot make MPPE keys from it and hangs up: error 742), or where
+     * v1 is the only one allowed; then CHAP-MD5, PAP */
+    if ((p->cfg.auth & PPP_AUTH_MSCHAPV1) &&
+        (p->cnt.win98 || !(p->cfg.auth & PPP_AUTH_MSCHAPV2)))
         p->w_auth = PPP_AUTH_MSCHAPV1;
     else if (p->cfg.auth & PPP_AUTH_MSCHAPV2)
         p->w_auth = PPP_AUTH_MSCHAPV2;
@@ -2345,6 +2376,18 @@ static void handle_frame(ppp_t *p)
     n = p->rx.len - off;
     trace(p, 0, proto, info, n, NULL, 0, NULL, 0);
 
+    if (p->lcp_wait_ms) {
+        /* the caller's first frame while ours waits: its LCP request says
+         * whether it is Windows 98 (MS-CHAP v1 first); anything else lets
+         * ours go as it is */
+        if (proto == PPP_PROTO_LCP && n >= 4 && info[0] == PPP_CONF_REQ) {
+            size_t l = ((size_t)info[2] << 8) | info[3];
+            if (l >= 4 && l <= n)
+                p->cnt.win98 = (uint8_t)is_win98_lcp(info + 4, l - 4);
+        }
+        lcp_release(p);
+    }
+
     if (proto == PPP_PROTO_LCP) {
         int was_open = p->lcp.state == PPP_FSM_OPENED;
 
@@ -2522,7 +2565,14 @@ void ppp_lower_up(ppp_t *p)
 
     set_phase(p, PPP_PHASE_ESTABLISH);
     ppp_fsm_open(&p->lcp);
-    ppp_fsm_up(&p->lcp);
+    p->lcp_wait_ms = 0;
+    if ((p->cfg.auth & PPP_AUTH_MSCHAPV1) && (p->cfg.auth & PPP_AUTH_MSCHAPV2))
+        /* which MS-CHAP goes first depends on who calls (lcp_reset): ours
+         * waits for the caller's first request, which says, up to a second
+         * (callers send theirs at once; Windows retries after 3 s) */
+        p->lcp_wait_ms = 1000;
+    else
+        ppp_fsm_up(&p->lcp);
 }
 
 void ppp_lower_down(ppp_t *p)
@@ -2532,6 +2582,7 @@ void ppp_lower_down(ppp_t *p)
     ppp_fsm_down(&p->lcp);        /* This-Layer-Down if it was Opened */
     network_stop(p);
     ppp_fsm_close(&p->lcp);       /* settle in Initial */
+    p->lcp_wait_ms = 0;
     p->pending_close = PPP_END_NONE;
     p->tx_head = p->tx_tail = 0;  /* nothing can be sent any more */
     set_phase(p, PPP_PHASE_DEAD);
@@ -2748,6 +2799,12 @@ void ppp_tick(ppp_t *p, uint32_t ms)
     if (p->phase == PPP_PHASE_DEAD)
         return;
     p->uptime_ms += ms;
+    if (p->lcp_wait_ms) {
+        if (ms >= p->lcp_wait_ms)
+            lcp_release(p);         /* no request from the caller: ours */
+        else
+            p->lcp_wait_ms -= ms;
+    }
     if (p->ccp_wait_ms) {
         if (ms >= p->ccp_wait_ms)
             ccp_start(p);           /* the caller sent no request: ours */
