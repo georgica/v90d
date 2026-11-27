@@ -706,6 +706,8 @@ int main(int argc, char **argv)
             strcat(led[i - 1], "/brightness");
             lf = fopen(led[i - 1], "w"); if (lf) { fputs("7\n", lf); fclose(lf); }
         }
+        snprintf(dclog, sizeof dclog, "%s/ns_dc.log", argv[2]);
+        unlink(dclog);                                  /* a last run's lines must not be read as this one's */
         pid = fork();
         if (pid == 0) {
             int a = fcntl(sv[1], F_DUPFD, 20), b = fcntl(sv2[1], F_DUPFD, 20);
@@ -827,6 +829,7 @@ int main(int argc, char **argv)
         CHECK_EQ_I(cfg_save(&c, conf, err, sizeof err), CFG_OK);
         CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
         snprintf(lanlog, sizeof lanlog, "%s/ns_lan.log", argv[2]);
+        unlink(lanlog);                                 /* a last run's lines must not be read as this one's */
         pid = fork();
         if (pid == 0) {
             int a = fcntl(sv[1], F_DUPFD, 20), lfd = open(lanlog, O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -887,6 +890,7 @@ int main(int argc, char **argv)
         CHECK_EQ_I(cfg_save(&c, conf, err, sizeof err), CFG_OK);
         CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
         snprintf(lanlog, sizeof lanlog, "%s/ns_sat.log", argv[2]);
+        unlink(lanlog);                                 /* a last run's lines must not be read as this one's */
         pid = fork();
         if (pid == 0) {
             int a = fcntl(sv[1], F_DUPFD, 20), lfd = open(lanlog, O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -1026,6 +1030,7 @@ int main(int argc, char **argv)
         CHECK_EQ_I(cfg_save(&c, conf, err, sizeof err), CFG_OK);
         CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
         snprintf(lanlog, sizeof lanlog, "%s/ns_inert.log", argv[2]);
+        unlink(lanlog);                                 /* a last run's lines must not be read as this one's */
         pid = fork();
         if (pid == 0) {
             int a = fcntl(sv[1], F_DUPFD, 20), lfd = open(lanlog, O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -1078,6 +1083,7 @@ int main(int argc, char **argv)
         CHECK_EQ_I(cfg_save(&c, conf, err, sizeof err), CFG_OK);
         CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
         snprintf(lanlog, sizeof lanlog, "%s/ns_vpn.log", argv[2]);
+        unlink(lanlog);                                 /* a last run's lines must not be read as this one's */
         pid = fork();
         if (pid == 0) {
             int a = fcntl(sv[1], F_DUPFD, 20), lfd = open(lanlog, O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -1162,6 +1168,7 @@ int main(int argc, char **argv)
         CHECK_EQ_I(cfg_save(&c, conf, err, sizeof err), CFG_OK);
         CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
         snprintf(lanlog, sizeof lanlog, "%s/ns_mm.log", argv[2]);
+        unlink(lanlog);                                 /* a last run's lines must not be read as this one's */
         pid = fork();
         if (pid == 0) {
             char mcmd[360]; int a = fcntl(sv[1], F_DUPFD, 20), lfd = open(lanlog, O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -1237,6 +1244,7 @@ int main(int argc, char **argv)
         CHECK_EQ_I(cfg_save(&c, conf, err, sizeof err), CFG_OK);
         CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
         snprintf(lanlog, sizeof lanlog, "%s/ns_mm2.log", argv[2]);
+        unlink(lanlog);                                 /* a last run's lines must not be read as this one's */
         pid = fork();
         if (pid == 0) {
             char mcmd[360]; int a = fcntl(sv[1], F_DUPFD, 20), lfd = open(lanlog, O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -1311,6 +1319,7 @@ int main(int argc, char **argv)
         CHECK_EQ_I(cfg_save(&c, conf, err, sizeof err), CFG_OK);
         CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
         snprintf(lanlog, sizeof lanlog, "%s/ns_bbs.log", argv[2]);
+        unlink(lanlog);                                 /* a last run's lines must not be read as this one's */
         pid = fork();
         if (pid == 0) {
             int a = fcntl(sv[1], F_DUPFD, 20), lfd = open(lanlog, O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -1472,6 +1481,7 @@ int main(int argc, char **argv)
         CHECK_EQ_I(cfg_save(&c, conf, err, sizeof err), CFG_OK);
         CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
         snprintf(lanlog, sizeof lanlog, "%s/ns_menu.log", argv[2]);
+        unlink(lanlog);                                 /* a last run's lines must not be read as this one's */
         pid = fork();
         if (pid == 0) {
             int a = fcntl(sv[1], F_DUPFD, 20), lfd = open(lanlog, O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -1489,8 +1499,9 @@ int main(int argc, char **argv)
         /* the menu wants the lists: the details are fetched, the directory made */
         /* the fetch is a child in real time, started on the daemon's clock:
          * up to 300 s of real time, for a heavily loaded machine (it ends when
-         * seen, at once on a quiet one). 60 s was missed twice while another
-         * session's simulated modem calls had every core busy. */
+         * seen, at once on a quiet one). The log is removed before the daemon
+         * starts: a last run's "2 with the guide's details", read before the
+         * child had truncated the file, once ended this wait at once. */
         {
             time_t until = time(NULL) + 300;
             struct timespec w0, w1; long loops = 0;
@@ -2012,6 +2023,7 @@ int main(int argc, char **argv)
         rf = fopen(rfile, "w"); if (rf) { fputs("nameserver ::1\n", rf); fclose(rf); }
         CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
         snprintf(lanlog, sizeof lanlog, "%s/ns_dns.log", argv[2]);
+        unlink(lanlog);                                 /* a last run's lines must not be read as this one's */
         pid = fork();
         if (pid == 0) {
             int a = fcntl(sv[1], F_DUPFD, 20), lfd = open(lanlog, O_WRONLY | O_CREAT | O_TRUNC, 0644);
