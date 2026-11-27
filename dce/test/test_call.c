@@ -1631,7 +1631,7 @@ static void test_ppp_compression(void)
      * arrives is right and the call goes on compressed. */
     for (alg = 0; alg < 3; alg++) {
         static const line_t bursty = { -50.0, 15000, 3, 4000, 0.2 };
-        int nn = quick ? 30 : 80;
+        int nn = quick ? 30 : 80, lost_dn, lost_up;
         unsigned want = alg == 0 ? PPP_COMP_DEFLATE : alg == 1 ? PPP_COMP_MPPC : PPP_COMP_NONE;
         long t0;
 
@@ -1659,25 +1659,36 @@ static void test_ppp_compression(void)
         CHECK(traffic(HTML, nn, nn, 1800000, r));
         t0 = ((F[DN].t_last > F[UP].t_last ? F[DN].t_last : F[UP].t_last) - t0) / FS;
         bursts_on = 0;
-        traffic_lossy = 0;
         traffic_idle_ms = 3000;
         s = status();
         printf("    V.22bis without error control, noise bursts, %s: down %d of %d packets arrived, up %d of %d, in %ld s"
                " (%ld octets/s delivered down, %ld up)\n",
                alg_name(want), F[DN].n_rx, nn, F[UP].n_rx, nn, t0,
                F[DN].bytes_rx / (t0 ? t0 : 1), F[UP].bytes_rx / (t0 ? t0 : 1));
+        CHECK_EQ_I(F[DN].n_bad + F[UP].n_bad, 0);
+        CHECK(F[DN].n_rx >= nn / 2 && F[UP].n_rx >= nn / 2);
+        lost_dn = F[DN].n_rx < nn; lost_up = F[UP].n_rx < nn;
+        /* a frame lost at the very end of the bursts shows as a gap only
+         * when the next packet comes: a packet each way, still counted as
+         * lossy, and time for a reset that follows to complete (RFC 1979:
+         * what comes meanwhile is dropped), before the resets are judged */
+        (void)traffic(HTML, 2, 2, 60000, r);
+        traffic_lossy = 0;
+        run_ms(10000);
+        s = status();
         if (want)
             printf("      server: %lu frames with a bad FCS, %lu decompressor errors (Reset-Requests), %lu Reset-Requests answered;"
                    " caller: %d and %d; CCP opened %lu time(s)\n",
                    (unsigned long)s->ppp_counters.rx_bad_fcs, (unsigned long)s->ppp_counters.comp_rx_errors,
                    (unsigned long)s->ppp_counters.comp_tx_resets, C.ppp.comp_rx_bad, C.ppp.resets_rcvd,
                    (unsigned long)s->ppp_counters.ccp_opens);
-        CHECK_EQ_I(F[DN].n_bad + F[UP].n_bad, 0);
-        CHECK(F[DN].n_rx >= nn / 2 && F[UP].n_rx >= nn / 2);
         if (want) {
-            /* frames were lost both ways and both decompressors recovered */
-            CHECK(s->ppp_counters.comp_rx_errors >= 1 && C.ppp.comp_rx_bad >= 1);
-            CHECK(s->ppp_counters.comp_tx_resets >= 1);
+            /* where frames were lost, that way's decompressor saw the gap and
+             * recovered (asked for, and got, a reset); which ways the bursts
+             * hit is chance, the more so in the shorter quick run */
+            if (lost_up) CHECK(s->ppp_counters.comp_rx_errors >= 1);
+            if (lost_dn) { CHECK(C.ppp.comp_rx_bad >= 1); CHECK(s->ppp_counters.comp_tx_resets >= 1); }
+            CHECK(lost_up || lost_dn);
         }
         CHECK_EQ_I(s->state, DCE_ONLINE);
         /* still compressing at the end, both ways */
@@ -1720,3 +1731,4 @@ int main(int argc, char **argv)
     RUN('q', test_ppp_compression);
     T_REPORT(quick ? "call (quick)" : "call");
 }
+

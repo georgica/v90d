@@ -364,6 +364,16 @@ static int log_has(const char *log, const char *needle)
     return strstr(buf, needle) != NULL;
 }
 
+/* a line of the log that has both a and b */
+static int log_line_has(const char *log, const char *a, const char *b)
+{
+    FILE *f = fopen(log, "r"); char line[600]; int hit = 0;
+    if (!f) return 0;
+    while (!hit && fgets(line, sizeof line, f)) hit = strstr(line, a) && strstr(line, b);
+    fclose(f);
+    return hit;
+}
+
 typedef struct {
     const char *what, *opts;        /* pppd options on top of the basic ones */
     size_t down_text, down_random, up;
@@ -483,11 +493,12 @@ static void one_call(int n, const call_t *k, const char *log)
      * transfers above towards us and our ppp_vj towards it. With novj
      * neither: pppd asks for none and Rejects ours. */
     if (strstr(k->opts, "novj")) {
-        CHECK(!log_has(log, "sent [IPCP ConfAck id=0x1 <compress VJ"));
+        CHECK(!log_line_has(log, "IPCP ConfAck", "<compress VJ"));
     } else {
         if (!log_has(log, "rcvd [IPCP ConfReq id=0x1 <compress VJ 0f 01>")) printf("    pppd's log lacks our VJ request\n");
         CHECK(log_has(log, "rcvd [IPCP ConfReq id=0x1 <compress VJ 0f 01>"));
-        CHECK(log_has(log, "rcvd [IPCP ConfAck id=0x1 <compress VJ"));
+        /* its own request (Nak'd for the address first, so not id 1) Acked with VJ */
+        CHECK(log_line_has(log, "rcvd [IPCP ConfAck", "<compress VJ"));
     }
     caller_hangup(&C);
     modem_on = 0; hook = 0; c_tx = 0;

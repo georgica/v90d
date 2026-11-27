@@ -3264,3 +3264,11 @@ bug and no way past authentication were found.
   Protocol-Reject when not agreed), ccp (VJ under MPPE, no clear VJ), srv
   (the log line; off on console and WebTV ports), ns_pppd (every call with
   VJ against pppd and the kernel's slhc, and a novj call).
+- dce's noisy-line test (V.22bis without error control, noise bursts) judged
+  too early: a frame lost at the very end of the bursts showed as a gap only
+  with the next packet, so the final four packets fell into the reset that
+  followed (RFC 1979: dropped meanwhile). Offering VJ made IPCP six octets
+  longer, the bursts landed later, and the quick run (under qemu) hit it.
+  The test now sends a packet each way and lets a reset complete before it
+  judges, and checks recovery in each direction that lost frames (which
+  ways a burst hits is chance). No change to the PPP code: recovery worked.

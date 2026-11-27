@@ -1819,7 +1819,6 @@ static void comp_rx_error(ppp_t *p)
     ppp_vj_rx_lost(&p->vj);
     p->cnt.comp_rx_errors++;
     p->cnt.comp_rx_dropped++;
-        ppp_vj_rx_lost(&p->vj);     /* a VJ packet may have been in it (RFC 1144 4.2) */
     if (p->ccp.rejected_codes & (1u << CCP_RESET_REQ)) {
         ccp_renegotiate(p);                 /* the peer has no Reset-Request */
         return;
@@ -1863,7 +1862,7 @@ static void mppe_rx_error(ppp_t *p)
     if (!ppp_mppe_rx_out_of_step(&p->mppe))
         return;
     p->cnt.comp_rx_dropped++;
-        ppp_vj_rx_lost(&p->vj);     /* a VJ packet may have been in it (RFC 1144 4.2) */
+    ppp_vj_rx_lost(&p->vj);     /* a VJ packet may have been in it (RFC 1144 4.2) */
     if (p->rx_wait && p->rr_timer > 0)
         return;
     if (p->ccp.rejected_codes & (1u << CCP_RESET_REQ))
@@ -2172,7 +2171,7 @@ static void comp_input(ppp_t *p, const uint8_t *info, size_t n)
          * packet is decoded */
         if (p->rx_wait) {
             p->cnt.comp_rx_dropped++;
-        ppp_vj_rx_lost(&p->vj);     /* a VJ packet may have been in it (RFC 1144 4.2) */
+            ppp_vj_rx_lost(&p->vj);     /* a VJ packet may have been in it (RFC 1144 4.2) */
             return;
         }
         r = hdr == p->rx_seq ? ppp_deflate_decompress(&p->cdec.d, info + 2, n - 2, p->cbuf_rx, sizeof p->cbuf_rx) : -1;
@@ -2192,7 +2191,7 @@ static void comp_input(ppp_t *p, const uint8_t *info, size_t n)
             p->rx_wait = 0;
         } else if (p->rx_wait) {
             p->cnt.comp_rx_dropped++;
-        ppp_vj_rx_lost(&p->vj);     /* a VJ packet may have been in it (RFC 1144 4.2) */
+            ppp_vj_rx_lost(&p->vj);     /* a VJ packet may have been in it (RFC 1144 4.2) */
             /* still the old history, a Restart period after we asked */
             if (p->rr_timer == 0)
                 comp_reset_again(p);
