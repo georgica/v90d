@@ -979,6 +979,7 @@ static void test_dreamcast_call(void)
     CHECK_EQ_I((int)S.dce.cfg.ppp.auth, (int)(PPP_AUTH_MSCHAPV1 | PPP_AUTH_MSCHAPV2 | PPP_AUTH_CHAP | PPP_AUTH_PAP));
     CHECK_EQ_I(S.dce.cfg.ppp.encrypt, 0);
     CHECK_EQ_I(S.dce.cfg.ppp.no_vj, 0);     /* an internet port: VJ offered */
+    CHECK_EQ_I((int)S.dce.cfg.ppp.echo_interval_ms, 30000);   /* and echoes, every 30 s */
     CHECK(strcmp(S.status.peer_name, "alice") == 0);
     CHECK(C.ppp.dns1 == c.ppp_local);      /* [network] dns_relay, on by default: the box answers */
     CHECK(C.ppp.dns2 == 0);
@@ -2207,6 +2208,7 @@ static void test_webtv(void)
     CHECK_EQ_I((int)S.dce.cfg.ppp.auth, PPP_AUTH_PAP);
     CHECK_EQ_I(S.dce.cfg.ppp.encrypt, 0);
     CHECK_EQ_I(S.dce.cfg.ppp.no_vj, 1);     /* no VJ header compression for a box */
+    CHECK_EQ_I((int)S.dce.cfg.ppp.echo_interval_ms, 0);   /* nor echoes: it answers none */
     CHECK(S.dce.cfg.ppp.pap_cb != NULL && S.dce.cfg.ppp.pap_cb(S.dce.cfg.ppp.ctx, u, 3, pw, 6));
     CHECK(S.link != SRV_LINK_MENU);
     CHECK((S.dce.cfg.modulations & V90M_MOD_V90) != 0);
