@@ -3190,7 +3190,10 @@ bug and no way past authentication were found.
   `encryption` and `encryption2` lines are read and ignored). A caller that
   asks for MPPE gets it; one that does not is served in the clear, with the
   compression it asks for. Once a caller has asked, nothing goes in the
-  clear either way. With the keys in hand CCP waits up to a Restart period
+  clear either way. Windows' "optional encryption" asks for MPPC and MPPE
+  in one request (0x61); we do not do both at once, so it keeps MPPC in
+  the clear where the port compresses (text is far quicker that way), and
+  only "require data encryption" (MPPE alone) is taken as asking. With the keys in hand CCP waits up to a Restart period
   for the caller's request before sending ours, so ours can be MPPE from
   the start (pppd with require-mppe gives up on any other first request). Both logins (CHAP and PAP) offer MS-CHAPv2 first, which
   MPPE needs, then CHAP-MD5, then (a PAP port) PAP: a caller moves on with
@@ -3240,3 +3243,24 @@ bug and no way past authentication were found.
   the caller's Ucode and LAPM bit, taken or not, the ANSpcm level, its TONEq
   and the short Phase 2, or the fall back to V.8. Tests: srv (each case of
   the line). Not yet tried with a real V.92 modem.
+- **Van Jacobson TCP/IP header compression** (RFC 1144), asked for by a
+  Netstalgia member (BinModem's author): Windows 95/98/ME ("Use IP header
+  compression", on by default), classic Mac OS and BinModem offer it, and
+  at modem speeds it makes interactive TCP much quicker (an echoed
+  keystroke is a few octets instead of 41). IPCP option 2 (0x002d) each way
+  on its own, 16 slots offered, the peer's Max-Slot-Id and Comp-Slot-Id
+  honoured, other compression protocols Rejected; on by default, off with
+  `ppp_config_t.no_vj` (and on console and WebTV ports, as CCP is). VJ
+  works before CCP and MPPE; after a lost frame compressed packets are
+  tossed until the slot is named or re-stated (RFC 1144 4.2). New module
+  `ppp/ppp_vj.c` (build lists that name the PPP sources need it). Counters
+  `vj_tx_comp`, `vj_tx_uncomp`, `vj_rx_comp`, `vj_rx_uncomp`, `vj_errors`,
+  `vj_tx_slots`, `vj_rx_slots`; the daemon logs a line per call
+  (srv_vj_text). Tests: vj (mixed streams rebuilt to the octet, plain IP
+  cases, more connections than slots, slot number left out or not, tossing
+  and the resend, malformed input, 200000 random packets; clean under ASan
+  and UBSan), ppp (negotiation both forms, IPHC Rejected, off; data both
+  ways, the peer's slot count and Comp-Slot-Id, a bad FCS and recovery,
+  Protocol-Reject when not agreed), ccp (VJ under MPPE, no clear VJ), srv
+  (the log line; off on console and WebTV ports), ns_pppd (every call with
+  VJ against pppd and the kernel's slhc, and a novj call).

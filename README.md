@@ -25,6 +25,9 @@ the stock firmware stays in the box, one click away.
   x2 (U.S. Robotics, 1997) and K56flex (1996, experimental). Both are
   answering only, off by default, and share one call at a time; see "Modems".
 - PPP server with users and passwords, MPPC compression and optional
+  Van Jacobson TCP/IP header compression (RFC 1144: Windows' "Use IP
+  header compression", classic Mac OS, BinModem), which makes typing in a
+  remote session much quicker at modem speeds;
   MPPE encryption for any caller that asks for it, with no setting (MS-CHAPv2
   is offered first; 128-bit keys, or 40/56-bit for Windows 9x/ME without
   the 128-bit upgrade), NAT to the

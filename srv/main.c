@@ -516,6 +516,11 @@ static void log_last_call(int port)
               who, v.k_tx, v.k_rx, v.n401_tx, v.n401_rx, comp,
               v.tx_i, v.tx_i_retx, v.rx_i, v.rx_i_dropped, v.tx_rej, v.rx_rej, v.t401_expiries, v.comp_in, v.comp_out, v.decomp_in, v.decomp_out);
         log_ppp_comp(who, &S[port].dce.ppp);
+        {
+            ppp_status_t ps; char t[200];
+            ppp_get_status(&S[port].dce.ppp, &ps);
+            if (srv_vj_text(&ps.counters, t, sizeof t)) logf_(CFG_LOG_INFO, "%s  %s", who, t);
+        }
         log_ppp_end(who, &S[port].dce);
     }
     if (S[port].dce.modem) {

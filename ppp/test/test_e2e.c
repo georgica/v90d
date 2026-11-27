@@ -230,12 +230,13 @@ static void test_chap_bringup(void)
     run(60000);
     CHECK_EQ_I(status()->ip_up, 1);
 
-    /* a client that asks for Van Jacobson compression is told no and
-     * comes up without it */
+    /* a client that asks for Van Jacobson compression gets it (the
+     * server compresses towards it from then on) */
     cc.want_vj = 1;
     begin(&sc, &cc);
     CHECK(run_until_up(5000) >= 0);
-    CHECK_EQ_I(C.vj_rejected, 1);
+    CHECK_EQ_I(C.vj_rejected, 0);
+    CHECK(status()->counters.vj_tx_slots > 0);
     CHECK(C.my_ip == PEER_IP);
 
     /* no authentication configured on the server */

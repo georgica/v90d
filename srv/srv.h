@@ -200,6 +200,10 @@ size_t  srv_k56_text(const v90m_k56 *k, char *buf, size_t n);
  * "" and 0 when it did not ask (or q is NULL); otherwise the length, cut
  * to fit n. */
 size_t  srv_qc_text(const v90m_qc *q, char *buf, size_t n);
+/* The Van Jacobson header compression line of a call's log: each way, the
+ * TCP packets sent compressed of all sent with a slot, and the slots; the
+ * packets dropped. "" and 0 when it was agreed neither way. */
+size_t  srv_vj_text(const ppp_counters_t *k, char *buf, size_t n);
 /* For the log of a call: a caller that asked for MPPE encryption on CCP
  * option 18 (its last request) while none was agreed -- Windows ends such a
  * call with error 742. "" and 0 when it asked for none, or MPPE is in use. */

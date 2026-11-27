@@ -4,6 +4,7 @@
 #include <string.h>
 #include "test.h"
 #include "ppp.h"
+#include "ppp_vj.h"
 #include "ppp_md5.h"
 
 #define OUR_IP   PPP_IP4(10, 0, 0, 1)
@@ -599,11 +600,11 @@ static void test_chap(void)
     CHECK_EQ_I(status()->phase, PPP_PHASE_NETWORK);
     CHECK_EQ_I(status()->authenticated, 1);
     CHECK(strcmp(status()->peer_name, "alice") == 0);
-    /* IPCP starts: our request announces our address */
+    /* IPCP starts: our request offers VJ and announces our address */
     f = find(PPP_PROTO_IPCP, PPP_CONF_REQ);
     {
-        const uint8_t want[] = { 3, 6, 10, 0, 0, 1 };
-        CHECK(f && f->n == 10 && memcmp(f->d + 4, want, 6) == 0);
+        const uint8_t want[] = { 2, 6, 0x00, 0x2d, 15, 1, 3, 6, 10, 0, 0, 1 };
+        CHECK(f && f->n == 4 + sizeof want && memcmp(f->d + 4, want, sizeof want) == 0);
     }
     /* a repeated Response gets the same Success again (RFC 1994 4.1) */
     chap_answer(ch, "alice", "wonderland");
@@ -895,13 +896,12 @@ static void test_ipcp(void)
         CHECK_EQ_I(ip_count, 0);
     }
     /* Windows-style request: VJ compression, address 0, both DNS, both
-     * NBNS. First answer: Reject of VJ and the NBNS options only. */
+     * NBNS. First answer: Reject of the NBNS options only (VJ is taken). */
     {
         const uint8_t o[] = { 2, 6, 0x00, 0x2d, 0x0f, 0x01, 3, 6, 0, 0, 0, 0,
                               129, 6, 0, 0, 0, 0, 130, 6, 0, 0, 0, 0,
                               131, 6, 0, 0, 0, 0, 132, 6, 0, 0, 0, 0 };
-        const uint8_t want[] = { 2, 6, 0x00, 0x2d, 0x0f, 0x01,
-                                 130, 6, 0, 0, 0, 0, 132, 6, 0, 0, 0, 0 };
+        const uint8_t want[] = { 130, 6, 0, 0, 0, 0, 132, 6, 0, 0, 0, 0 };
         push_cp(PPP_PROTO_IPCP, PPP_CONF_REQ, 1, o, sizeof o);
         pull();
         f = find(PPP_PROTO_IPCP, PPP_CONF_REJ);
@@ -1512,6 +1512,243 @@ static void test_trace(void)
     CHECK_EQ_I(trs[0].ms, 0);
 }
 
+/* ---- Van Jacobson TCP/IP header compression (RFC 1144, RFC 1332) ---- */
+
+/* a TCP/IP datagram: 20 + 20 octets of headers, `data` of payload */
+static size_t vj_tcp(uint8_t *p, uint32_t seq, uint32_t ack, uint16_t id, size_t data)
+{
+    size_t len = 40 + data, i;
+    uint32_t s = 0;
+    memset(p, 0, 40);
+    p[0] = 0x45; p[2] = (uint8_t)(len >> 8); p[3] = (uint8_t)len; p[4] = (uint8_t)(id >> 8); p[5] = (uint8_t)id;
+    p[6] = 0x40; p[8] = 64; p[9] = 6;
+    p[12] = 10; p[15] = 2; p[16] = 93; p[17] = 184; p[18] = 216; p[19] = 34;
+    for (i = 0; i < 20; i += 2) s += (uint32_t)p[i] << 8 | p[i + 1];
+    while (s >> 16) s = (s & 0xffff) + (s >> 16);
+    p[10] = (uint8_t)(~s >> 8); p[11] = (uint8_t)~s;
+    p[20] = 0x04; p[21] = 0x01; p[22] = 0; p[23] = 80;
+    p[24] = (uint8_t)(seq >> 24); p[25] = (uint8_t)(seq >> 16); p[26] = (uint8_t)(seq >> 8); p[27] = (uint8_t)seq;
+    p[28] = (uint8_t)(ack >> 24); p[29] = (uint8_t)(ack >> 16); p[30] = (uint8_t)(ack >> 8); p[31] = (uint8_t)ack;
+    p[32] = 0x50; p[33] = 0x10; p[34] = 0x22; p[35] = 0x38; p[36] = 0x12; p[37] = 0x34;
+    for (i = 0; i < data; i++) p[40 + i] = (uint8_t)(i * 7 + seq);
+    return len;
+}
+
+/* IPCP up with the peer asking for VJ (opt; NULL: not) */
+static void vj_ipcp_up(const uint8_t *opt, size_t on)
+{
+    frame_t *cr = find(PPP_PROTO_IPCP, PPP_CONF_REQ);
+    uint8_t mine[32] = { 3, 6, 10, 0, 0, 2 };
+    size_t n = 6;
+    CHECK(cr != NULL);
+    if (!cr) return;
+    if (opt) { memcpy(mine + n, opt, on); n += on; }
+    push_cp(PPP_PROTO_IPCP, PPP_CONF_ACK, cr->d[1], cr->d + 4, cr->n - 4);
+    push_cp(PPP_PROTO_IPCP, PPP_CONF_REQ, 1, mine, n);
+    pull();
+    CHECK(find(PPP_PROTO_IPCP, PPP_CONF_ACK) != NULL);
+    CHECK_EQ_I(status()->ip_up, 1);
+}
+
+static void test_vj_negotiation(void)
+{
+    ppp_config_t c;
+    frame_t *f;
+    size_t vl;
+    const uint8_t *v;
+
+    /* ours: VJ, 16 slots (Max-Slot-Id 15), the slot number may be left out */
+    base_cfg(&c);
+    start(&c);
+    to_network(peer_lcp, sizeof peer_lcp);
+    f = find(PPP_PROTO_IPCP, PPP_CONF_REQ);
+    v = f ? opt(f, 2, &vl) : NULL;
+    CHECK(v && vl == 4 && v[0] == 0x00 && v[1] == 0x2d && v[2] == 15 && v[3] == 1);
+    /* the peer's, in the RFC 1332 form and in the older 4-octet one: Acked */
+    {
+        const uint8_t o[] = { 3, 6, 10, 0, 0, 2, 2, 6, 0x00, 0x2d, 0x07, 0x00 };
+        push_cp(PPP_PROTO_IPCP, PPP_CONF_REQ, 1, o, sizeof o);
+        pull();
+        f = find(PPP_PROTO_IPCP, PPP_CONF_ACK);
+        CHECK(f && f->n == 4 + sizeof o);
+    }
+    {
+        const uint8_t o[] = { 3, 6, 10, 0, 0, 2, 2, 4, 0x00, 0x2d };
+        push_cp(PPP_PROTO_IPCP, PPP_CONF_REQ, 2, o, sizeof o);
+        pull();
+        CHECK(find(PPP_PROTO_IPCP, PPP_CONF_ACK) != NULL);
+    }
+    /* another protocol (RFC 2507 IPHC, 0x0061): Rejected */
+    {
+        const uint8_t o[] = { 3, 6, 10, 0, 0, 2, 2, 14, 0x00, 0x61, 0, 15, 0, 15, 0, 0x20, 0, 0x02, 0, 0x02 };
+        const uint8_t rej[] = { 2, 14, 0x00, 0x61, 0, 15, 0, 15, 0, 0x20, 0, 0x02, 0, 0x02 };
+        push_cp(PPP_PROTO_IPCP, PPP_CONF_REQ, 3, o, sizeof o);
+        pull();
+        f = find(PPP_PROTO_IPCP, PPP_CONF_REJ);
+        CHECK(f && f->n == 4 + sizeof rej && memcmp(f->d + 4, rej, sizeof rej) == 0);
+    }
+    /* our VJ Rejected: asked for no more */
+    {
+        const uint8_t rej[] = { 2, 6, 0x00, 0x2d, 15, 1 };
+        f = find(PPP_PROTO_IPCP, PPP_CONF_REQ);
+        start(&c);
+        to_network(peer_lcp, sizeof peer_lcp);
+        f = find(PPP_PROTO_IPCP, PPP_CONF_REQ);
+        CHECK(f != NULL);
+        if (f) push_cp(PPP_PROTO_IPCP, PPP_CONF_REJ, f->d[1], rej, sizeof rej);
+        pull();
+        f = find(PPP_PROTO_IPCP, PPP_CONF_REQ);
+        CHECK(f && opt(f, 2, &vl) == NULL && opt(f, 3, &vl) != NULL);
+    }
+    /* switched off (cfg.no_vj): not asked for, and the peer's Rejected */
+    base_cfg(&c);
+    c.no_vj = 1;
+    start(&c);
+    to_network(peer_lcp, sizeof peer_lcp);
+    f = find(PPP_PROTO_IPCP, PPP_CONF_REQ);
+    CHECK(f && opt(f, 2, &vl) == NULL);
+    {
+        const uint8_t o[] = { 3, 6, 10, 0, 0, 2, 2, 6, 0x00, 0x2d, 0x0f, 0x01 };
+        push_cp(PPP_PROTO_IPCP, PPP_CONF_REQ, 1, o, sizeof o);
+        pull();
+        f = find(PPP_PROTO_IPCP, PPP_CONF_REJ);
+        CHECK(f && f->n == 10 && f->d[4] == 2);
+    }
+}
+
+static void test_vj_data(void)
+{
+    static const uint8_t vjo[] = { 2, 6, 0x00, 0x2d, 0x0f, 0x01 };
+    static const uint8_t vjo_nc[] = { 2, 6, 0x00, 0x2d, 0x03, 0x00 };   /* 4 slots, slot always named */
+    static uint8_t pkt[1600], w[1600], back[1600];
+    static ppp_vj_t peer;
+    ppp_config_t c;
+    frame_t *f;
+    uint32_t seq = 1000, ack = 5000;
+    uint16_t id = 1;
+    int i, r, comp = 0, uncomp = 0, ok = 0;
+    size_t len, n;
+
+    base_cfg(&c);
+    start(&c);
+    to_network(peer_lcp, sizeof peer_lcp);
+    vj_ipcp_up(vjo, sizeof vjo);
+    CHECK_EQ_I(status()->counters.vj_tx_slots, 16);
+    CHECK_EQ_I(status()->counters.vj_rx_slots, 16);
+    /* to the peer: the first uncompressed, the rest compressed; rebuilt by a
+     * decompressor of its own */
+    ppp_vj_rx_init(&peer, 16);
+    for (i = 0; i < 20; i++) {
+        len = vj_tcp(pkt, seq, ack, id++, 100);
+        seq += 100;
+        CHECK_EQ_I(ppp_send_ip(&S, pkt, len), 0);
+        pull();
+        f = find(PPP_PROTO_VJC, 0);
+        if (!f) f = find(PPP_PROTO_VJUC, 0);
+        CHECK(f != NULL);
+        if (!f) break;
+        if (f->proto == PPP_PROTO_VJC) comp++; else uncomp++;
+        r = ppp_vj_uncompress(&peer, f->proto, f->d, f->n, back, sizeof back);
+        if (r == (int)len && memcmp(back, pkt, len) == 0) ok++;
+    }
+    CHECK_EQ_I(ok, 20); CHECK_EQ_I(uncomp, 1); CHECK_EQ_I(comp, 19);
+    CHECK_EQ_I((int)status()->counters.vj_tx_comp, 19);
+    CHECK_EQ_I((int)status()->counters.vj_tx_uncomp, 1);
+    /* not TCP: as IP */
+    pkt[9] = 17;
+    CHECK_EQ_I(ppp_send_ip(&S, pkt, 60), 0);
+    pull();
+    CHECK(find(PPP_PROTO_IP, 0) != NULL);
+
+    /* from the peer: compressed by it, delivered as the datagram */
+    ppp_vj_tx_init(&peer, 16, 1);
+    ip_count = 0; ok = 0;
+    for (i = 0; i < 20; i++) {
+        uint16_t pr;
+        len = vj_tcp(pkt, ack, seq, id++, 50 + i);
+        ack += (uint32_t)(50 + i);
+        pr = ppp_vj_compress(&peer, pkt, len, w, sizeof w, &n);
+        push(pr, w, n);
+        if (ip_count == i + 1 && ip_len == len && memcmp(ip_got, pkt, len) == 0) ok++;
+    }
+    CHECK_EQ_I(ok, 20);
+    CHECK_EQ_I((int)status()->counters.vj_rx_comp, 19);
+    CHECK_EQ_I((int)status()->counters.vj_rx_uncomp, 1);
+
+    /* a damaged frame (bad FCS): the next compressed packet that does not
+     * name its slot is tossed and counted; an uncompressed one recovers */
+    {
+        static const uint8_t junk[] = { 0x7e, 0xff, 0x7d, 0x23, 0x00, 0x2d, 0x10, 0x55, 0x66, 0x77, 0x7e };
+        int before = ip_count;
+        ppp_input_bytes(&S, junk, sizeof junk);
+        len = vj_tcp(pkt, ack, seq, id++, 30); ack += 30;
+        n = 0;
+        (void)ppp_vj_compress(&peer, pkt, len, w, sizeof w, &n);
+        push(PPP_PROTO_VJC, w, n);
+        CHECK_EQ_I(ip_count, before);
+        CHECK(status()->counters.vj_errors >= 1);
+        /* the peer's TCP resends: back in sequence, uncompressed */
+        len = vj_tcp(pkt, ack - 30, seq, id++, 30);
+        {
+            uint16_t pr = ppp_vj_compress(&peer, pkt, len, w, sizeof w, &n);
+            CHECK_EQ_I(pr, PPP_PROTO_VJUC);
+            push(pr, w, n);
+        }
+        CHECK_EQ_I(ip_count, before + 1);
+        len = vj_tcp(pkt, ack, seq, id++, 30); ack += 30;
+        {
+            uint16_t pr = ppp_vj_compress(&peer, pkt, len, w, sizeof w, &n);
+            CHECK_EQ_I(pr, PPP_PROTO_VJC);
+            push(pr, w, n);
+        }
+        CHECK(ip_count == before + 2 && ip_len == len && memcmp(ip_got, pkt, len) == 0);
+    }
+
+    /* a peer that keeps 4 slots and wants its slot named: every compressed
+     * packet to it names one */
+    base_cfg(&c);
+    start(&c);
+    to_network(peer_lcp, sizeof peer_lcp);
+    vj_ipcp_up(vjo_nc, sizeof vjo_nc);
+    CHECK_EQ_I(status()->counters.vj_tx_slots, 4);
+    for (i = 0; i < 5; i++) {
+        len = vj_tcp(pkt, seq, ack, id++, 20); seq += 20;
+        CHECK_EQ_I(ppp_send_ip(&S, pkt, len), 0);
+        pull();
+        f = find(PPP_PROTO_VJC, 0);
+        if (i > 0) CHECK(f && (f->d[0] & 0x40) && f->d[1] < 4);
+    }
+    /* a peer that asked for no VJ: none sent; ours on, theirs to us taken */
+    base_cfg(&c);
+    start(&c);
+    to_network(peer_lcp, sizeof peer_lcp);
+    vj_ipcp_up(NULL, 0);
+    CHECK_EQ_I(status()->counters.vj_tx_slots, 0);
+    for (i = 0; i < 3; i++) {
+        len = vj_tcp(pkt, seq, ack, id++, 20); seq += 20;
+        CHECK_EQ_I(ppp_send_ip(&S, pkt, len), 0);
+        pull();
+        CHECK(find(PPP_PROTO_IP, 0) != NULL);
+    }
+    /* VJ that was not agreed (switched off here): Protocol-Rejected */
+    base_cfg(&c);
+    c.no_vj = 1;
+    start(&c);
+    to_network(peer_lcp, sizeof peer_lcp);
+    vj_ipcp_up(NULL, 0);
+    len = vj_tcp(pkt, seq, ack, id++, 20);
+    ppp_vj_tx_init(&peer, 16, 1);
+    {
+        uint16_t pr = ppp_vj_compress(&peer, pkt, len, w, sizeof w, &n);
+        ip_count = 0;
+        push(pr, w, n);
+        pull();
+        CHECK_EQ_I(ip_count, 0);
+        f = find(PPP_PROTO_LCP, 8);
+        CHECK(f && f->d[4] == 0x00 && f->d[5] == 0x2f);
+    }
+}
+
 static void test_fuzz(void)
 {
     static const uint16_t protos[] = { PPP_PROTO_LCP, PPP_PROTO_LCP, PPP_PROTO_PAP,
@@ -1590,6 +1827,8 @@ int main(void)
     test_no_peer_and_loopback();
     test_reply_fits_mru();
     test_trace();
+    test_vj_negotiation();
+    test_vj_data();
     test_fuzz();
     T_REPORT("test_ppp");
 }

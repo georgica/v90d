@@ -44,7 +44,11 @@ the caller Acks governs what we send.
 - Encryption changes option 18. With `cfg.encrypt` 0 (the default, and
   what the daemon uses since 0.14) encryption is given on request: a caller
   whose option 18 carries MPPE key bits (0x20 / 0x40 / 0x80), and whose
-  login was MS-CHAPv2 (so the keys are in hand), gets MPPE. That request
+  login was MS-CHAPv2 (so the keys are in hand), gets MPPE. One whose
+  request carries MPPC's bit as well (Windows' "optional encryption",
+  0x61) takes either, and we do not do both at once: it keeps MPPC in the
+  clear, as text is far quicker compressed (it gets MPPE only where we do
+  no MPPC). "Require data encryption" (0x60, 0x40) asks for MPPE alone. That request
   ranks above any compression in it. With the keys in hand CCP waits (a
   Restart period at most) for the caller's first request before sending
   ours, so ours is MPPE, in the mode and key length asked, when the caller
@@ -354,6 +358,32 @@ RFC 2759 / 3078 / 3079 (MS-CHAPv2 and MPPE):
     Configure-Nak and -Reject replies, like every other packet we send, fit
     the peer's MRU (whole options, as many as fit; the peer asks again
     without them).
+35. Van Jacobson TCP/IP header compression (RFC 1144; `ppp_vj.c`), IPCP
+    option 2 with protocol 0x002d (RFC 1332 3.2), each way on its own. Our
+    request offers it with Max-Slot-Id 15 (16 slots) and Comp-Slot-Id 1;
+    the peer's, in RFC 1332's form or RFC 1172's older 4-octet one, is
+    Acked with any slot count (we use at most 16) and its Comp-Slot-Id
+    honoured (0: every compressed packet names its slot). Any other
+    compression protocol (RFC 2507's IPHC, 0x0061) is Rejected; a Nak
+    toward one drops ours. `cfg.no_vj` turns it off both ways. A TCP
+    datagram goes as 0x002d (only what changed: a few octets for an echoed
+    keystroke) or 0x002f (whole, its slot in the protocol field: a new
+    connection, a resend, changed options); anything else as 0x0021.
+    VJ works on the datagram, before CCP: what it makes is compressed or
+    encrypted like IP, and under MPPE a cleartext VJ packet is dropped
+    like cleartext IP. After a frame lost on the way in (a bad FCS, an
+    abort, an overlong or short frame, one the decompressor or MPPE could
+    not use) compressed packets are tossed until one names its slot or an
+    uncompressed one comes (RFC 1144 4.2); the sender's TCP resends what
+    was lost, which goes uncompressed and puts the slot right. A packet
+    that cannot be sent keeps the compressor's slots as they were. VJ that
+    was not agreed is Protocol-Rejected; a Protocol-Reject of VJ from the
+    peer stops it towards the peer. Counters: `vj_tx_comp`,
+    `vj_tx_uncomp`, `vj_rx_comp`, `vj_rx_uncomp`, `vj_errors`, and the
+    slots agreed each way. `test/test_vj.c` rebuilds long mixed streams to
+    the octet and fuzzes the decompressor; `srv/test/ns_pppd.c` runs every
+    call against pppd and the kernel's slhc with it on (and one with
+    `novj`).
 
 ## Windows callers: assumed, not tested
 
