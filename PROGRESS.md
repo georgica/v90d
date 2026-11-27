@@ -3323,7 +3323,7 @@ bug and no way past authentication were found.
 - Tests: ppp (no echo replies but data: up; then silent: ended; looped
   echoes still a loop), srv (no echoes on a WebTV port, 30 s on others).
 
-## A negotiation log for every answered call (2026-11-27): host-tested, NOT yet tested on a box
+## A negotiation log for every answered call (2026-11-27): host-tested, and tried on an HT801
 
 For finding out why a modem does not connect. Built on libv90modem 0.7.4.
 
@@ -3332,9 +3332,9 @@ For finding out why a modem does not connect. Built on libv90modem 0.7.4.
   whether the caller used V.8, the furthest stage reached, the modulation
   chosen, whether data mode was reached, the modem's error and a timeline up
   to data mode. The daemon's log gets one `negotiation:` line per call.
-- dce reads v90m_get_diag every 10 ms until data mode, and once as the call
-  ends. A state shorter than that may not show. The CPU cost on the box has
-  not been measured.
+- dce reads v90m_get_diag every 10 ms until data mode, and once more when
+  the log is taken as the call ends. A state shorter than that may not show.
+  The CPU cost on the box has not been measured.
 - On the Calls page the log opens in a window with Copy and Close (/ui.js);
   without script the link leads to the text. The policy gained
   `connect-src 'self'`, so that the script may read it. The page's 15 s
@@ -3365,11 +3365,13 @@ was not tried).
 Raspbian 12), not under qemu: the programs were cross-built on the VM with
 the toolchain of fw/setup.sh and run natively (`QEMU=` empty, `ARM_CC=false`
 so that nothing could be compiled there). On this change on v90d 0.14.0,
-before the pop-up: ALL ARM CHECKS PASS, 309 result lines, all with 0 failures, 106 minutes.
+before the pop-up: ALL ARM CHECKS PASS, 309 result lines, all with 0
+failures, 106 minutes.
 With the pop-up, still on 0.14.0, `cfg` and `srv` (the directories it
 changes) were built and run again the same way, `make test-arm` in each: all
-with 0 failures. No ARM test has run since the change was moved onto 0.14.2.
-A newer processor than the box's: this is not a run on the box.
+with 0 failures. No ARM test has run since the change was moved onto 0.14.2,
+nor with the fixes from the review below. A newer processor than the box's:
+this is not a run on the box.
 
 The pop-up's checks in cfg's tests were seen failing before it was written.
 The script itself they cannot run: it was tried in headless Chromium 156 on
@@ -3377,3 +3379,44 @@ the same VM, against cfg's server and pages with made-up calls, 17 checks,
 none failing (the window, Copy pasted back whole, the three ways to close,
 no reload while open and one after, the Add button, without script, with a
 login and after it ended). No other browser was tried.
+
+Fixed from the pull request's review: the timeline missed a change in the
+last 10 ms before a caller hung up (the summary had it); Tab left the pop-up
+for the page behind; and a late reply replaced the log asked for after it,
+or opened the window after Esc. Seen failing first: dce's call test (x),
+asked every millisecond, found the timeline behind the summary 14 times; 7
+new checks in Chromium failed. After: call (x) 4186 checks, 0 failures;
+Chromium 25 checks, none failing. `make check` on the fixed sources: ALL
+HOST CHECKS PASS, 208 suite results, all with 0 failures; `make check-ns`
+523, 95 and 14 checks, all with 0 failures.
+
+On a box: the owner's HT801, firmware 0.14.2 built from the change as merged
+(with the pop-up, before the review's fixes), one answered call. The Calls
+page, from the owner's screenshot:
+
+    Port 1  2026-11-27 22:32:28  0:00:40  5000  answered  V.90  48000  28800  error  Log
+
+and its log, open in the pop-up (transcribed from the screenshot):
+
+    Port 1, call 2, 2026-11-27 22:32:28 UTC
+    Dialed: 5000
+    Result: answered
+    Ended: error after 0:00:40
+
+    Offered: V.92, V.90, V.34, V.32bis, V.22bis, V.22, Bell 212A, V.21, Bell 103
+    Caller used V.8: yes
+    Furthest stage: data
+    Modulation chosen: V.90
+    Data mode reached: yes
+    Modem error: none
+
+    Timeline (seconds after the answer, up to data mode)
+      0.0  stage tone, modulation none, V.8 no
+      1.7  stage v8, modulation V.90, V.8 yes
+      3.4  stage phase2, modulation V.90, V.8 yes
+      3.8  stage phase3, modulation V.90, V.8 yes
+      6.3  stage phase4, modulation V.90, V.8 yes
+      8.7  stage data, modulation V.90, V.8 yes
+
+Why the call ended with "error" has not been looked into: this log stops at
+data mode. The fixes from the review have not been run on a box.

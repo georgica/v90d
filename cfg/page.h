@@ -183,14 +183,16 @@ static inline void page_top(sbuf_t *b, const char *title, const char *head, int 
  *   without it posts the button: the page is saved and comes back with one
  *   more row (settings.h);
  * - a link marked data-pop opens the text it leads to in a window on the
- *   page, with Copy and Close. Without it, or when the text cannot be had
- *   (a login that has ended), the link is followed as any other. Copy is the
+ *   page, with Copy and Close, and Tab goes round inside it. Only the reply
+ *   to the link followed last is used, and none once the window was closed
+ *   (or Esc pressed). Without the script, or when the text cannot be had (a
+ *   login that has ended), the link is followed as any other. Copy is the
  *   old execCommand: the clipboard's newer interface needs https;
  * - the page of calls (id="calls") is read again every 15 s, but not while
  *   such a window is open (without script the page does it itself). */
 #define PAGE_JS \
     "(function(){\n" \
-    "var d=document,pop=null,from=null;\n" \
+    "var d=document,pop=null,from=null,ask=0;\n" \
     "function add(e,b){\n" \
     " if(b.getAttribute('name')!=='add'||!b.getAttribute('data-tpl'))return;\n" \
     " var t=d.getElementById(b.getAttribute('data-tpl')),r=d.getElementById(b.getAttribute('data-rows'));\n" \
@@ -212,6 +214,7 @@ static inline void page_top(sbuf_t *b, const char *title, const char *head, int 
     " var x=d.createElement('input');x.type='button';x.value=text;to.appendChild(x);return x;\n" \
     "}\n" \
     "function close(){\n" \
+    " ask++;\n" \
     " if(!pop)return;\n" \
     " d.body.removeChild(pop);pop=null;\n" \
     " if(from&&from.focus)from.focus();\n" \
@@ -230,16 +233,23 @@ static inline void page_top(sbuf_t *b, const char *title, const char *head, int 
     "  s.innerHTML='';s.appendChild(d.createTextNode(ok?'Copied':'Press Ctrl+C to copy'));\n" \
     " };\n" \
     " x.onclick=close;\n" \
+    " pop.stops=[t,c,x];\n" \
     " pop.onclick=function(e){if((e||window.event).target===pop)close();};\n" \
     " x.focus();\n" \
+    "}\n" \
+    "function tab(e){\n" \
+    " var f=pop.stops,n=f.length,i=0;\n" \
+    " while(i<n&&f[i]!==d.activeElement)i++;\n" \
+    " i=i<n?(i+(e.shiftKey?n-1:1))%n:(e.shiftKey?n-1:0);\n" \
+    " e.preventDefault();f[i].focus();\n" \
     "}\n" \
     "function open(e,a){\n" \
     " if(a.getAttribute('data-pop')===null||!window.XMLHttpRequest)return;\n" \
     " if(e.button||e.ctrlKey||e.metaKey||e.shiftKey||e.altKey)return;\n" \
     " e.preventDefault();from=a;\n" \
-    " var r=new XMLHttpRequest();\n" \
+    " var r=new XMLHttpRequest(),mine=++ask;\n" \
     " r.onreadystatechange=function(){\n" \
-    "  if(r.readyState!==4)return;\n" \
+    "  if(r.readyState!==4||mine!==ask)return;\n" \
     "  if(r.status===200&&/^text\\/plain/.test(r.getResponseHeader('Content-Type')||''))show(r.responseText);\n" \
     "  else window.location.href=a.href;\n" \
     " };\n" \
@@ -250,7 +260,9 @@ static inline void page_top(sbuf_t *b, const char *title, const char *head, int 
     "  var b=e.target;if(!b||!b.getAttribute)return;\n" \
     "  if(b.tagName==='A')open(e,b);else add(e,b);\n" \
     " },false);\n" \
-    " d.addEventListener('keydown',function(e){if(e.keyCode===27)close();},false);\n" \
+    " d.addEventListener('keydown',function(e){\n" \
+    "  if(e.keyCode===27)close();else if(e.keyCode===9&&pop)tab(e);\n" \
+    " },false);\n" \
     "}\n" \
     "function again(){\n" \
     " setTimeout(function(){\n" \

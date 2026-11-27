@@ -547,23 +547,33 @@ static void ms_step(dce_t *d, int retraining)
  * names the one before) */
 static int moving_mod(const dce_t *d, const v90m_state *ms) { return d->moving && ms->modulation != V90M_CONN_NONE; }
 
-/* a line of the negotiation log whenever the start-up moves on; nothing
- * more once data mode was reached (the stops after it are logged apart) */
+/* a line of the negotiation log in n, if the start-up has moved on since
+ * its last one; nothing more once data mode was reached (the stops after it
+ * are logged apart) */
+static void neg_note(dce_neg_t *n, uint32_t at_ms, const v90m_diag *g, int used_v8)
+{
+    dce_neg_event_t now, *e;
+    if (n->data_reached) return;
+    n->data_reached = g->data_reached;
+    now.at_ms = at_ms;
+    now.phase = v90m_phase_name(g->phase);
+    now.selected = v90m_conn_name(g->selected);
+    now.used_v8 = used_v8;
+    if (n->n_events) {
+        e = &n->events[n->n_events - 1];
+        if (!strcmp(e->phase, now.phase) && !strcmp(e->selected, now.selected) && e->used_v8 == now.used_v8) return;
+    }
+    if (n->n_events < DCE_NEG_EVENTS) e = &n->events[n->n_events++];
+    else { e = &n->events[DCE_NEG_EVENTS - 1]; n->dropped++; }   /* the newest keeps the last place */
+    *e = now;
+}
+
 static void neg_track(dce_t *d, const v90m_state *ms)
 {
     v90m_diag g;
-    dce_neg_event_t *e;
     if (d->neg.data_reached) return;
     v90m_get_diag(d->modem, &g);
-    d->neg.data_reached = g.data_reached;
-    if (d->neg.n_events && (int)g.phase == d->neg_phase && (int)g.selected == d->neg_sel && ms->used_v8 == d->neg_v8) return;
-    d->neg_phase = (int)g.phase; d->neg_sel = (int)g.selected; d->neg_v8 = ms->used_v8;
-    if (d->neg.n_events < DCE_NEG_EVENTS) e = &d->neg.events[d->neg.n_events++];
-    else { e = &d->neg.events[DCE_NEG_EVENTS - 1]; d->neg.dropped++; }   /* the newest keeps the last place */
-    e->at_ms = d->call_ms;
-    e->phase = v90m_phase_name(g.phase);
-    e->selected = v90m_conn_name(g.selected);
-    e->used_v8 = ms->used_v8;
+    neg_note(&d->neg, d->call_ms, &g, ms->used_v8);
 }
 
 void dce_get_neg(const dce_t *d, dce_neg_t *n)
@@ -573,6 +583,9 @@ void dce_get_neg(const dce_t *d, dce_neg_t *n)
     *n = d->neg;
     v90m_get_diag(d->modem, &g);
     v90m_get_state(d->modem, &ms);
+    /* one more look, into the copy: a call that ends here (the caller hung
+     * up) may have moved on since the last one */
+    neg_note(n, d->call_ms, &g, ms.used_v8);
     n->used_v8 = ms.used_v8;
     n->data_reached = g.data_reached;
     n->phase = v90m_phase_name(g.phase);

@@ -409,7 +409,8 @@ log). `M` is the call's `number` in the port's `status.json`, counted from 1
 since start-up, so it begins again after a restart.
 
 On `/calls` the script (/ui.js) opens the text in a window on the page, with
-Copy and Close (Esc or a click outside close it too). Copy uses the old
+Copy and Close (Esc or a click outside close it too). Tab goes round inside
+it, and only the reply to the link followed last is shown. Copy uses the old
 `execCommand`, as the clipboard's newer interface needs https; where it does
 not work the text is left selected. Without the script, or when the text
 cannot be had (the login has ended), the link is followed as any other. The
