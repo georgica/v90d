@@ -2003,51 +2003,20 @@ static void network_start(ppp_t *p)
     p->mppe_redos = 0;
     p->ccp_redo = 0;
     p->enc_wait_ms = 0;
-    p->ccp_wait_ms = 0;
-    if (ccp_wanted(p)) {
-        if (p->mppe_have && !p->cfg.encrypt)
-            /* encryption on request: wait (a Restart period at most) for
-             * the caller's request, so that ours can be MPPE if it asks
-             * for it -- pppd with require-mppe ends the link on a server
-             * whose first request is anything else */
-            p->ccp_wait_ms = p->ccp.restart_ms ? p->ccp.restart_ms : 3000;
-        else
-            ccp_start(p);
-    }
+    /* CCP starts with IPCP, our request at once (as in 0.13): Windows 98
+     * with "require data encryption" hangs up on a server that starts
+     * IPCP with no CCP. On request, our request turns to MPPE as soon as
+     * the caller asks for it (pppd with require-mppe, which gives up on a
+     * first request that is not MPPE, is not served) */
+    if (ccp_wanted(p))
+        ccp_start(p);
 }
 
 /* CCP from Initial: open it and send our request */
 static void ccp_start(ppp_t *p)
 {
-    p->ccp_wait_ms = 0;
     ppp_fsm_open(&p->ccp);
     ppp_fsm_up(&p->ccp);
-}
-
-/* While CCP waits for the caller (encryption on request): what its first
- * request says about MPPE, before ours is built from it */
-static void ccp_prescan(ppp_t *p, const uint8_t *info, size_t n)
-{
-    size_t len, pos = 0, vlen;
-    uint8_t type;
-    const uint8_t *val;
-
-    if (n < 4 || info[0] != PPP_CONF_REQ)
-        return;
-    len = (size_t)info[2] << 8 | info[3];
-    if (len < 4 || len > n)
-        return;
-    while (ppp_fsm_next_option(info + 4, len - 4, &pos, &type, &val, &vlen)) {
-        uint32_t v;
-        if (type != CCP_OPT_MPPC || vlen != 4)
-            continue;
-        v = get32(val);
-        if (!mppe_asks(p, v))
-            continue;
-        p->mppe_asked = 1;
-        mppe_settle(p, v, 1);
-        p->cw_want_h = (uint8_t)((v & MPPE_BIT_H) != 0);
-    }
 }
 
 /* take IPCP and CCP all the way back to Initial, whatever state they are in */
@@ -2060,7 +2029,6 @@ static void network_stop(ppp_t *p)
     p->peer_ip = 0;
     ppp_fsm_down(&p->ccp);
     ppp_fsm_close(&p->ccp);
-    p->ccp_wait_ms = 0;         /* a wait for the caller's CCP request ends too */
 }
 
 /* ---------------------------------------------------------------- */
@@ -2322,10 +2290,6 @@ static void handle_frame(ppp_t *p)
     switch (proto) {
     case PPP_PROTO_CCP:
         if (ccp_wanted(p)) {
-            if (p->ccp_wait_ms) {
-                ccp_prescan(p, info, n);
-                ccp_start(p);
-            }
             ppp_fsm_input(&p->ccp, info, n);
             if (p->ccp_redo) {
                 p->ccp_redo = 0;
@@ -2666,12 +2630,6 @@ void ppp_tick(ppp_t *p, uint32_t ms)
     if (p->phase == PPP_PHASE_DEAD)
         return;
     p->uptime_ms += ms;
-    if (p->ccp_wait_ms) {
-        if (ms >= p->ccp_wait_ms)
-            ccp_start(p);           /* the caller sent no request: ours */
-        else
-            p->ccp_wait_ms -= ms;
-    }
     ppp_fsm_tick(&p->lcp, ms);
     ppp_fsm_tick(&p->ipcp, ms);
     ppp_fsm_tick(&p->ccp, ms);

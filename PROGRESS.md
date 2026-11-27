@@ -3193,9 +3193,7 @@ bug and no way past authentication were found.
   clear either way. Windows' "optional encryption" asks for MPPC and MPPE
   in one request (0x61); we do not do both at once, so it keeps MPPC in
   the clear where the port compresses (text is far quicker that way), and
-  only "require data encryption" (MPPE alone) is taken as asking. With the keys in hand CCP waits up to a Restart period
-  for the caller's request before sending ours, so ours can be MPPE from
-  the start (pppd with require-mppe gives up on any other first request). Both logins (CHAP and PAP) offer MS-CHAPv2 first, which
+  only "require data encryption" (MPPE alone) is taken as asking. (0.14.1: our CCP request goes out at once again; see below.)
   MPPE needs, then CHAP-MD5, then (a PAP port) PAP: a caller moves on with
   a Nak, or now also a Configure-Reject (old stacks that Reject a method
   they do not know), and only a Reject of the last method ends the link.
@@ -3272,3 +3270,22 @@ bug and no way past authentication were found.
   The test now sends a packet each way and lets a reset complete before it
   judges, and checks recovery in each direction that lost frames (which
   ways a burst hits is chance). No change to the PPP code: recovery worked.
+
+## 0.14.1: CCP starts at once again, for Windows 98 (2026-11-27)
+
+- A Windows 98 SE member (Netstalgia ticket #84) still got error 742 on
+  0.14.0. On request, with MS-CHAPv2 keys in hand, 0.14.0 waited for the
+  caller's CCP request before sending ours (so that ours could be MPPE from
+  the start for pppd with require-mppe). After CHAP Success, Windows 98 saw
+  our IPCP request and no CCP, decided no encryption could be had and hung
+  up after one round trip. 0.13 sent both at once, and the same member's
+  call then stayed up (until MPPE failed, the bug 0.14.0 fixed).
+- Our CCP request goes out at once again, with IPCP's; a caller that asks
+  for MPPE gets it as before (our request turns to MPPE at once). The
+  price, chosen by the owner: pppd with require-mppe cannot connect (it
+  gives up on a first request that is not MPPE); no member is known to use
+  it. ns_pppd's require-mppe calls are gone; the MPPE packet path, run
+  against the kernel's ppp_mppe at 40, 56 and 128 bits up to 0.14.0, is
+  unchanged.
+- Tests: ccp (our request at once; Windows asking for MPPE with and
+  without Rejecting our Deflate first).

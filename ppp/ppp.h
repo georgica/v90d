@@ -369,8 +369,6 @@ typedef struct ppp {
     uint8_t  ccp_switch;       /* ... while our request was for compression:
                                   make the next one MPPE */
     uint8_t  mppe_redos;       /* CCP renegotiated for want of MPPE both ways */
-    uint32_t ccp_wait_ms;      /* on request: CCP not opened yet, waiting this
-                                  much longer for the caller's request */
     uint8_t  ccp_redo;         /* the two directions came up at different key
                                   lengths: negotiate CCP again (not keyed yet) */
     uint8_t  mppe_started;     /* MPPE was keyed once this authentication; a CCP

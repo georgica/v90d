@@ -49,14 +49,15 @@ the caller Acks governs what we send.
   0x61) takes either, and we do not do both at once: it keeps MPPC in the
   clear, as text is far quicker compressed (it gets MPPE only where we do
   no MPPC). "Require data encryption" (0x60, 0x40) asks for MPPE alone. That request
-  ranks above any compression in it. With the keys in hand CCP waits (a
-  Restart period at most) for the caller's first request before sending
-  ours, so ours is MPPE, in the mode and key length asked, when the caller
-  wants it: pppd with require-mppe ends the link on a server whose first
-  request is anything else. A caller that asks later still gets it: our
-  request becomes MPPE (sent at once if CCP is still negotiating, or by
-  negotiating CCP again if our compression had been Acked); and from then
-  on nothing goes in the clear
+  ranks above any compression in it. Our CCP request goes out at once
+  after the login, with IPCP's, asking for compression: Windows 98 with
+  "require data encryption" hangs up on a server that starts IPCP with no
+  CCP (0.14.0 waited for the caller's request first, and lost it). When
+  the caller asks for MPPE our request becomes MPPE, sent at once if CCP
+  is still negotiating, or by negotiating CCP again if our compression had
+  been Acked. pppd with require-mppe is not served: it ends the link on a
+  server whose first request is not MPPE. From then on nothing goes in the
+  clear
   either way, as with encryption required. A caller that asks for no MPPE
   gets compression and the clear, as before; one that asks without the
   keys (another login) is Nak'd down to MPPC's 0x00000001. With
