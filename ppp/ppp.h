@@ -89,6 +89,8 @@ typedef enum {
 #define PPP_AUTH_PAP   1u
 #define PPP_AUTH_CHAP  2u          /* CHAP-MD5 (RFC 1994) */
 #define PPP_AUTH_MSCHAPV2 4u       /* MS-CHAPv2 (RFC 2759), for MPPE keys */
+#define PPP_AUTH_MSCHAPV1 8u       /* MS-CHAP v1 (RFC 2433), for MPPE keys; offered
+                                      first when allowed (Windows 98 needs it) */
 
 /* why the link ended (or is ending) */
 typedef enum {
@@ -334,6 +336,7 @@ typedef struct ppp {
      * master start keys derived from it (RFC 3079), for CCP to key MPPE */
     uint8_t  mschap2_resp[42];
     uint8_t  mppe_send[16], mppe_recv[16];
+    uint8_t  mppe_short_send[8], mppe_short_recv[8];   /* the 40/56-bit start keys */
     uint8_t  mppe_have;
 
     /* IPCP */

@@ -71,6 +71,19 @@ void ppp_mschap2_auth_response(const uint8_t *pass, size_t plen, const uint8_t n
                                const uint8_t peer_chal[16], const uint8_t auth_chal[16],
                                const uint8_t *user, size_t ulen, uint8_t out[42]);
 
+/* ---- MS-CHAP v1 (RFC 2433), server side ---- */
+
+/* ChallengeResponse (RFC 2433 A.7): the 24-octet response to an 8-octet
+ * challenge for a 16-octet password hash (NT or LAN Manager) */
+void ppp_mschap1_response(const uint8_t chal[8], const uint8_t pwhash[16], uint8_t out[24]);
+/* LmPasswordHash (RFC 2433 A.2): ASCII letters upper-cased, 14 octets */
+void ppp_lm_password_hash(const uint8_t *pass, size_t plen, uint8_t out[16]);
+/* The MPPE start key after an MS-CHAP v1 login (RFC 3079 section 2), the
+ * same both ways: keylen 8 (40/56-bit) from the LAN Manager hash, 16
+ * (128-bit) from the NT hash's hash and the challenge */
+void ppp_mschap1_mppe_start(const uint8_t *pass, size_t plen, const uint8_t chal[8],
+                            size_t keylen, uint8_t start[16]);
+
 /* ---- MPPE key derivation (RFC 3079), server side ---- */
 
 /* The master send and receive START keys (before the per-session key

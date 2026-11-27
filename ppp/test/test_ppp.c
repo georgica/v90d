@@ -5,6 +5,8 @@
 #include "test.h"
 #include "ppp.h"
 #include "ppp_vj.h"
+#include "ppp_mppe.h"
+#define P_CCP_ID 0x80fd
 #include "ppp_md5.h"
 
 #define OUR_IP   PPP_IP4(10, 0, 0, 1)
@@ -206,6 +208,27 @@ static void mschap2_answer_as(const frame_t *ch, const char *sent, const char *u
     rsp[1 + 48] = 0;
     memcpy(rsp + 50, sent, sl);
     push_cp(PPP_PROTO_CHAP, 2, ch->d[1], rsp, 50 + sl);
+}
+
+/* an MS-CHAP v1 Response (RFC 2433): LM response (or zeros), NT response
+ * (or zeros), the "use NT" flag */
+static void mschap1_answer(const frame_t *ch, const char *user, const char *secret, int use_nt)
+{
+    uint8_t rsp[1 + 49 + 64], h[16];
+    size_t ul = strlen(user);
+
+    rsp[0] = 49;
+    memset(rsp + 1, 0, 48);
+    if (use_nt) {
+        ppp_nt_password_hash((const uint8_t *)secret, strlen(secret), h);
+        ppp_mschap1_response(ch->d + 5, h, rsp + 1 + 24);
+    } else {
+        ppp_lm_password_hash((const uint8_t *)secret, strlen(secret), h);
+        ppp_mschap1_response(ch->d + 5, h, rsp + 1);
+    }
+    rsp[1 + 48] = (uint8_t)(use_nt != 0);
+    memcpy(rsp + 50, user, ul);
+    push_cp(PPP_PROTO_CHAP, 2, ch->d[1], rsp, 50 + ul);
 }
 
 static void mschap2_answer(const frame_t *ch, const char *user, const char *secret)
@@ -660,6 +683,126 @@ static void test_chap(void)
     CHECK(find(PPP_PROTO_CHAP, 1) == NULL);
     CHECK(find(PPP_PROTO_LCP, PPP_TERM_REQ) != NULL);
     CHECK_EQ_I(status()->end_reason, PPP_END_AUTH_TIMEOUT);
+}
+
+/* MS-CHAP v1 (RFC 2433), which Windows 98 needs for MPPE keys: offered
+ * first when allowed, an 8-octet challenge, the NT response (or, from an
+ * old client, the LM one alone), a plain Success; MPPE keys of both
+ * lengths (RFC 3079 section 2: 40/56-bit from the LAN Manager hash) */
+static void test_mschap1(void)
+{
+    ppp_config_t c;
+    frame_t *ch, *f, *cr;
+    uint8_t chal[8];
+    size_t vl;
+    const uint8_t *v;
+
+    base_cfg(&c);
+    c.auth = PPP_AUTH_MSCHAPV1 | PPP_AUTH_MSCHAPV2 | PPP_AUTH_CHAP | PPP_AUTH_PAP;
+    start(&c);
+    pull();
+    cr = find(PPP_PROTO_LCP, PPP_CONF_REQ);
+    v = cr ? opt(cr, 3, &vl) : NULL;
+    CHECK(v && vl == 3 && v[0] == 0xc2 && v[1] == 0x23 && v[2] == 0x80);   /* MS-CHAP v1 first */
+    start(&c);
+    lcp_up(peer_lcp, sizeof peer_lcp);
+    CHECK_EQ_I(status()->auth, PPP_AUTH_MSCHAPV1);
+    ch = find(PPP_PROTO_CHAP, 1);
+    CHECK(ch != NULL);
+    if (!ch) return;
+    CHECK_EQ_I(ch->d[4], 8);                                    /* an 8-octet challenge */
+    memcpy(chal, ch->d + 5, 8);                                 /* (pull() reuses the frame) */
+    mschap1_answer(ch, "alice", "wonderland", 1);
+    pull();
+    f = find(PPP_PROTO_CHAP, 3);
+    CHECK(f != NULL);
+    CHECK(f && !(f->d[4] == 'S' && f->d[5] == '='));            /* no authenticator response in v1 */
+    CHECK_EQ_I(status()->phase, PPP_PHASE_NETWORK);
+    CHECK(strcmp(status()->peer_name, "alice") == 0);
+    CHECK_EQ_I(S.mppe_have, 1);
+    {
+        uint8_t st[16];
+        ppp_mschap1_mppe_start((const uint8_t *)"wonderland", 10, chal, 16, st);
+        CHECK(memcmp(S.mppe_send, st, 16) == 0 && memcmp(S.mppe_recv, st, 16) == 0);   /* the same both ways */
+        ppp_mschap1_mppe_start((const uint8_t *)"wonderland", 10, chal, 8, st);
+        CHECK(memcmp(S.mppe_short_send, st, 8) == 0 && memcmp(S.mppe_short_recv, st, 8) == 0);
+    }
+
+    /* an old client's LM response alone (flag 0): taken */
+    start(&c);
+    lcp_up(peer_lcp, sizeof peer_lcp);
+    ch = find(PPP_PROTO_CHAP, 1);
+    if (ch) mschap1_answer(ch, "alice", "WONDERLAND", 0);      /* the LM hash ignores case */
+    pull();
+    CHECK(find(PPP_PROTO_CHAP, 3) != NULL);
+    CHECK_EQ_I(status()->phase, PPP_PHASE_NETWORK);
+
+    /* wrong secret: Failure "E=691", link ended */
+    start(&c);
+    lcp_up(peer_lcp, sizeof peer_lcp);
+    ch = find(PPP_PROTO_CHAP, 1);
+    if (ch) mschap1_answer(ch, "alice", "Wonderland", 1);
+    pull();
+    f = find(PPP_PROTO_CHAP, 4);
+    CHECK(f && f->n >= 4 + 5 && memcmp(f->d + 4, "E=691", 5) == 0);
+    CHECK_EQ_I(status()->end_reason, PPP_END_AUTH_FAILED);
+
+    /* a client that will not do v1 Naks toward v2: v2 */
+    start(&c);
+    pull();
+    cr = find(PPP_PROTO_LCP, PPP_CONF_REQ);
+    {
+        static const uint8_t nak[5] = { 3, 5, 0xc2, 0x23, 0x81 };
+        if (cr) push_cp(PPP_PROTO_LCP, PPP_CONF_NAK, cr->d[1], nak, sizeof nak);
+    }
+    pull();
+    cr = find(PPP_PROTO_LCP, PPP_CONF_REQ);
+    v = cr ? opt(cr, 3, &vl) : NULL;
+    CHECK(v && vl == 3 && v[2] == 0x81);
+
+    /* MPPE at 40 bits after a v1 login: the LM-hash keys, against a far end
+     * keyed the same way */
+    {
+        static ppp_mppe_t peer;
+        static const uint8_t ip[40] = { 0x45, 0, 0, 40 };
+        uint8_t ccp40[6] = { 18, 6, 0, 0, 0, 0x20 }, st[16], pt[128];
+        start(&c);
+        lcp_up(peer_lcp, sizeof peer_lcp);
+        ch = find(PPP_PROTO_CHAP, 1);
+        if (!ch) return;
+        memcpy(chal, ch->d + 5, 8);
+        mschap1_answer(ch, "alice", "wonderland", 1);
+        ppp_mschap1_mppe_start((const uint8_t *)"wonderland", 10, chal, 8, st);
+        pull();
+        ipcp_up();
+        push_cp(P_CCP_ID, PPP_CONF_REQ, 7, ccp40, 6);         /* the caller: 40-bit, stateful */
+        pull();
+        {
+            /* our request now (the last one sent): MPPE 40-bit stateful */
+            frame_t *last = NULL; int q;
+            uint8_t want40[6] = { 18, 6, 0, 0, 0, 0x20 };
+            for (q = 0; q < n_out; q++)
+                if (out[q].proto == P_CCP_ID && out[q].d[0] == PPP_CONF_REQ) last = &out[q];
+            CHECK(last && last->n == 10 && memcmp(last->d + 4, want40, 6) == 0);
+            if (last) push_cp(P_CCP_ID, PPP_CONF_ACK, last->d[1], last->d + 4, last->n - 4);
+        }
+        pull();
+        if (status()->ccp_state != PPP_FSM_OPENED) {
+            /* our CCP started afresh with MPPE; the caller asks again (as it
+             * does on its Restart timer) */
+            push_cp(P_CCP_ID, PPP_CONF_REQ, 8, ccp40, 6);
+            pull();
+        }
+        CHECK_EQ_I(status()->comp_tx, PPP_COMP_MPPE);
+        CHECK_EQ_I(status()->counters.mppe_keybits, 40);
+        ppp_mppe_begin(&peer, st, st, 8, PPP_MPPE_FORCE_40);
+        ppp_mppe_stateful(&peer, 1, 1);
+        CHECK_EQ_I(ppp_send_ip(&S, ip, sizeof ip), 0);
+        pull();
+        f = find(0x00fd, 0);
+        CHECK(f && ppp_mppe_decrypt(&peer, f->d, f->n, pt, sizeof pt) == (int)sizeof ip + 2 &&
+              memcmp(pt + 2, ip, sizeof ip) == 0);
+    }
 }
 
 static void test_mschap2(void)
@@ -1817,6 +1960,7 @@ int main(void)
     test_auth_negotiation();
     test_chap();
     test_mschap2();
+    test_mschap1();
     test_encrypt_needs_keys();
     test_pap();
     test_ipcp();
@@ -1832,3 +1976,4 @@ int main(void)
     test_fuzz();
     T_REPORT("test_ppp");
 }
+

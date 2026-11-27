@@ -162,6 +162,8 @@ static void up_mru(const ppp_config_t *c, unsigned mru)
         S.mppe_have = 1;
         memcpy(S.mppe_send, inj_s, 16);
         memcpy(S.mppe_recv, inj_r, 16);
+        memcpy(S.mppe_short_send, inj_s, 8);     /* as MS-CHAPv2 has them (RFC 3079 3.3) */
+        memcpy(S.mppe_short_recv, inj_r, 8);
     }
     ppp_hdlc_rx_init(&dec, PPP_HDLC_BUF);
     dec.rx_accm = 0;

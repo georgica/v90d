@@ -976,7 +976,7 @@ static void test_dreamcast_call(void)
     place_call("5551234", 6000);
     start_modem(0, "alice", "wonderland");
     CHECK(wait_ip(20000) > 0);
-    CHECK_EQ_I((int)S.dce.cfg.ppp.auth, (int)(PPP_AUTH_MSCHAPV2 | PPP_AUTH_CHAP | PPP_AUTH_PAP));
+    CHECK_EQ_I((int)S.dce.cfg.ppp.auth, (int)(PPP_AUTH_MSCHAPV1 | PPP_AUTH_MSCHAPV2 | PPP_AUTH_CHAP | PPP_AUTH_PAP));
     CHECK_EQ_I(S.dce.cfg.ppp.encrypt, 0);
     CHECK_EQ_I(S.dce.cfg.ppp.no_vj, 0);     /* an internet port: VJ offered */
     CHECK(strcmp(S.status.peer_name, "alice") == 0);
