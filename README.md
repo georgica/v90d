@@ -272,7 +272,7 @@ binary in the image and no closed blob.
 
 The modem is [libv90modem](https://github.com/georgica/libv90modem)
 (GPL-2.0-only), a library in a repository of its own that v90d builds
-against. `fw/setup.sh` fetches a pinned release of it (0.7.2, checked by
+against. `fw/setup.sh` fetches a pinned release of it (0.7.4, checked by
 SHA-256, like the other dependencies) and unpacks it next to this tree
 (`fw/setup-libv90m.sh` does that part alone); to
 build against a working copy instead, say where it is with `LIBV90M=`
@@ -322,6 +322,12 @@ V.92 is offered by default (`v92 = off` to stop it) and used when the
 caller's modem asks for PCM upstream; a caller that does not ask gets V.90,
 and so does a V.92 call whose start-up does not succeed (with the Conexant
 about one call in seven). An upgraded box keeps the setting it had.
+With V.92 on, a caller's modem that asks for V.92 Quick Connect (it has
+called this box before and remembers the line) gets the short start-up,
+which skips most of V.8 and the line probing; one that does not finish it
+within 2 s gets the ordinary start-up. After each call where it was asked
+for, the log says what came of it (`V.92 Quick Connect: asked ...`). It has
+not been tried with a real V.92 modem yet.
 
 The two 56k schemes from before V.90, x2 (U.S. Robotics, 1997) and K56flex
 (1996), can be offered to a modem that speaks one. Both are answering only,

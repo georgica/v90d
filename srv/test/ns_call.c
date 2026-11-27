@@ -1493,14 +1493,20 @@ int main(int argc, char **argv)
          * session's simulated modem calls had every core busy. */
         {
             time_t until = time(NULL) + 300;
-            while (time(NULL) < until && !file_has(lanlog, "2 with the guide's details")) { run_ms(100); usleep(20000); }
+            struct timespec w0, w1; long loops = 0;
+            clock_gettime(CLOCK_MONOTONIC, &w0);
+            while (time(NULL) < until && !file_has(lanlog, "2 with the guide's details")) { run_ms(100); usleep(20000); loops++; }
+            clock_gettime(CLOCK_MONOTONIC, &w1);
             if (!file_has(lanlog, "2 with the guide's details")) {
                 /* what the daemon and its children were doing, for the report */
                 char ps[400];
-                printf("    the directory's details did not come in 300 s; the daemon's log:\n");
+                printf("    the directory's details did not come in 300 s (%ld s by the monotonic clock, %ld rounds, daemon %s); the daemon's log:\n",
+                       (long)(w1.tv_sec - w0.tv_sec), loops, dead ? "gone" : "there");
                 snprintf(ps, sizeof ps, "sed 's/^/      /' %s", lanlog);
                 if (system(ps)) { }
                 snprintf(ps, sizeof ps, "ps -o pid,ppid,stat,etime,wchan:20,args --ppid %d -p %d | sed 's/^/      /'", (int)pid, (int)pid);
+                if (system(ps)) { }
+                snprintf(ps, sizeof ps, "ls -l /proc/%d/fd 2>&1 | sed 's/^/      fd /'; grep -E 'State|PPid' /proc/%d/status | sed 's/^/      /'", (int)pid, (int)pid);
                 if (system(ps)) { }
             }
         }

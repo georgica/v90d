@@ -147,6 +147,32 @@ void srv_ppp_trace_text(int out, uint32_t ms, uint16_t proto, const uint8_t *pkt
         snprintf(buf + at, n - at, " ...");
 }
 
+size_t srv_qc_text(const v90m_qc *q, char *buf, size_t n)
+{
+    char ask[32], lvl[16];
+    int r, l;
+    if (!buf || !n) return 0;
+    buf[0] = 0;
+    if (!q || !q->heard) return 0;
+    if (q->uqts < 0)
+        r = snprintf(buf, n, "V.92 Quick Connect: a request that is not one, ignored: V.8 instead");
+    else {
+        snprintf(ask, sizeof ask, "Ucode %d%s", q->uqts, q->lapm ? ", LAPM" : "");
+        if (!q->accepted)
+            r = snprintf(buf, n, "V.92 Quick Connect: asked (%s); not taken: V.8 instead", ask);
+        else {
+            l = q->level_db10 < 0 ? -q->level_db10 : q->level_db10;
+            snprintf(lvl, sizeof lvl, "%s%d.%d", q->level_db10 < 0 ? "-" : "", l / 10, l % 10);
+            if (q->fallback)
+                r = snprintf(buf, n, "V.92 Quick Connect: asked (%s); taken, ANSpcm at %s dBm0, no TONEq within 2 s: V.8 instead", ask, lvl);
+            else
+                r = snprintf(buf, n, "V.92 Quick Connect: asked (%s); taken, ANSpcm at %s dBm0, TONEq after %d ms%s", ask, lvl, q->toneq_ms,
+                             q->short_p2 == 1 ? ", short Phase 2" : q->short_p2 == 2 ? ", short Phase 2 begun, then the full one" : "");
+        }
+    }
+    return r < 0 ? 0 : (size_t)r < n ? (size_t)r : n - 1;
+}
+
 size_t srv_k56_text(const v90m_k56 *k, char *buf, size_t n)
 {
     static const char *const vers[4] = { "no versions", "version 1", "version 2", "versions 1 and 2" };

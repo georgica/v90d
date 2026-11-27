@@ -194,6 +194,12 @@ int     srv_webtv(const srv_t *s);
  * that would have run K56flex version 1). "" and 0 when no CL went out (or
  * k is NULL); otherwise the length, the text cut to fit n. */
 size_t  srv_k56_text(const v90m_k56 *k, char *buf, size_t n);
+/* The V.92 Quick Connect line of a call's log, from libv90modem's v90m_qc:
+ * whether the caller asked (its Ucode, LAPM), whether we took it, the
+ * ANSpcm level, its TONEq and short Phase 2, or the fall back to V.8.
+ * "" and 0 when it did not ask (or q is NULL); otherwise the length, cut
+ * to fit n. */
+size_t  srv_qc_text(const v90m_qc *q, char *buf, size_t n);
 /* For the log of a call: a caller that asked for MPPE encryption on CCP
  * option 18 (its last request) while none was agreed -- Windows ends such a
  * call with error 742. "" and 0 when it asked for none, or MPPE is in use. */

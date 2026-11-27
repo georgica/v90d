@@ -2066,6 +2066,35 @@ static void test_ppp_trace_text(void)
     CHECK(strlen(b) == 19);
 }
 
+/* the V.92 Quick Connect line of a call's log (srv_qc_text), from
+ * libv90modem's v90m_qc */
+static void test_qc_text(void)
+{
+    v90m_qc q; char b[200];
+    memset(&q, 0, sizeof q);
+    CHECK(srv_qc_text(&q, b, sizeof b) == 0 && b[0] == 0);          /* not asked: nothing */
+    q.heard = 1; q.uqts = 74; q.lapm = 1; q.accepted = 1; q.level_db10 = -120;
+    q.toneq_ms = 210; q.short_p2 = 1; q.bypass = 1;
+    CHECK(srv_qc_text(&q, b, sizeof b) > 0);
+    CHECK(strcmp(b, "V.92 Quick Connect: asked (Ucode 74, LAPM); taken, ANSpcm at -12.0 dBm0, TONEq after 210 ms, short Phase 2") == 0);
+    q.short_p2 = 2;
+    srv_qc_text(&q, b, sizeof b);
+    CHECK(strcmp(b, "V.92 Quick Connect: asked (Ucode 74, LAPM); taken, ANSpcm at -12.0 dBm0, TONEq after 210 ms, short Phase 2 begun, then the full one") == 0);
+    q.short_p2 = 0; q.toneq_ms = 0; q.fallback = 1; q.level_db10 = -95; q.lapm = 0;
+    srv_qc_text(&q, b, sizeof b);
+    CHECK(strcmp(b, "V.92 Quick Connect: asked (Ucode 74); taken, ANSpcm at -9.5 dBm0, no TONEq within 2 s: V.8 instead") == 0);
+    memset(&q, 0, sizeof q); q.heard = 1; q.uqts = 70;              /* not taken (no V.92 here, or turned off) */
+    srv_qc_text(&q, b, sizeof b);
+    CHECK(strcmp(b, "V.92 Quick Connect: asked (Ucode 70); not taken: V.8 instead") == 0);
+    q.uqts = -1;                                                      /* not a modem's QC1a */
+    srv_qc_text(&q, b, sizeof b);
+    CHECK(strcmp(b, "V.92 Quick Connect: a request that is not one, ignored: V.8 instead") == 0);
+    CHECK(srv_qc_text(NULL, b, sizeof b) == 0 && b[0] == 0);
+    q.uqts = 74;
+    srv_qc_text(&q, b, 10);
+    CHECK(strlen(b) == 9);
+}
+
 static void test_heavy_guard(void)
 {
     cfg_t c; int slot = 0;
@@ -2316,6 +2345,7 @@ int main(void)
     test_v32bis_call();
     test_heavy_guard();
     test_k56_text();
+    test_qc_text();
     test_mppe_note();
     test_ppp_trace_text();
     /* the same server on a line with linear receive (srv_tick_lin): whole

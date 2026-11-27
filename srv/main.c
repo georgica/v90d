@@ -530,9 +530,12 @@ static void log_last_call(int port)
         /* an answered K56flex offer: which version the client chose, and
          * whether we took it (a version-1 client is declined and goes on
          * as V.34 or V.90) */
-        v90m_k56 f; char t[160];
+        v90m_k56 f; v90m_qc qc; char t[200];
         v90m_get_k56(S[port].dce.modem, &f);
         if (srv_k56_text(&f, t, sizeof t)) logf_(CFG_LOG_INFO, "%s  %s", who, t);
+        /* a caller that asked for V.92 Quick Connect: what came of it */
+        v90m_get_qc(S[port].dce.modem, &qc);
+        if (srv_qc_text(&qc, t, sizeof t)) logf_(CFG_LOG_INFO, "%s  %s", who, t);
     }
 }
 

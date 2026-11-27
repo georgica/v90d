@@ -3231,3 +3231,12 @@ bug and no way past authentication were found.
   field on the page), ns_pppd (require-mppe-128, -40 and both, with no
   setting; the plain calls unchanged), ns_call
   (the trace in a call's log).
+- **libv90modem 0.7.4** (from 0.7.2; additive, the same ABI): V.92 Quick
+  Connect on the answering side, on whenever V.92 is offered (a caller that
+  asks for it gets the short start-up; one that does not complete it falls
+  back to V.8 within 2 s), and V.8bis's ACK(1) fixed. 0.7.3's HST fixes come
+  with it (HST stays off in v90d). After each call where Quick Connect was
+  asked for, the log says what came of it (srv_qc_text, from v90m_get_qc):
+  the caller's Ucode and LAPM bit, taken or not, the ANSpcm level, its TONEq
+  and the short Phase 2, or the fall back to V.8. Tests: srv (each case of
+  the line). Not yet tried with a real V.92 modem.
