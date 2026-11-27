@@ -1600,6 +1600,33 @@ static void test_keepalive(void)
         if (f) push_cp(PPP_PROTO_LCP, 10, f->d[1], f->d + 4, 4);
     }
     CHECK_EQ_I(status()->end_reason, PPP_END_KEEPALIVE);
+
+    /* a caller that answers no echo but keeps sending is alive: a WebTV box
+     * on V.34 had its call ended at 2:15 (30 s echoes, 3 missed) while it
+     * sent 1039 frames. Any frame from it counts; when it falls silent the
+     * same three missed echoes end the call. */
+    start(&c);
+    to_network(peer_lcp, sizeof peer_lcp);
+    ipcp_up();
+    {
+        static const uint8_t ip[20] = { 0x45, 0, 0, 20, 0, 0, 0, 0, 64, 17, 0, 0,
+                                        10, 0, 0, 2, 10, 0, 0, 1 };
+        for (i = 0; i < 10; i++) {
+            ppp_tick(&S, 1000);
+            pull();
+            push(PPP_PROTO_IP, ip, sizeof ip);            /* no echo reply, data */
+        }
+        CHECK_EQ_I(status()->phase, PPP_PHASE_NETWORK);
+        CHECK_EQ_I(status()->end_reason, PPP_END_NONE);
+        for (i = 0; i < 3; i++) {                           /* now silent */
+            ppp_tick(&S, 1000);
+            pull();
+            CHECK_EQ_I(status()->phase, PPP_PHASE_NETWORK);
+        }
+        ppp_tick(&S, 1000);
+        pull();
+        CHECK_EQ_I(status()->end_reason, PPP_END_KEEPALIVE);
+    }
 }
 
 static void test_no_peer_and_loopback(void)

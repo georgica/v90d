@@ -529,7 +529,9 @@ static void call_start(srv_t *s)
     if (c->dns_relay) { d.ppp.dns1 = c->ppp_local; d.ppp.dns2 = 0; }
     else { d.ppp.dns1 = c->dns[0]; d.ppp.dns2 = c->dns[1]; }
     d.ppp.mru = (uint16_t)c->mru;
-    d.ppp.echo_interval_ms = (uint32_t)c->echo_interval * 1000u;
+    /* LCP echo keepalive; never for a WebTV box, which answers no
+     * Echo-Request (a lost line still ends the call through the modem) */
+    d.ppp.echo_interval_ms = s->webtv ? 0 : (uint32_t)c->echo_interval * 1000u;
     /* [ppp] compression: CCP with Deflate and MPPC; off, CCP only for a
      * caller that asks for MPPE */
     d.ppp.comp = !c->compression ? PPP_COMP_NONE : (PPP_COMP_DEFLATE | PPP_COMP_MPPC);

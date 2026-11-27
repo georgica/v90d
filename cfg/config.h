@@ -35,7 +35,8 @@
  *   auth = none               none | pap | chap. pap and chap need a user.
  *   mru = 1500                68..1500
  *   echo_interval = 30        seconds between LCP echo requests, 0 = off,
- *                             at most 3600
+ *                             at most 3600; any frame from the caller
+ *                             counts as an answer; none on a WebTV port
  *   compression = on          on | off: PPP compression (CCP) with callers
  *                             that ask for it, Deflate or MPPC
  *   (no encryption key since 0.14: a caller that asks for MPPE gets it

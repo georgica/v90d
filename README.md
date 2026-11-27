@@ -159,7 +159,9 @@ more and then fails error control); the log shows both rates after the
 call. A box whose call-waiting detection is on can hang up after a short
 stop of the data that it takes for call waiting; every stop is in the log
 (`data stopped ...`), and turning that detection off in the box's dialing
-settings is the fix. A WebTV Plus whose log shows a rate renegotiation
+settings is the fix. The box answers no PPP echo request, so a WebTV port
+sends it none (up to 0.14.1 a busy box was cut off after about 2 minutes,
+"the caller stopped answering echo requests"). A WebTV Plus whose log shows a rate renegotiation
 begun by the caller about every 22 s is running its modem's automatic
 fall-forward (the factory default); `AT%E1` in its TellyScript turns that
 off. The call is a dial-up

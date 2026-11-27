@@ -3305,3 +3305,20 @@ bug and no way past authentication were found.
   fingerprint against pppd, XP and near-miss requests, the one-second
   wait), ccp (MPPE+MPPC gets MPPE), ns_pppd (require-mppe 128, 40 and
   stateful back, and require-mppe-128 alone, which now gets MS-CHAPv2).
+
+## 0.14.2: WebTV calls no longer end at 2:15 (2026-11-27)
+
+- A WebTV box on a v90d port (V.34 31200, a clean line, 1039 frames
+  received) had every call ended at about 2:15: "PPP ended: the caller
+  stopped answering echo requests". The box answers no LCP Echo-Request;
+  with `echo_interval` 30 s and three misses allowed, v90d hung up at
+  120 s of PPP, busy box or not.
+- Any frame from the caller now counts as an answer to the keepalive (as
+  pppd's lcp-echo-adaptive), except our own echoes looped back with our
+  magic number. A caller that falls silent is still ended after the same
+  three missed echoes.
+- WebTV ports send no echo request at all: the box answers none, so they
+  could only end a quiet call (a user reading a page); a lost line still
+  ends the call through the modem.
+- Tests: ppp (no echo replies but data: up; then silent: ended; looped
+  echoes still a loop), srv (no echoes on a WebTV port, 30 s on others).

@@ -2362,6 +2362,19 @@ static void handle_frame(ppp_t *p)
     n = p->rx.len - off;
     trace(p, 0, proto, info, n, NULL, 0, NULL, 0);
 
+    /* any frame from the caller shows it is there: the keepalive counts only
+     * echoes nobody else answered (a WebTV box answers no Echo-Request, and
+     * had its busy V.34 call ended at 2:15). Our own echoes looped back,
+     * with our magic number, show nothing. */
+    if (p->echo_pending && p->lcp.state == PPP_FSM_OPENED) {
+        uint32_t ours = p->w_magic ? p->magic : 0;
+        int looped = proto == PPP_PROTO_LCP && n >= 8 &&
+                     (info[0] == LCP_ECHO_REQ || info[0] == LCP_ECHO_REP) &&
+                     ours != 0 && get32(info + 4) == ours;
+        if (!looped)
+            p->echo_pending = 0;
+    }
+
     if (p->lcp_wait_ms) {
         /* the caller's first frame while ours waits: its LCP request says
          * whether it is Windows 98 (MS-CHAP v1 first); anything else lets
