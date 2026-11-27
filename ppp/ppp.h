@@ -366,6 +366,8 @@ typedef struct ppp {
                                   request (0: none yet): no Nak goes below it */
     uint32_t cw_mppe_key, cpend_mppe_key;  /* that bit in our last request / in
                                   the peer's request we accepted */
+    uint8_t  mppe_struck;      /* on request, MPPE asked with MPPC: 1, once (it
+                                  keeps MPPC); 2, asked again (it gets MPPE) */
     uint8_t  mppe_asked;       /* on request: the caller asked for MPPE (with
                                   our keys in hand): it gets MPPE, nothing in
                                   the clear */

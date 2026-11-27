@@ -1486,7 +1486,7 @@ static int mppe_asks(const ppp_t *p, uint32_t v)
 {
     if (!(v & MPPE_KEYS) || !p->mppe_have)
         return 0;
-    return !((v & MPPC_BIT) && (p->cfg.comp & PPP_COMP_MPPC));
+    return p->mppe_struck == 2 || !((v & MPPC_BIT) && (p->cfg.comp & PPP_COMP_MPPC));
 }
 
 /* MPPE is what our request carries and what we take: encryption required,
@@ -1678,6 +1678,18 @@ static int ccp_recv_cr(ppp_fsm_t *f, const uint8_t *opts, size_t len,
     p->cpend_wbits = 0;
     p->cpend_mppe = 0;
     p->cchosen = 0;
+    /* MPPE and MPPC asked together keep MPPC the first time ("optional
+     * encryption" takes that). Asked again with the MPPE bits still in it,
+     * after our Nak took them off, the caller requires encryption: Windows
+     * 98's "Require data encryption" with software compression on asks 0x21
+     * so, and hangs up without MPPE. Counted here, once per request. */
+    while (ppp_fsm_next_option(opts, len, &pos, &type, &val, &vlen))
+        if (type == CCP_OPT_MPPC && vlen == 4 && p->mppe_have && p->mppe_struck < 2 &&
+            (get32(val) & MPPE_KEYS) && !mppe_asks(p, get32(val))) {
+            p->mppe_struck++;
+            break;
+        }
+    pos = 0;
     while (ppp_fsm_next_option(opts, len, &pos, &type, &val, &vlen)) {
         int r = 0;
 
@@ -2068,6 +2080,7 @@ static void network_start(ppp_t *p)
     p->mppe_key = MPPE_BIT_S;   /* 128-bit until the peer shows it has less */
     p->mppe_floor = 0;          /* no request from the peer yet */
     p->mppe_asked = 0;
+    p->mppe_struck = 0;
     p->ccp_switch = 0;
     p->mppe_redos = 0;
     p->ccp_redo = 0;

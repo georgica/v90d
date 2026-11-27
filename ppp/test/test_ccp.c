@@ -1887,6 +1887,16 @@ static void test_mppe_on_request(void)
         f = find(P_CCP, PPP_CONF_NAK);
         CHECK(f && same(f, mppc, 6));                              /* its: toward MPPC alone */
         CHECK_EQ_I(ppp_send_ip(&S, ip, sizeof ip), 0);            /* not held: no encryption asked */
+        /* a caller that asks again with the MPPE bits still in it, after our
+         * Nak took them off, requires encryption (Windows 98 with "Require
+         * data encryption" and software compression asks 0x21 so, and hangs
+         * up without it): it gets MPPE */
+        push_cp(P_CCP, PPP_CONF_REQ, 6, opt61, 6);
+        pull();
+        f = find(P_CCP, PPP_CONF_NAK);
+        CHECK(f && same(f, s128, 6));
+        CHECK(scr_new && same(&scr, s128, 6));                     /* ours becomes MPPE too */
+        CHECK(ppp_send_ip(&S, ip, sizeof ip) != 0);                /* nothing in the clear now */
         /* with no MPPC to give (compression off), it gets MPPE instead */
         base_cfg(&cfg);
         cfg.comp = 0;
