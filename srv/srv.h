@@ -69,6 +69,8 @@ typedef struct {
     int        echo_delay;
     int        rx_linear, max_tx_code;  /* bench settings: srv_set_rx_linear, srv_set_max_tx_code */
     int        originate;               /* bench setting: srv_set_originate */
+    void     (*ppp_trace)(void *ctx, int out, uint32_t ms, uint16_t proto,
+                          const uint8_t *pkt, size_t pn, size_t len);   /* srv_set_ppp_trace */
     int       *heavy_slot;      /* shared across ports: calls now offering a heavy modulation, x2 or K56flex (NULL = no guard) */
     int        heavy_held;      /* 1 = this call reserved the heavy slot */
     int        in_call;         /* the call object is running */
@@ -192,6 +194,20 @@ int     srv_webtv(const srv_t *s);
  * that would have run K56flex version 1). "" and 0 when no CL went out (or
  * k is NULL); otherwise the length, the text cut to fit n. */
 size_t  srv_k56_text(const v90m_k56 *k, char *buf, size_t n);
+/* For the log of a call: a caller that asked for MPPE encryption on CCP
+ * option 18 (its last request) while none was agreed -- Windows ends such a
+ * call with error 742. "" and 0 when it asked for none, or MPPE is in use. */
+size_t  srv_mppe_note(const ppp_counters_t *k, char *buf, size_t n);
+/* One line of a call's PPP trace (ppp_config_t.trace): the time since PPP
+ * started, the direction, the protocol and code by name, the identifier,
+ * the length and the octets after the header that were given (cut, with
+ * "...", where more were sent). Cut to fit n. */
+void    srv_ppp_trace_text(int out, uint32_t ms, uint16_t proto, const uint8_t *pkt,
+                           size_t pn, size_t len, char *buf, size_t n);
+/* where each call's PPP trace goes (NULL: nowhere); ctx is the srv_t */
+typedef void (*srv_ppp_trace_fn)(void *ctx, int out, uint32_t ms, uint16_t proto,
+                                 const uint8_t *pkt, size_t pn, size_t len);
+void    srv_set_ppp_trace(srv_t *s, srv_ppp_trace_fn fn);
 /* Unpredictable octets (the daemon reads them from /dev/urandom) for the
  * next call's PPP: its magic numbers and challenges. Give fresh ones after
  * each call; the server keeps at most 32. */

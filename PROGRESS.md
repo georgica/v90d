@@ -3143,3 +3143,85 @@ caught it.
 - Tests: srv (the K56flex line for each case: nothing offered, offered and
   not chosen, version 2 agreed, version 1 declined, version-2-only and
   version-1-only offers, an undefined version, a short buffer, NULL).
+
+## 0.14.0: PPP fixes from an audit and the ISP's Windows error 742 report (2026-11-26)
+
+Two Windows dial-up members of the Netstalgia ISP (nsdiald, on v90d's PPP)
+saw the PC end PPP right after its MS-CHAPv2 login, before IPCP, with
+Windows error 742 ("does not support the data encryption requirements").
+An audit of ppp/ (negotiation, authentication, framing, compression and
+encryption; fuzzed under ASan and UBSan, crypto checked against reference
+implementations) found the cause and three other bugs. No memory-safety
+bug and no way past authentication were found.
+
+- **40-bit and 56-bit MPPE.** CCP agreed 128-bit keys only, so a PC with
+  shorter ones (Windows 9x/ME without the 128-bit upgrade) could never
+  agree and ended with 742. Now one key length both ways: 128-bit, or the
+  strongest of 56 and 40 a peer shows it has (by request, Nak or, as pppd
+  does, Reject); the short keys as RFC 3079 3.3/3.4 and the kernel derive
+  them. CCP is negotiated again, before anything is keyed, if the two
+  directions were Acked at different lengths. A Nak never takes the length
+  below the strongest of the peer's own request (a review found that one
+  injected Nak could talk a 128-bit peer down to 40). `mppe_keybits` counts
+  it; the daemon's compression line says "40-bit keys" and so on. A
+  `require-mppe-40` call runs against the kernel's ppp_mppe (ns_pppd).
+- **The caller's encryption request is always kept.** With encryption off
+  its option-18 request was never recorded, so a log said "asked nothing".
+  It is kept now, and the daemon logs "the caller asked for encryption
+  (option 18 ...) and none was agreed" for such a call (srv_mppe_note),
+  however the call ended.
+- **Stateless MPPE after a long loss.** More than 512 packets lost in a row
+  (the catch-up credit) and no packet ever decrypted again: the call stayed
+  up carrying nothing. The receiver now steps as far as the credit goes on
+  each packet and catches up over the next ones. Past the 2047-count window
+  (either mode) the link now ends with `PPP_END_MPPE_LOST` after 32 such
+  packets, instead of staying up dead.
+- **Configure-Nak/Reject within the peer's MRU** (whole options, as many as
+  fit).
+- **A PPP trace** (`ppp_config_t.trace`, asked for by the ISP): every
+  control packet each way with the time, the protocol and up to 64 octets,
+  PAP and CHAP header only, also inside a Protocol-Reject (no secrets). The daemon logs it at debug level
+  (srv_ppp_trace_text), for example `PPP +1.234 s in  CCP Configure-Request
+  id 5, 10 octets: 12 06 00 00 00 21`.
+- **Encryption on request, with no setting.** The PPP encryption switch is
+  gone from the Modem page and the config file (an older file's
+  `encryption` and `encryption2` lines are read and ignored). A caller that
+  asks for MPPE gets it; one that does not is served in the clear, with the
+  compression it asks for. Once a caller has asked, nothing goes in the
+  clear either way. With the keys in hand CCP waits up to a Restart period
+  for the caller's request before sending ours, so ours can be MPPE from
+  the start (pppd with require-mppe gives up on any other first request). Both logins (CHAP and PAP) offer MS-CHAPv2 first, which
+  MPPE needs, then CHAP-MD5, then (a PAP port) PAP: a caller moves on with
+  a Nak, or now also a Configure-Reject (old stacks that Reject a method
+  they do not know), and only a Reject of the last method ends the link.
+  A port with a login carries IP 4 octets smaller (the MPPE overhead);
+  status.json's `ppp_encryption` means "given on request" now. In the
+  library `cfg.encrypt` 0 is on request, 1 still means required.
+- **A race on ppp0.** The NAT child (re-applying the rules as a call begins
+  or ends) and the STUN child ran on as themselves holding the daemon's TUN
+  devices; when a port's ppp0 was set up again meanwhile (a console's lease
+  running out), it was "busy" and callers got PPP with no network.
+  ns_call's console lease test caught it now and then. Both children now
+  close every descriptor, and the set-up waits for a NAT child first. That
+  was not all of it: any child between its fork and its exec (the lease
+  script, started as the lease runs out) holds the descriptor too, and
+  close-on-exec only lets go at the exec. So the device is no longer made
+  again when only its addresses or MTU change: it gets them in place
+  (tun_readdress), and is made anew only if that fails. ns_call checks
+  that the lease test never logs "cannot set up".
+- Tests: mppe (long runs of loss caught up on, 513 to 2046; the late
+  count; 40- and 56-bit packets against a reference written apart), ccp
+  (the link ends past the window; 40- and 56-bit callers each way, a
+  Windows-style Nak, a Reject after the peer's request, 128 when offered,
+  no Nak below the peer's own request in either order, two lengths never
+  keyed; the request logged with encryption off; on request: Windows-style
+  (asked, Deflate Rejected, MPPE; no clear meanwhile), pppd-style (no
+  MPPE asked: Deflate and the clear), a caller that Acks our Deflate and
+  asks MPPE, no keys), ppp (MS-CHAPv2, CHAP-MD5 and PAP in turn on Rejects;
+  a Reject cut to MRU
+  68; the trace, in order, no password, none in a Protocol-Reject), srv
+  (the encryption note, the trace line; a PAP caller on a port that offers
+  MS-CHAPv2 first), cfg (old encryption keys read and not written; no
+  field on the page), ns_pppd (require-mppe-128, -40 and both, with no
+  setting; the plain calls unchanged), ns_call
+  (the trace in a call's log).

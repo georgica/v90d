@@ -501,12 +501,35 @@ static void test_auth_negotiation(void)
     v = f ? opt(f, 3, &vl) : NULL;
     CHECK(v && vl == 2 && v[0] == 0xc0 && v[1] == 0x23);
 
-    /* authentication is mandatory: a Configure-Reject of it ends the link */
+    /* A Configure-Reject of the method asked for (an old stack that does
+     * not know MS-CHAPv2 and Rejects where it should Nak) moves on to the
+     * next one allowed: MS-CHAPv2, CHAP-MD5, then PAP. Authentication is
+     * still mandatory: a Reject of the last one ends the link. */
     base_cfg(&c);
+    c.auth = PPP_AUTH_MSCHAPV2 | PPP_AUTH_CHAP | PPP_AUTH_PAP;
     start(&c);
     pull();
     f = find(PPP_PROTO_LCP, PPP_CONF_REQ);
-    push_cp(PPP_PROTO_LCP, PPP_CONF_REJ, f->d[1], rej_chap, sizeof rej_chap);
+    v = f ? opt(f, 3, &vl) : NULL;
+    CHECK(v && vl == 3 && v[0] == 0xc2 && v[1] == 0x23 && v[2] == 0x81);    /* MS-CHAPv2 first */
+    {
+        uint8_t rj[5] = { 3, 5, 0xc2, 0x23, 0x81 };
+        push_cp(PPP_PROTO_LCP, PPP_CONF_REJ, f->d[1], rj, sizeof rj);
+    }
+    pull();
+    CHECK(find(PPP_PROTO_LCP, PPP_TERM_REQ) == NULL);
+    f = find(PPP_PROTO_LCP, PPP_CONF_REQ);
+    v = f ? opt(f, 3, &vl) : NULL;
+    CHECK(v && vl == 3 && v[0] == 0xc2 && v[1] == 0x23 && v[2] == 0x05);    /* then CHAP-MD5 */
+    if (f) push_cp(PPP_PROTO_LCP, PPP_CONF_REJ, f->d[1], rej_chap, sizeof rej_chap);
+    pull();
+    f = find(PPP_PROTO_LCP, PPP_CONF_REQ);
+    v = f ? opt(f, 3, &vl) : NULL;
+    CHECK(v && vl == 2 && v[0] == 0xc0 && v[1] == 0x23);                     /* then PAP */
+    {
+        uint8_t rj[4] = { 3, 4, 0xc0, 0x23 };
+        if (f) push_cp(PPP_PROTO_LCP, PPP_CONF_REJ, f->d[1], rj, sizeof rj);
+    }
     pull();
     CHECK(find(PPP_PROTO_LCP, PPP_TERM_REQ) != NULL);
     CHECK_EQ_I(status()->end_reason, PPP_END_AUTH_REFUSED);
@@ -1372,6 +1395,123 @@ static void test_no_peer_and_loopback(void)
 /* Random but well-framed packets in every phase: the parsers must never
  * read or write out of bounds (run this under a sanitizer to be sure; it
  * is in the normal run as a crash and sanity check). */
+/* A Configure-Reject or -Nak is cut to the peer's MRU like every other
+ * reply: whole options, as many as fit (the peer asks again without them
+ * and the rest are rejected then) */
+static void test_reply_fits_mru(void)
+{
+    ppp_config_t c;
+    frame_t *f;
+    const uint8_t po[] = { 1, 4, 0x00, 0x44, 5, 6, 9, 9, 9, 9 };    /* MRU 68 */
+    uint8_t req[12 * 20];
+    unsigned i;
+
+    for (i = 0; i < 12; i++) {
+        memset(req + i * 20, (int)i, 20);
+        req[i * 20] = (uint8_t)(200 + i);
+        req[i * 20 + 1] = 20;
+    }
+    base_cfg(&c);
+    start(&c);
+    to_network(po, sizeof po);
+    CHECK_EQ_I(status()->peer_mru, 68);
+    pull();
+    push_cp(PPP_PROTO_IPCP, PPP_CONF_REQ, 7, req, sizeof req);
+    pull();
+    f = find(PPP_PROTO_IPCP, PPP_CONF_REJ);
+    CHECK(f != NULL);
+    if (f) {
+        CHECK(f->n <= 68);
+        CHECK(f->n == 4 + 3 * 20);                      /* three whole options */
+        CHECK(memcmp(f->d + 4, req, 3 * 20) == 0);
+        CHECK_EQ_I(((f->d[2] << 8) | f->d[3]), (int)f->n);
+    }
+}
+
+/* the control-packet trace (cfg.trace): every LCP, PAP, CHAP, IPCP and CCP
+ * packet each way, in order, with the time; never IP, never a password */
+typedef struct { int out; uint32_t ms; uint16_t proto; uint8_t code, id; size_t n, len; uint8_t d[PPP_TRACE_MAX]; } tr_t;
+static tr_t trs[64];
+static int n_trs;
+static void on_trace(void *ctx, int out, uint32_t ms, uint16_t proto, const uint8_t *pkt, size_t n, size_t len)
+{
+    (void)ctx;
+    if (n_trs < 64) {
+        tr_t *t = &trs[n_trs++];
+        t->out = out; t->ms = ms; t->proto = proto; t->n = n; t->len = len;
+        t->code = n ? pkt[0] : 0; t->id = n > 1 ? pkt[1] : 0;
+        memcpy(t->d, pkt, n < sizeof t->d ? n : sizeof t->d);
+    }
+}
+
+static void test_trace(void)
+{
+    ppp_config_t c;
+    const uint8_t ip[20] = { 0x45, 0, 0, 20 };
+    int i, lcp_out = -1, lcp_in = -1, pap_in = -1, pap_out = -1, ipcp = 0;
+
+    base_cfg(&c);
+    c.auth = PPP_AUTH_PAP;
+    c.trace = on_trace;
+    n_trs = 0;
+    start(&c);
+    lcp_up(peer_lcp, sizeof peer_lcp);
+    ppp_tick(&S, 250);
+    pap_request(7, "bob", "s3cret~}");
+    pull();
+    ipcp_up();
+    CHECK_EQ_I(status()->ip_up, 1);
+    i = n_trs;
+    push(PPP_PROTO_IP, ip, sizeof ip);                  /* IP is not traced */
+    CHECK_EQ_I(ppp_send_ip(&S, ip, sizeof ip), 0);
+    pull();
+    CHECK_EQ_I(n_trs, i);
+    for (i = 0; i < n_trs; i++) {
+        const tr_t *t = &trs[i];
+        CHECK(t->n <= PPP_TRACE_MAX && t->n <= t->len);
+        if (t->proto == PPP_PROTO_LCP && t->out && t->code == PPP_CONF_REQ && lcp_out < 0) lcp_out = i;
+        if (t->proto == PPP_PROTO_LCP && !t->out && t->code == PPP_CONF_REQ && lcp_in < 0) {
+            lcp_in = i;
+            CHECK_EQ_I((int)t->len, 4 + (int)sizeof peer_lcp);
+            CHECK(t->n == t->len && memcmp(t->d + 4, peer_lcp, sizeof peer_lcp) == 0);
+        }
+        if (t->proto == PPP_PROTO_PAP && !t->out) {
+            pap_in = i;
+            CHECK_EQ_I(t->id, 7);
+            CHECK_EQ_I((int)t->n, 4);                    /* the header only: no password */
+            CHECK_EQ_I((int)t->len, 4 + 2 + 3 + 8);
+            CHECK_EQ_I(t->ms, 250);
+        }
+        if (t->proto == PPP_PROTO_PAP && t->out) { pap_out = i; CHECK_EQ_I((int)t->n, 4); CHECK_EQ_I(t->code, 2); }
+        if (t->proto == PPP_PROTO_IPCP) ipcp++;
+    }
+    CHECK(lcp_out == 0);                                /* the first thing out */
+    /* a PAP request after a CHAP login is Protocol-Rejected, the request
+     * inside: the trace shows no more of it than its header */
+    {
+        ppp_config_t c2;
+        int seen = 0;
+        base_cfg(&c2);
+        c2.auth = PPP_AUTH_CHAP;
+        c2.trace = on_trace;
+        start(&c2);
+        to_network(peer_lcp, sizeof peer_lcp);
+        n_trs = 0;
+        pap_request(9, "bob", "s3cret~}");
+        pull();
+        for (i = 0; i < n_trs; i++)
+            if (trs[i].proto == PPP_PROTO_LCP && trs[i].out && trs[i].code == 8) {
+                seen = 1;
+                CHECK((int)trs[i].n <= 4 + 2 + 4);
+                CHECK(trs[i].n < 6 || (trs[i].d[4] == 0xc0 && trs[i].d[5] == 0x23));
+            }
+        CHECK(seen);
+    }
+    CHECK(lcp_in > lcp_out && pap_in > lcp_in && pap_out > pap_in);
+    CHECK(ipcp >= 3);
+    CHECK_EQ_I(trs[0].ms, 0);
+}
+
 static void test_fuzz(void)
 {
     static const uint16_t protos[] = { PPP_PROTO_LCP, PPP_PROTO_LCP, PPP_PROTO_PAP,
@@ -1448,6 +1588,8 @@ int main(void)
     test_tx_buffer();
     test_keepalive();
     test_no_peer_and_loopback();
+    test_reply_fits_mru();
+    test_trace();
     test_fuzz();
     T_REPORT("test_ppp");
 }

@@ -117,7 +117,7 @@ typedef struct {
     uint32_t  peer_ip;
     uint32_t  local_ip;
     int       ppp_compression;  /* PPP compression is allowed (the setting, not a measurement) */
-    int       ppp_encryption;   /* MPPE encryption is required (the setting, not a measurement) */
+    int       ppp_encryption;   /* MPPE is given to a caller that asks (the port's login offers MS-CHAPv2) */
     int       ppp_comp_tx, ppp_comp_rx;     /* ST_COMP_*: agreed towards / from the caller */
     uint64_t  comp_tx_in, comp_tx_out;      /* this call: octets of IP given to the compressor,
                                                and what went out for them */

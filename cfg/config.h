@@ -38,12 +38,10 @@
  *                             at most 3600
  *   compression = on          on | off: PPP compression (CCP) with callers
  *                             that ask for it, Deflate or MPPC
- *   encryption = off          on | off: require 128-bit MPPE on port 1.
- *                             Forces MS-CHAPv2 (so a user is needed), and
- *                             drops plain compression. A caller that will
- *                             not do MPPE is refused.
- *   encryption2 = off         the same for port 2 (set per port, unlike the
- *                             rest of [ppp]; the users are shared)
+ *   (no encryption key since 0.14: a caller that asks for MPPE gets it
+ *   when it logs in with MS-CHAPv2, which auth = chap offers first; any
+ *   other is served in the clear. An older file's encryption and
+ *   encryption2 lines are read and ignored.)
  *   user = NAME SECRET        one line per user. NAME is 1..63 octets,
  *                             SECRET 0..64 octets.
  *
@@ -98,8 +96,8 @@
  *   The box has two telephone ports. [modem] and [line] are port 1;
  *   [modem2] and [line2] take the same keys with the same defaults for
  *   port 2. Everything else (network, ppp with its users, status, log) is
- *   shared by both ports, except ppp_peer2 and encryption2, which give
- *   port 2 its own PPP peer address and its own MPPE requirement.
+ *   shared by both ports, except ppp_peer2, which gives
+ *   port 2 its own PPP peer address.
  *
  *   [status]
  *   listen = lan              lan | off: HTTP status server on the LAN side
@@ -221,10 +219,9 @@ typedef struct {
     char secret[CFG_SECRET_MAX + 1];  /* NUL terminated, may be empty */
 } cfg_user_t;
 
-/* what port 2 has of its own: [modem2], [line2], ppp_peer2 and encryption2 */
+/* what port 2 has of its own: [modem2], [line2] and ppp_peer2 */
 typedef struct {
     uint32_t   ppp_peer;
-    int        encryption;      /* 1 = MPPE required on this port (see the top-level field) */
     unsigned   modulations;
     int        max_down, max_up, tx_level, v42, v42bis, v92, x2, k56, rings, law;
     char       line_number[CFG_NUMBER_MAX + 1];
@@ -257,7 +254,6 @@ typedef struct {
     int        mru;
     int        echo_interval;   /* seconds, 0 = off */
     int        compression;     /* 1 = PPP compression (CCP: Deflate, MPPC) is negotiated */
-    int        encryption;      /* 1 = MPPE encryption is required (forces MS-CHAPv2); port 1, port 2 is port2.encryption */
     int        n_users;
     cfg_user_t users[CFG_MAX_USERS];
     /* [modem] */
@@ -344,8 +340,7 @@ int cfg_save(const cfg_t *c, const char *path, char *err, size_t errsz);
 
 /* The configuration as one port's server wants it: *out is *c with, for
  * port 1 (the second port; port 0 is the first), the [modem2], [line2],
- * ppp_peer2 and encryption2 values in the fields of [modem], [line],
- * ppp_peer and encryption. */
+ * ppp_peer2 values in the fields of [modem], [line] and ppp_peer. */
 void cfg_for_port(const cfg_t *c, int port, cfg_t *out);
 
 /* One service, as the value of a service line ("NUMBER HOST:PORT MODE

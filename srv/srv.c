@@ -81,6 +81,72 @@ void srv_set_entropy(srv_t *s, const uint8_t *b, size_t n)
 int  srv_protoweb(const srv_t *s) { return s->in_call && s->protoweb; }
 int  srv_webtv(const srv_t *s) { return s->in_call && s->webtv; }
 
+size_t srv_mppe_note(const ppp_counters_t *k, char *buf, size_t n)
+{
+    uint32_t v;
+    int r;
+    if (!buf || !n) return 0;
+    buf[0] = 0;
+    if (!k || !(k->mppe_seen & PPP_MPPE_SEEN_REQ) || k->comp_tx == PPP_COMP_MPPE) return 0;
+    v = k->mppe_peer_req;
+    if (!(v & 0xe0u)) return 0;                         /* S, M, L: no key length asked */
+    r = snprintf(buf, n, "the caller asked for encryption (option 18 %08lx:%s%s%s%s) and none was agreed",
+                 (unsigned long)v,
+                 v & 0x40u ? " 128-bit," : "", v & 0x80u ? " 56-bit," : "", v & 0x20u ? " 40-bit," : "",
+                 v & 0x01000000u ? " stateless" : "");
+    if (r < 0) { buf[0] = 0; return 0; }
+    /* the list's last comma */
+    {
+        size_t len = (size_t)r < n ? (size_t)r : n - 1;
+        char *c = strstr(buf, ",)");
+        if (c) { memmove(c, c + 1, strlen(c + 1) + 1); len--; }
+        return len;
+    }
+}
+
+void srv_set_ppp_trace(srv_t *s, srv_ppp_trace_fn fn) { s->ppp_trace = fn; }
+
+void srv_ppp_trace_text(int out, uint32_t ms, uint16_t proto, const uint8_t *pkt,
+                        size_t pn, size_t len, char *buf, size_t n)
+{
+    static const char *const cp[16] = { "", "Configure-Request", "Configure-Ack", "Configure-Nak",
+        "Configure-Reject", "Terminate-Request", "Terminate-Ack", "Code-Reject", "Protocol-Reject",
+        "Echo-Request", "Echo-Reply", "Discard-Request", "Identification", "Time-Remaining",
+        "Reset-Request", "Reset-Ack" };
+    static const char *const pap[4] = { "", "Authenticate-Request", "Authenticate-Ack", "Authenticate-Nak" };
+    static const char *const chap[5] = { "", "Challenge", "Response", "Success", "Failure" };
+    const char *pn_ = proto == PPP_PROTO_LCP ? "LCP" : proto == PPP_PROTO_PAP ? "PAP"
+                    : proto == PPP_PROTO_CHAP ? "CHAP" : proto == PPP_PROTO_IPCP ? "IPCP"
+                    : proto == PPP_PROTO_CCP ? "CCP" : NULL;
+    const char *cn = NULL;
+    char pbuf[8], cbuf[16];
+    size_t at, i;
+    int r;
+
+    if (!buf || !n) return;
+    if (!pn_) { snprintf(pbuf, sizeof pbuf, "%04x", (unsigned)proto); pn_ = pbuf; }
+    r = snprintf(buf, n, "PPP +%lu.%03lu s %s %s", (unsigned long)(ms / 1000u), (unsigned long)(ms % 1000u),
+                 out ? "out" : "in ", pn_);
+    at = r < 0 ? 0 : (size_t)r < n ? (size_t)r : n - 1;
+    if (pn < 4) {
+        snprintf(buf + at, n - at, " %lu octet%s", (unsigned long)len, len == 1 ? "" : "s");
+        return;
+    }
+    if (proto == PPP_PROTO_PAP) cn = pkt[0] < 4 ? pap[pkt[0]] : NULL;
+    else if (proto == PPP_PROTO_CHAP) cn = pkt[0] < 5 ? chap[pkt[0]] : NULL;
+    else if (proto == PPP_PROTO_LCP || proto == PPP_PROTO_IPCP || proto == PPP_PROTO_CCP)
+        cn = pkt[0] < 16 && pkt[0] && (proto == PPP_PROTO_CCP || pkt[0] < 14) ? cp[pkt[0]] : NULL;
+    if (!cn || !*cn) { snprintf(cbuf, sizeof cbuf, "code %u", (unsigned)pkt[0]); cn = cbuf; }
+    r = snprintf(buf + at, n - at, " %s id %u, %lu octets", cn, (unsigned)pkt[1], (unsigned long)len);
+    at += r < 0 ? 0 : (size_t)r < n - at ? (size_t)r : n - at - 1;
+    for (i = 4; i < pn && at + 4 < n; i++) {
+        r = snprintf(buf + at, n - at, "%s%02x", i == 4 ? ": " : " ", (unsigned)pkt[i]);
+        at += r < 0 ? 0 : (size_t)r < n - at ? (size_t)r : n - at - 1;
+    }
+    if (pn < len && pn > 4 && at + 4 < n)
+        snprintf(buf + at, n - at, " ...");
+}
+
 size_t srv_k56_text(const v90m_k56 *k, char *buf, size_t n)
 {
     static const char *const vers[4] = { "no versions", "version 1", "version 2", "versions 1 and 2" };
@@ -213,9 +279,10 @@ static void adopt(srv_t *s, const cfg_t *cfg)
     s->cfg = *cfg; s->have_next = 0;
     s->status.service = cfg->service;
     s->status.v92 = cfg->v92 && full_options(cfg, 0);
-    /* encryption replaces plain compression (call_start) */
-    s->status.ppp_compression = cfg->compression && !cfg->encryption && full_options(cfg, 0);
-    s->status.ppp_encryption = cfg->encryption && full_options(cfg, 0);
+    s->status.ppp_compression = cfg->compression && full_options(cfg, 0);
+    /* MPPE for a caller that asks: a login offers MS-CHAPv2 first
+     * (call_start), never on a console or WebTV port */
+    s->status.ppp_encryption = cfg->auth != CFG_AUTH_NONE && full_options(cfg, 0) && cfg->service != CFG_SERVICE_WEBTV;
     for (i = 0; i < CFG_MAX_USERS; i++) {
         s->users[i].name = s->cfg.users[i].name;
         s->users[i].secret = s->cfg.users[i].secret;
@@ -390,22 +457,23 @@ static void call_start(srv_t *s)
         d.v42.lapm.v42bis_tx = 0; d.v42.lapm.v42bis_rx = 0;
         d.v42.lapm.v44_tx = 0; d.v42.lapm.v44_rx = 0;
     }
-    /* [ppp] encryption, decided once so the authentication, the encryption
-     * and the compression below agree: never on a console port, which can
-     * do neither MS-CHAPv2 nor MPPE and keeps the port's own login */
-    enc = c->encryption && full_options(c, bbs) && !s->webtv;
+    /* Encryption on request: with a login (CHAP or PAP), MS-CHAPv2 is
+     * offered first, then CHAP-MD5, then (a PAP port) PAP, each for a
+     * caller that Naks or Rejects the one before; so a caller that wants
+     * MPPE has the keys for it and gets it (ppp.h, encrypt 0), and one
+     * that does not ask is served in the clear. Never on a console port,
+     * which keeps the port's own login, nor for a WebTV box. */
+    enc = c->auth != CFG_AUTH_NONE && full_options(c, bbs) && !s->webtv;
     if (s->webtv) {
         /* the box's own PAP login, whoever it says it is; some boxes give
          * up on a link that asks for none */
         d.ppp.auth = PPP_AUTH_PAP;
         d.ppp.pap_cb = webtv_pap;
     } else if (enc)
-        /* MPPE needs the MS-CHAPv2 keys and must not fall back: force the
-         * authentication regardless of the [ppp] auth setting */
-        d.ppp.auth = PPP_AUTH_MSCHAPV2;
+        d.ppp.auth = PPP_AUTH_MSCHAPV2 | PPP_AUTH_CHAP | (c->auth == CFG_AUTH_PAP ? PPP_AUTH_PAP : 0);
     else
         d.ppp.auth = c->auth == CFG_AUTH_CHAP ? PPP_AUTH_CHAP : c->auth == CFG_AUTH_PAP ? PPP_AUTH_PAP : PPP_AUTH_NONE;
-    d.ppp.encrypt = enc;
+    d.ppp.encrypt = 0;              /* on request, never required */
     d.ppp.users = s->users; d.ppp.n_users = (size_t)c->n_users;
     d.ppp.our_ip = c->ppp_local; d.ppp.peer_ip = c->ppp_peer;
     /* the callers' name server: the box (dnsrelay.h), or the servers themselves */
@@ -413,10 +481,9 @@ static void call_start(srv_t *s)
     else { d.ppp.dns1 = c->dns[0]; d.ppp.dns2 = c->dns[1]; }
     d.ppp.mru = (uint16_t)c->mru;
     d.ppp.echo_interval_ms = (uint32_t)c->echo_interval * 1000u;
-    /* [ppp] compression: CCP with Deflate and MPPC, or no CCP at all. When
-     * encryption is required, CCP carries only MPPE (no plain compression to
-     * fall back to), so drop Deflate/MPPC. */
-    d.ppp.comp = (enc || !c->compression) ? PPP_COMP_NONE : (PPP_COMP_DEFLATE | PPP_COMP_MPPC);
+    /* [ppp] compression: CCP with Deflate and MPPC; off, CCP only for a
+     * caller that asks for MPPE */
+    d.ppp.comp = !c->compression ? PPP_COMP_NONE : (PPP_COMP_DEFLATE | PPP_COMP_MPPC);
     if (for_console(c) && !bbs) {
         /* The number and the login are the port's, as for every service.
          * Whatever [ppp] and [network] say: no CCP (one game is known to
@@ -432,6 +499,7 @@ static void call_start(srv_t *s)
     d.ppp.seed = s->seed ^ s->clock;
     if (s->entropy_n) { d.ppp.entropy = s->entropy; d.ppp.entropy_n = s->entropy_n; }
     d.ppp.ctx = s; d.ppp.ip_rx = ip_from_caller;
+    d.ppp.trace = s->ppp_trace;
     if (for_link(c) || bbs || acts) d.raw_rx = raw_from_caller;
     d.raw_ec = bbs;
     /* The terminal menu on a PPP service's own number: the call starts as

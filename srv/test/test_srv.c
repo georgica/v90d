@@ -921,10 +921,8 @@ static void test_dreamcast_call(void)
 
     base_cfg(&c); c.rings = 0; c.auth = CFG_AUTH_PAP; c.v92 = 1;
     c.service = CFG_SERVICE_DREAMCAST;
-    /* [ppp] encryption is ignored on a console port: the console keeps the
-     * port's own login (PAP here, which is all this caller does) instead of
-     * being asked for MS-CHAPv2 it cannot do */
-    c.encryption = 1;
+    /* no encryption on a console port: the console keeps the port's own
+     * login (PAP here, which is all this caller does) */
     line_init();
     srv_init(&S, &c, 77, lan_rx, NULL);
     CHECK_EQ_I(S.status.service, CFG_SERVICE_DREAMCAST);
@@ -967,17 +965,19 @@ static void test_dreamcast_call(void)
     /* the Internet service on the same settings: the box's own name
      * servers, V.92 as set, and the packets as they came */
     c.service = CFG_SERVICE_INTERNET;
-    /* encryption on an Internet port does apply, and replaces compression */
-    line_init();
-    srv_init(&S, &c, 78, lan_rx, NULL);
-    CHECK_EQ_I(S.status.ppp_encryption, 1); CHECK_EQ_I(S.status.ppp_compression, 0);
-    c.encryption = 0;       /* this caller does PAP only */
+    /* encryption on request on an Internet port: the login offers MS-CHAPv2
+     * first (then CHAP-MD5, then the port's PAP); compression stays on.
+     * This caller does PAP only and gets in with it. */
     line_init();
     srv_init(&S, &c, 78, lan_rx, NULL);
     CHECK_EQ_I(S.status.v92, 1); CHECK_EQ_I(S.status.ppp_compression, 1);
+    CHECK_EQ_I(S.status.ppp_encryption, 1);
     place_call("5551234", 6000);
     start_modem(0, "alice", "wonderland");
     CHECK(wait_ip(20000) > 0);
+    CHECK_EQ_I((int)S.dce.cfg.ppp.auth, (int)(PPP_AUTH_MSCHAPV2 | PPP_AUTH_CHAP | PPP_AUTH_PAP));
+    CHECK_EQ_I(S.dce.cfg.ppp.encrypt, 0);
+    CHECK(strcmp(S.status.peer_name, "alice") == 0);
     CHECK(C.ppp.dns1 == c.ppp_local);      /* [network] dns_relay, on by default: the box answers */
     CHECK(C.ppp.dns2 == 0);
     mktcp(p, 30, 1024, 80, 0x10);
@@ -2025,6 +2025,47 @@ static void test_k56_text(void)
     CHECK(srv_k56_text(NULL, b, sizeof b) == 0 && b[0] == 0);
 }
 
+/* the log line for a caller that asked for MPPE when none was agreed
+ * (srv_mppe_note): what a Windows error 742 looks like from our side */
+static void test_mppe_note(void)
+{
+    ppp_counters_t k; char b[200];
+    memset(&k, 0, sizeof k);
+    CHECK(srv_mppe_note(&k, b, sizeof b) == 0 && b[0] == 0);         /* asked nothing */
+    k.mppe_seen = PPP_MPPE_SEEN_REQ; k.mppe_peer_req = 0x00000001;   /* MPPC only: no encryption asked */
+    CHECK(srv_mppe_note(&k, b, sizeof b) == 0);
+    k.mppe_peer_req = 0x00000021;                                     /* MPPC and 40-bit */
+    CHECK(srv_mppe_note(&k, b, sizeof b) > 0);
+    CHECK(strcmp(b, "the caller asked for encryption (option 18 00000021: 40-bit) and none was agreed") == 0);
+    k.mppe_peer_req = 0x010000e0;
+    srv_mppe_note(&k, b, sizeof b);
+    CHECK(strcmp(b, "the caller asked for encryption (option 18 010000e0: 128-bit, 56-bit, 40-bit, stateless) and none was agreed") == 0);
+    k.comp_tx = PPP_COMP_MPPE;                                        /* agreed: nothing to say */
+    CHECK(srv_mppe_note(&k, b, sizeof b) == 0 && b[0] == 0);
+    CHECK(srv_mppe_note(NULL, b, sizeof b) == 0);
+}
+
+/* one line of the PPP trace (srv_ppp_trace_text) */
+static void test_ppp_trace_text(void)
+{
+    static const uint8_t ccp[10] = { 1, 5, 0, 10, 18, 6, 0, 0, 0, 0x21 };
+    static const uint8_t pap[4] = { 1, 7, 0, 17 };
+    static const uint8_t odd[6] = { 9, 1, 0, 6, 0xde, 0xad };
+    char b[300];
+    srv_ppp_trace_text(0, 1234, PPP_PROTO_CCP, ccp, sizeof ccp, sizeof ccp, b, sizeof b);
+    CHECK(strcmp(b, "PPP +1.234 s in  CCP Configure-Request id 5, 10 octets: 12 06 00 00 00 21") == 0);
+    srv_ppp_trace_text(1, 50, PPP_PROTO_PAP, pap, 4, 17, b, sizeof b);
+    CHECK(strcmp(b, "PPP +0.050 s out PAP Authenticate-Request id 7, 17 octets") == 0);
+    srv_ppp_trace_text(1, 0, PPP_PROTO_LCP, odd, sizeof odd, 80, b, sizeof b);
+    CHECK(strcmp(b, "PPP +0.000 s out LCP Echo-Request id 1, 80 octets: de ad ...") == 0);
+    srv_ppp_trace_text(0, 0, 0x8057, odd, sizeof odd, sizeof odd, b, sizeof b);
+    CHECK(strcmp(b, "PPP +0.000 s in  8057 code 9 id 1, 6 octets: de ad") == 0);
+    srv_ppp_trace_text(0, 0, PPP_PROTO_CCP, odd, 1, 1, b, sizeof b);   /* too short for a header */
+    CHECK(strcmp(b, "PPP +0.000 s in  CCP 1 octet") == 0);
+    srv_ppp_trace_text(0, 0, PPP_PROTO_CCP, ccp, sizeof ccp, sizeof ccp, b, 20);
+    CHECK(strlen(b) == 19);
+}
+
 static void test_heavy_guard(void)
 {
     cfg_t c; int slot = 0;
@@ -2107,7 +2148,7 @@ static void test_webtv(void)
     c.service = CFG_SERVICE_WEBTV;
     c.modulations |= CFG_MOD_V90 | CFG_MOD_V34;
     c.v92 = 1; c.x2 = 1;
-    c.encryption = 1;                   /* MPPE asked for: not for a WebTV box */
+    c.auth = CFG_AUTH_CHAP;             /* MS-CHAPv2 and MPPE offered: not to a WebTV box */
     c.svc_menu = 1;                     /* the terminal menu: not for a WebTV box */
 
     webtv_call(&c, &slot, "18009328800");
@@ -2121,7 +2162,6 @@ static void test_webtv(void)
     /* V.34 towards a box no faster than its own line probe said */
     CHECK((S.dce.cfg.modulations & V90M_OPT_V34_TX_CAP) != 0);
     /* a box's own login, nobody's on this port: connected */
-    c.encryption = 0;
     hang_up();
     webtv_call(&c, &slot, "8009328800");
     CHECK_EQ_I(srv_webtv(&S), 1);
@@ -2276,6 +2316,8 @@ int main(void)
     test_v32bis_call();
     test_heavy_guard();
     test_k56_text();
+    test_mppe_note();
+    test_ppp_trace_text();
     /* the same server on a line with linear receive (srv_tick_lin): whole
      * calls of each kind, with the same expectations */
     printf("  with linear receive:\n");

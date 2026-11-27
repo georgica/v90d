@@ -76,7 +76,6 @@ static const char l_mods[]   = "v90, v34, v32bis, v22bis, v22, v21";
 static void port_take(cfg_port_t *p, const cfg_t *c)
 {
     p->ppp_peer = c->ppp_peer;
-    p->encryption = c->encryption;
     p->modulations = c->modulations; p->max_down = c->max_down; p->max_up = c->max_up;
     p->tx_level = c->tx_level; p->v42 = c->v42; p->v42bis = c->v42bis; p->v92 = c->v92; p->x2 = c->x2; p->k56 = c->k56;
     p->rings = c->rings; p->law = c->law;
@@ -89,7 +88,6 @@ static void port_take(cfg_port_t *p, const cfg_t *c)
 static void port_give(const cfg_port_t *p, cfg_t *c)
 {
     c->ppp_peer = p->ppp_peer;
-    c->encryption = p->encryption;
     c->modulations = p->modulations; c->max_down = p->max_down; c->max_up = p->max_up;
     c->tx_level = p->tx_level; c->v42 = p->v42; c->v42bis = p->v42bis; c->v92 = p->v92; c->x2 = p->x2; c->k56 = p->k56;
     c->rings = p->rings; c->law = p->law;
@@ -129,7 +127,6 @@ void cfg_default(cfg_t *c)
     c->mru           = 1500;
     c->echo_interval = 30;
     c->compression   = 1;
-    c->encryption    = 0;
     c->modulations   = CFG_MOD_ALL;
     c->max_down      = 56000;
     c->max_up        = 33600;
@@ -383,7 +380,6 @@ static int validate(const cfg_t *c, char *msg, int *k1, int *k2)
     *k1 = K_MRU;       if (rng(msg, K_MRU, c->mru, 68, 1500)) return -1;
     *k1 = K_ECHO;      if (rng(msg, K_ECHO, c->echo_interval, 0, 3600)) return -1;
     *k1 = K_COMPRESSION; if (en(msg, K_COMPRESSION, c->compression, 2)) return -1;
-    *k1 = K_ENCRYPTION; if (en(msg, K_ENCRYPTION, c->encryption, 2)) return -1;
 
     if (validate_port(c, 0, msg, k1)) return -1;
     *k1 = K_LISTEN;    if (en(msg, K_LISTEN, c->status_listen, 2)) return -1;
@@ -476,11 +472,6 @@ static int validate(const cfg_t *c, char *msg, int *k1, int *k2)
         *k1 = K_AUTH; *k2 = K_USER;
         return kerr(msg, K_AUTH, "%s needs at least one user", n_auth[c->auth]);
     }
-    if ((c->encryption || c->port2.encryption) && c->n_users == 0) {
-        /* the user list is shared, so either port needing MPPE needs a user */
-        *k1 = c->encryption ? K_ENCRYPTION : K_ENCRYPTION2; *k2 = K_USER;
-        return kerr(msg, *k1, "encryption needs MS-CHAPv2, so at least one user");
-    }
     if (modem_rules(c, 0, msg, k1, k2)) return -1;
 
     /* port 2 */
@@ -488,7 +479,6 @@ static int validate(const cfg_t *c, char *msg, int *k1, int *k2)
         cfg_t two;
         cfg_for_port(c, 1, &two);
         *k2 = -1;
-        *k1 = K_ENCRYPTION2; if (en(msg, K_ENCRYPTION2, two.encryption, 2)) return -1;
         if (validate_port(&two, K2_OFF, msg, k1)) return -1;
         if (modem_rules(&two, K2_OFF, msg, k1, k2)) return -1;
         /* x2 and k56 may be on for both ports: the daemon serves only one heavy
@@ -839,8 +829,9 @@ static int set_value(cfg_t *c, pctx_t *px, int k, int mk, int line, const char *
     case K_MRU:       return set_int(&c->mru, mk, v, msg);
     case K_ECHO:      return set_int(&c->echo_interval, mk, v, msg);
     case K_COMPRESSION: return set_enum(&c->compression, mk, v, n_onoff, 2, l_onoff, msg);
-    case K_ENCRYPTION: return set_enum(&c->encryption, mk, v, n_onoff, 2, l_onoff, msg);
-    case K_ENCRYPTION2: return set_enum(&px->two.encryption, mk, v, n_onoff, 2, l_onoff, msg);
+    /* gone in 0.14 (encryption is given when the caller asks): an older
+     * file's line is read and set aside */
+    case K_ENCRYPTION: case K_ENCRYPTION2: { int old; return set_enum(&old, mk, v, n_onoff, 2, l_onoff, msg); }
     case K_USER:      return set_user(c, px, line, v, msg);
     case K_SVC:       return set_service(c, v, msg);
     case K_SVC_NETSTALGIA: return set_enum(&c->svc_netstalgia, mk, v, n_onoff, 2, l_onoff, msg);
@@ -1158,8 +1149,6 @@ int cfg_write(const cfg_t *c, int with_secrets, char *buf, size_t cap)
     w_int(&s, K_MRU, c->mru);
     w_int(&s, K_ECHO, c->echo_interval);
     w_str(&s, K_COMPRESSION, nm(n_onoff, 2, c->compression));
-    w_str(&s, K_ENCRYPTION, nm(n_onoff, 2, c->encryption));
-    w_str(&s, K_ENCRYPTION2, nm(n_onoff, 2, c->port2.encryption));
     n = c->n_users < 0 ? 0 : c->n_users > CFG_MAX_USERS ? CFG_MAX_USERS : c->n_users;
     for (i = 0; i < n; i++) {
         w_key(&s, K_USER);

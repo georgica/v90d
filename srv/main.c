@@ -346,7 +346,7 @@ static void adopt(const cfg_t *n)
         if (view.dc_lan != S[i].cfg.dc_lan) net_dirty = 1;
         if (view.webtv_server != S[i].cfg.webtv_server || view.webtv_addr != S[i].cfg.webtv_addr) net_dirty = 1;   /* a Dreamcast's 10.0.1.129 */
         if (view.ppp_local != S[i].cfg.ppp_local || view.ppp_peer != S[i].cfg.ppp_peer || view.nat != S[i].cfg.nat || view.service != S[i].cfg.service || view.mru != S[i].cfg.mru
-            || view.encryption != S[i].cfg.encryption)      /* the tun MTU follows it (netsvc.c) */
+            || (view.auth != CFG_AUTH_NONE) != (S[i].cfg.auth != CFG_AUTH_NONE))  /* the tun MTU follows it: MPPE possible (netsvc.c) */
             net_dirty = 1;
         srv_reconfigure(&S[i], &view);
     }
@@ -388,6 +388,18 @@ static int on_save(void *ctx, const cfg_t *n)
 static const char *const tel_name[] = { "answered", "busy", "wrong number", "abandoned", "line dropped", "session limit", "idle timeout" };
 static const char *const mod_name[] = { "no carrier", "V.90", "V.34", "V.32bis", "V.22bis", "V.22", "V.21", "V.92", "Bell 103", "Bell 212A" };
 
+/* each PPP control packet of a call, at debug level (set the log level to
+ * debug to see a call's LCP, authentication, IPCP and CCP exchange) */
+static void ppp_trace_log(void *ctx, int out, uint32_t ms, uint16_t proto, const uint8_t *pkt, size_t pn, size_t len)
+{
+    char who[12] = "", t[300];
+    unsigned port = (unsigned)((srv_t *)ctx - S) + 1u;
+    if (log_level < CFG_LOG_DEBUG) return;
+    if (n_ports > 1) snprintf(who, sizeof who, "port %u: ", port % 10u);
+    srv_ppp_trace_text(out, ms, proto, pkt, pn, len, t, sizeof t);
+    logf_(CFG_LOG_DEBUG, "%s%s", who, t);
+}
+
 /* PPP compression (CCP) of the call that ended: one line, only if it was used */
 static void log_ppp_comp(const char *who, const ppp_t *ppp)
 {
@@ -399,15 +411,17 @@ static void log_ppp_comp(const char *who, const ppp_t *ppp)
     if (!k->ccp_opens) return;
     at = k->comp_tx < 5 ? k->comp_tx : 0;
     ar = k->comp_rx < 5 ? k->comp_rx : 0;
+    char key[16] = "";
     if (at == PPP_COMP_MPPE && (k->mppe_stateful & 1)) at = 5;
     if (ar == PPP_COMP_MPPE && (k->mppe_stateful & 2)) ar = 5;
+    if (k->mppe_keybits) snprintf(key, sizeof key, ", %u-bit keys", (unsigned)k->mppe_keybits);
     logf_(CFG_LOG_INFO, "%s  PPP compression: to caller %s %lu -> %lu octets (%lu packets sent as they were), from caller %s %lu -> %lu;"
-          " resets asked of us %lu, by us %lu (%lu packets dropped), CCP opened %lu time(s)",
+          " resets asked of us %lu, by us %lu (%lu packets dropped), CCP opened %lu time(s)%s",
           who, alg[at], (unsigned long)k->comp_tx_in, (unsigned long)k->comp_tx_out,
           (unsigned long)k->comp_tx_native, alg[ar],
           (unsigned long)k->comp_rx_in, (unsigned long)k->comp_rx_out,
           (unsigned long)k->comp_tx_resets, (unsigned long)k->comp_rx_errors, (unsigned long)k->comp_rx_dropped,
-          (unsigned long)k->ccp_opens);
+          (unsigned long)k->ccp_opens, key);
 }
 
 /* How PPP ended, when it was not an ordinary hang-up; with encryption
@@ -419,11 +433,16 @@ static void log_ppp_end(const char *who, const dce_t *d)
         "the caller refused every login method allowed", "wrong name or password",
         "the caller never logged in", "the caller stopped answering echo requests",
         "looped back (heard our own magic number)", "IPCP did not converge",
-        "encryption is required and MPPE was not agreed" };
+        "encryption is required and MPPE was not agreed",
+        "encryption fell out of step after a long outage" };
     ppp_status_t ps;
     const ppp_counters_t *k = &ps.counters;
-    char mppe[96] = "";
+    char mppe[96] = "", note[200];
     ppp_get_status(&d->ppp, &ps);
+    /* a caller that wanted encryption and did not get it, however the call
+     * ended (Windows hangs up itself, error 742) */
+    if (d->ppp_end != PPP_END_ENCRYPT_REQUIRED && srv_mppe_note(k, note, sizeof note))
+        logf_(CFG_LOG_INFO, "%s  PPP: %s", who, note);
     if (d->ppp_end == PPP_END_NONE || d->ppp_end == PPP_END_PEER_TERMINATED ||
         d->ppp_end == PPP_END_LOWER_DOWN || d->ppp_end == PPP_END_LOCAL_CLOSE ||
         (unsigned)d->ppp_end >= sizeof why / sizeof why[0]) return;
@@ -660,6 +679,7 @@ int main(int argc, char **argv)
         srv_set_echo_delay(&S[p], echo_delay);
         srv_set_max_tx_code(&S[p], max_tx_code);
         srv_set_originate(&S[p], originate);
+        srv_set_ppp_trace(&S[p], ppp_trace_log);
         srv_set_heavy_slot(&S[p], &heavy_inflight);   /* one heavy call (x2 or K56flex) at a time across the ports */
         if ((size_t)p < strlen(rx_formats)) {
             if (line_set_linear(&line[p], rx_formats[p] == 'l') < 0)

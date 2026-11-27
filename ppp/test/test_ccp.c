@@ -1679,6 +1679,215 @@ static void mppe_open(ppp_config_t *cfg)
 }
 
 /* the corners of MPPE found in review */
+/* MPPE that can no longer get back in step (the peer's count went further
+ * than the window from the last packet we decrypted, after a long outage)
+ * ends the link: it would stay up carrying nothing, and re-keying would
+ * reuse the keystream. A few such packets are only dropped. */
+static void test_mppe_lost(void)
+{
+    ppp_config_t cfg;
+    static ppp_mppe_t peer;
+    static const uint8_t ompe[6] = { 18, 6, 0x01, 0x00, 0x00, 0x40 };
+    static const uint8_t ip[40] = { 0x45, 0x00, 0x00, 0x28 };
+    uint8_t enc[128], plain[2 + 40];
+    unsigned i;
+    size_t n;
+
+    for (i = 0; i < 16; i++) { inj_s[i] = (uint8_t)(i + 1); inj_r[i] = (uint8_t)(i + 101); }
+    base_cfg(&cfg);
+    cfg.comp = 0;
+    cfg.encrypt = 1;
+    inject_mppe = 1;
+    up(&cfg);
+    inject_mppe = 0;
+    push_cp(P_CCP, PPP_CONF_REQ, 20, ompe, 6);
+    pull();
+    push_cp(P_CCP, PPP_CONF_ACK, scr.d[1], scr.d + 4, scr.n - 4);
+    pull();
+    CHECK_EQ_I(status()->comp_rx, PPP_COMP_MPPE);
+    ppp_mppe_begin(&peer, inj_r, inj_s, 16, PPP_MPPE_FORCE_NONE);
+    plain[0] = 0x00; plain[1] = 0x21;
+    memcpy(plain + 2, ip, sizeof ip);
+    n = ppp_mppe_encrypt(&peer, plain, sizeof plain, enc, sizeof enc);
+    ip_count = 0;
+    push(P_COMP, enc, n);
+    CHECK_EQ_I(ip_count, 1);
+    for (i = 0; i < PPP_MPPE_WINDOW; i++)                  /* a long outage */
+        (void)ppp_mppe_encrypt(&peer, plain, sizeof plain, enc, sizeof enc);
+    for (i = 0; i < PPP_MPPE_LATE_MAX - 1; i++) {
+        n = ppp_mppe_encrypt(&peer, plain, sizeof plain, enc, sizeof enc);
+        push(P_COMP, enc, n);
+    }
+    pull();
+    CHECK_EQ_I(status()->end_reason, PPP_END_NONE);         /* dropped so far */
+    CHECK_EQ_I(ip_count, 1);
+    n = ppp_mppe_encrypt(&peer, plain, sizeof plain, enc, sizeof enc);
+    push(P_COMP, enc, n);
+    pull();
+    CHECK_EQ_I(status()->end_reason, PPP_END_MPPE_LOST);
+    CHECK_EQ_I(ip_count, 1);
+}
+
+/* What the peer asked for on option 18 is kept for the log whether or not
+ * we encrypt: a client that wants MPPE from a server that does not
+ * encrypt (Windows error 742) shows its request. */
+static void test_mppe_logged(void)
+{
+    ppp_config_t cfg;
+    static const uint8_t req[6] = { 18, 6, 0, 0, 0, 0x21 };    /* MPPC and 40-bit */
+
+    base_cfg(&cfg);
+    cfg.comp = PPP_COMP_MPPC;
+    cfg.encrypt = 0;
+    up(&cfg);
+    push_cp(P_CCP, PPP_CONF_REQ, 5, req, 6);
+    pull();
+    CHECK(find(P_CCP, PPP_CONF_NAK) != NULL);               /* toward MPPC alone */
+    CHECK(status()->counters.mppe_seen & PPP_MPPE_SEEN_REQ);
+    CHECK_EQ_I((int)status()->counters.mppe_peer_req, 0x21);
+}
+
+/* Encryption on request (cfg.encrypt 0, the default): a caller that asks
+ * for MPPE gets it, given MS-CHAPv2's keys; one that does not gets the
+ * compression it asks for, in the clear. Once a caller has asked, nothing
+ * goes in the clear either way. */
+static void test_mppe_on_request(void)
+{
+    ppp_config_t cfg;
+    frame_t *f;
+    static const uint8_t w60[6] = { 18, 6, 0, 0, 0, 0x60 }, s128[6] = { 18, 6, 0, 0, 0, 0x40 };
+    static const uint8_t d15[4] = { O26(15) };
+    static const uint8_t ip[40] = { 0x45, 0x00, 0x00, 0x28 };
+    unsigned i;
+
+    for (i = 0; i < 16; i++) { inj_s[i] = (uint8_t)(i + 1); inj_r[i] = (uint8_t)(i + 101); }
+
+    /* (a) Windows: asks for stateful MPPE. With the keys in hand CCP waits
+     * for the caller's request first (pppd with require-mppe gives up on a
+     * server whose first request is not MPPE): ours then matches it */
+    base_cfg(&cfg);
+    cfg.comp = BOTH;
+    inject_mppe = 1;
+    up(&cfg);
+    inject_mppe = 0;
+    CHECK(!scr_new);                                               /* nothing of ours yet */
+    CHECK_EQ_I(ppp_send_ip(&S, ip, sizeof ip), 0);                /* the clear, until it asks */
+    pull();
+    push_cp(P_CCP, PPP_CONF_REQ, 5, w60, 6);
+    pull();
+    CHECK(scr_new && same(&scr, s128, 6));                         /* ours: MPPE, stateful, 128 */
+    f = find(P_CCP, PPP_CONF_NAK);
+    CHECK(f && same(f, s128, 6));                                  /* its: toward one key length */
+    CHECK_EQ_I(ppp_send_ip(&S, ip, sizeof ip), PPP_ERR_DOWN);     /* asked: no cleartext now */
+    push_cp(P_CCP, PPP_CONF_ACK, scr.d[1], scr.d + 4, scr.n - 4);
+    push_cp(P_CCP, PPP_CONF_REQ, 6, s128, 6);
+    pull();
+    CHECK(find(P_CCP, PPP_CONF_ACK) != NULL);
+    ppp_tick(&S, 10);
+    pull();
+    CHECK_EQ_I(status()->end_reason, PPP_END_NONE);
+    CHECK_EQ_I(status()->comp_tx, PPP_COMP_MPPE);
+    CHECK_EQ_I(status()->comp_rx, PPP_COMP_MPPE);
+    CHECK_EQ_I(status()->counters.mppe_keybits, 128);
+    CHECK_EQ_I(ppp_send_ip(&S, ip, sizeof ip), 0);
+    pull();
+    CHECK(find(P_COMP, 0) != NULL && find(PPP_PROTO_IP, 0) == NULL);
+    /* a cleartext datagram from a caller that asked: dropped */
+    ip_count = 0;
+    push(PPP_PROTO_IP, ip, sizeof ip);
+    CHECK_EQ_I(ip_count, 0);
+
+    /* pppd's require-mppe-128: stateless 128 asked, ours the same at once */
+    {
+        static const uint8_t h128[6] = { 18, 6, 0x01, 0, 0, 0x40 };
+        base_cfg(&cfg);
+        cfg.comp = BOTH;
+        inject_mppe = 1;
+        up(&cfg);
+        inject_mppe = 0;
+        push_cp(P_CCP, PPP_CONF_REQ, 5, h128, 6);
+        pull();
+        CHECK(scr_new && same(&scr, h128, 6));
+        f = find(P_CCP, PPP_CONF_ACK);
+        CHECK(f && same(f, h128, 6));
+        push_cp(P_CCP, PPP_CONF_ACK, scr.d[1], scr.d + 4, scr.n - 4);
+        pull();
+        ppp_tick(&S, 10);
+        pull();
+        CHECK_EQ_I(status()->comp_tx, PPP_COMP_MPPE);
+        CHECK_EQ_I(status()->comp_rx, PPP_COMP_MPPE);
+    }
+
+    /* (b) a caller that asks for no encryption (pppd, Deflate): Deflate, and
+     * IP in the clear before and after */
+    base_cfg(&cfg);
+    cfg.comp = BOTH;
+    inject_mppe = 1;
+    up(&cfg);
+    inject_mppe = 0;
+    CHECK_EQ_I(ppp_send_ip(&S, ip, sizeof ip), 0);
+    push_cp(P_CCP, PPP_CONF_REQ, 5, d15, 4);
+    pull();
+    CHECK(scr_new && scr.n > 4 && scr.d[4] == 26);                 /* ours: Deflate */
+    push_cp(P_CCP, PPP_CONF_ACK, scr.d[1], scr.d + 4, scr.n - 4);
+    pull();
+    ppp_tick(&S, 10);
+    pull();
+    CHECK(status()->ccp_state == PPP_FSM_OPENED);
+    CHECK_EQ_I(status()->comp_tx, PPP_COMP_DEFLATE);
+    CHECK_EQ_I(status()->comp_rx, PPP_COMP_DEFLATE);
+    CHECK_EQ_I(status()->counters.mppe_keybits, 0);
+    CHECK_EQ_I(ppp_send_ip(&S, ip, sizeof ip), 0);
+
+    /* a caller that sends no CCP request: ours goes out a Restart period on */
+    base_cfg(&cfg);
+    cfg.comp = BOTH;
+    inject_mppe = 1;
+    up(&cfg);
+    inject_mppe = 0;
+    CHECK(!scr_new);
+    for (i = 0; i < 40 && !scr_new; i++) { ppp_tick(&S, 100); pull(); }
+    CHECK(scr_new && scr.n > 4 && scr.d[4] == 26);
+    CHECK(i >= 25 && i <= 31);                                     /* the default 3 s */
+
+    /* (c) a caller that asks for Deflate first, Acks ours, then asks for
+     * MPPE: no Deflate one way and MPPE the other, CCP again with MPPE */
+    base_cfg(&cfg);
+    cfg.comp = BOTH;
+    inject_mppe = 1;
+    up(&cfg);
+    inject_mppe = 0;
+    push_cp(P_CCP, PPP_CONF_REQ, 4, d15, 4);
+    pull();
+    push_cp(P_CCP, PPP_CONF_ACK, scr.d[1], scr.d + 4, scr.n - 4); /* our Deflate */
+    pull();
+    scr_new = 0;
+    push_cp(P_CCP, PPP_CONF_REQ, 5, s128, 6);                      /* its MPPE */
+    pull();
+    CHECK(status()->comp_rx != PPP_COMP_DEFLATE || status()->comp_tx != PPP_COMP_MPPE);
+    CHECK(scr_new && scr.n > 4 && scr.d[4] == 18);
+    push_cp(P_CCP, PPP_CONF_ACK, scr.d[1], scr.d + 4, scr.n - 4);
+    if (status()->ccp_state != PPP_FSM_OPENED) {
+        push_cp(P_CCP, PPP_CONF_REQ, 7, s128, 6);
+        pull();
+    }
+    ppp_tick(&S, 10);
+    pull();
+    CHECK_EQ_I(status()->comp_tx, PPP_COMP_MPPE);
+    CHECK_EQ_I(status()->comp_rx, PPP_COMP_MPPE);
+
+    /* (d) no keys (the login was not MS-CHAPv2): its MPPE request is Nak'd
+     * down to MPPC, the call goes on in the clear */
+    base_cfg(&cfg);
+    cfg.comp = BOTH;
+    up(&cfg);
+    push_cp(P_CCP, PPP_CONF_REQ, 5, w60, 6);
+    pull();
+    f = find(P_CCP, PPP_CONF_NAK);
+    CHECK(f && f->n == 10 && f->d[9] == 0x01);
+    CHECK_EQ_I(ppp_send_ip(&S, ip, sizeof ip), 0);
+}
+
 static void test_mppe_edges(void)
 {
     static const uint8_t ompe[6] = { 18, 6, 0x01, 0x00, 0x00, 0x40 };
@@ -2039,28 +2248,201 @@ static void test_mppe_windows(void)
     CHECK_EQ_I(status()->end_reason, PPP_END_NONE);
     CHECK_EQ_I(status()->ip_up, 1);
 
-    /* a client that will not do 128-bit at all (40-bit only): fail closed */
+}
+
+/* A client with short keys only (Windows 9x/ME without the 128-bit
+ * upgrade: 40-bit; some NT clients: 56-bit), stateful as on a modem: its
+ * request is taken as it is, our request for 128-bit is Nak'd down to its
+ * key length and asked for again at that length, and data runs both ways
+ * under 8-octet keys. A client that offers 128-bit too still gets 128. */
+static void short_key(uint32_t bit, int force)
+{
+    ppp_config_t cfg;
+    static ppp_mppe_t peer;
+    static const uint8_t ip[60] = { 0x45, 0x00, 0x00, 0x3c, 0x77 };
+    uint8_t req[6] = { 18, 6, 0, 0, 0, (uint8_t)bit }, enc[128], pt[128], plain[2 + 60];
+    frame_t *f;
+    unsigned i;
+    size_t n;
+    int d;
+
+    for (i = 0; i < 16; i++) { inj_s[i] = (uint8_t)(i + 1); inj_r[i] = (uint8_t)(i + 101); }
     base_cfg(&cfg);
     cfg.encrypt = 1;
     inject_mppe = 1;
     up(&cfg);
     inject_mppe = 0;
-    {
-        static const uint8_t l40[6] = { 18, 6, 0, 0, 0, 0x20 };
-        push_cp(P_CCP, PPP_CONF_NAK, scr.d[1], l40, 6);
+    /* its request (stateful, the one key length): Acked as it is */
+    push_cp(P_CCP, PPP_CONF_REQ, 5, req, 6);
+    pull();
+    f = find(P_CCP, PPP_CONF_ACK);
+    CHECK(f && same(f, req, 6));
+    /* ours, for 128-bit: Nak'd to its key length; asked again at that */
+    scr_new = 0;
+    push_cp(P_CCP, PPP_CONF_NAK, scr.d[1], req, 6);
+    pull();
+    CHECK(scr_new && same(&scr, req, 6));
+    push_cp(P_CCP, PPP_CONF_ACK, scr.d[1], scr.d + 4, scr.n - 4);
+    pull();
+    ppp_tick(&S, 10);
+    pull();
+    CHECK_EQ_I(status()->end_reason, PPP_END_NONE);
+    CHECK(status()->ccp_state == PPP_FSM_OPENED);
+    CHECK_EQ_I(status()->comp_tx, PPP_COMP_MPPE);
+    CHECK_EQ_I(status()->comp_rx, PPP_COMP_MPPE);
+    CHECK_EQ_I(status()->counters.mppe_keybits, bit == 0x20 ? 40 : 56);
+
+    ppp_mppe_begin(&peer, inj_r, inj_s, 8, force);
+    ppp_mppe_stateful(&peer, 1, 1);
+    for (i = 0; i < 300; i++) {                     /* across a flag packet */
+        CHECK_EQ_I(ppp_send_ip(&S, ip, sizeof ip), 0);
+        ppp_tick(&S, 50);
         pull();
-        if (scr_new)
-            push_cp(P_CCP, PPP_CONF_ACK, scr.d[1], scr.d + 4, scr.n - 4);
-        push_cp(P_CCP, PPP_CONF_REQ, 9, l40, 6);
-        pull();
-        CHECK(find(P_CCP, PPP_CONF_ACK) == NULL);
-        for (k = 0; k < 400 && status()->end_reason == PPP_END_NONE; k++) {
-            ppp_tick(&S, 100);
-            pull();
-        }
-        CHECK_EQ_I(status()->end_reason, PPP_END_ENCRYPT_REQUIRED);
-        CHECK(status()->comp_tx != PPP_COMP_MPPE);
+        f = find(P_COMP, 0);
+        CHECK(f != NULL);
+        if (!f) break;
+        d = ppp_mppe_decrypt(&peer, f->d, f->n, pt, sizeof pt);
+        CHECK(d == (int)sizeof ip + 2 && pt[1] == 0x21 && memcmp(pt + 2, ip, sizeof ip) == 0);
     }
+    plain[0] = 0x00; plain[1] = 0x21;
+    memcpy(plain + 2, ip, sizeof ip);
+    ip_count = 0;
+    for (i = 0; i < 300; i++) {
+        n = ppp_mppe_encrypt(&peer, plain, sizeof plain, enc, sizeof enc);
+        push(P_COMP, enc, n);
+    }
+    CHECK_EQ_I(ip_count, 300);
+    CHECK(memcmp(ip_got, ip, sizeof ip) == 0);
+}
+
+static void test_mppe_short_keys(void)
+{
+    ppp_config_t cfg;
+    frame_t *f;
+    static const uint8_t l40[6] = { 18, 6, 0, 0, 0, 0x20 }, both[6] = { 18, 6, 0, 0, 0, 0xe0 },
+                         s128[6] = { 18, 6, 0, 0, 0, 0x40 };
+
+    /* as pppd with require-mppe-40 does: stateless 40-bit requested, and
+     * our 128-bit request Rejected rather than Nak'd. Its own request has
+     * shown its key length: ask again at that, not give up MPPE */
+    {
+        static const uint8_t h40[6] = { 18, 6, 0x01, 0, 0, 0x20 };
+        base_cfg(&cfg);
+        cfg.encrypt = 1;
+        inject_mppe = 1;
+        up(&cfg);
+        inject_mppe = 0;
+        push_cp(P_CCP, PPP_CONF_REQ, 5, h40, 6);
+        pull();
+        f = find(P_CCP, PPP_CONF_ACK);
+        CHECK(f && same(f, h40, 6));
+        scr_new = 0;
+        push_cp(P_CCP, PPP_CONF_REJ, scr.d[1], scr.d + 4, scr.n - 4);
+        pull();
+        CHECK(scr_new && same(&scr, h40, 6));
+        push_cp(P_CCP, PPP_CONF_ACK, scr.d[1], scr.d + 4, scr.n - 4);
+        pull();
+        ppp_tick(&S, 10);
+        pull();
+        CHECK_EQ_I(status()->end_reason, PPP_END_NONE);
+        CHECK_EQ_I(status()->comp_tx, PPP_COMP_MPPE);
+        CHECK_EQ_I(status()->comp_rx, PPP_COMP_MPPE);
+        CHECK_EQ_I(status()->counters.mppe_keybits, 40);
+    }
+
+    /* a Nak (one frame anyone on the line could inject) never takes the
+     * key length below what the peer's own request offered: a peer that
+     * asked for 128 is not talked down to 40 */
+    {
+        static const uint8_t s128s[6] = { 18, 6, 0, 0, 0, 0x40 }, l40s[6] = { 18, 6, 0, 0, 0, 0x20 };
+        int ok40 = 0;
+        unsigned k;
+        base_cfg(&cfg);
+        cfg.encrypt = 1;
+        inject_mppe = 1;
+        up(&cfg);
+        inject_mppe = 0;
+        push_cp(P_CCP, PPP_CONF_REQ, 5, both, 6);           /* the peer offers 40, 56 and 128 */
+        pull();
+        for (k = 0; k < 6; k++) {                           /* the injected Naks */
+            scr_new = 0;
+            push_cp(P_CCP, PPP_CONF_NAK, scr.d[1], l40s, 6);
+            pull();
+            if (scr_new && same(&scr, l40s, 6)) ok40 = 1;
+        }
+        CHECK(!ok40);                                       /* never asked for 40 */
+        push_cp(P_CCP, PPP_CONF_REQ, 6, both, 6);
+        pull();
+        f = find(P_CCP, PPP_CONF_NAK);
+        CHECK(f && same(f, s128, 6));                       /* still 128 for the peer */
+        for (k = 0; k < 400 && status()->end_reason == PPP_END_NONE; k++) { ppp_tick(&S, 100); pull(); }
+        CHECK(status()->counters.mppe_keybits != 40);
+        (void)s128s;
+    }
+    /* the order the other way: the Nak first, then the request for 128 */
+    {
+        static const uint8_t l40s[6] = { 18, 6, 0, 0, 0, 0x20 };
+        base_cfg(&cfg);
+        cfg.encrypt = 1;
+        inject_mppe = 1;
+        up(&cfg);
+        inject_mppe = 0;
+        push_cp(P_CCP, PPP_CONF_NAK, scr.d[1], l40s, 6);
+        pull();
+        push_cp(P_CCP, PPP_CONF_REQ, 5, s128, 6);
+        pull();
+        f = find(P_CCP, PPP_CONF_ACK);
+        CHECK(f && same(f, s128, 6));                       /* 128 Acked, not Nak'd to 40 */
+        scr_new = 0;
+        push_cp(P_CCP, PPP_CONF_ACK, scr.d[1], scr.d + 4, scr.n - 4);
+        pull();
+        ppp_tick(&S, 10);
+        pull();
+        CHECK(status()->counters.mppe_keybits != 40);
+        if (status()->comp_tx == PPP_COMP_MPPE) CHECK_EQ_I(status()->counters.mppe_keybits, 128);
+    }
+
+    short_key(0x20, PPP_MPPE_FORCE_40);             /* 40-bit */
+    short_key(0x80, PPP_MPPE_FORCE_56);             /* 56-bit */
+
+    /* offered 40, 56 and 128 at once: 128 */
+    base_cfg(&cfg);
+    cfg.encrypt = 1;
+    inject_mppe = 1;
+    up(&cfg);
+    inject_mppe = 0;
+    push_cp(P_CCP, PPP_CONF_REQ, 5, both, 6);
+    pull();
+    f = find(P_CCP, PPP_CONF_NAK);
+    CHECK(f && same(f, s128, 6));
+
+    /* MPPE is one key length both ways: a client that Acked our 128-bit
+     * request and then asks for 40-bit itself gets our request again, at
+     * 40-bit, before anything is keyed; never two lengths */
+    base_cfg(&cfg);
+    cfg.encrypt = 1;
+    inject_mppe = 1;
+    up(&cfg);
+    inject_mppe = 0;
+    push_cp(P_CCP, PPP_CONF_ACK, scr.d[1], scr.d + 4, scr.n - 4);
+    pull();
+    scr_new = 0;
+    push_cp(P_CCP, PPP_CONF_REQ, 5, l40, 6);
+    pull();
+    CHECK(status()->comp_tx != PPP_COMP_MPPE);      /* not keyed at two lengths */
+    CHECK(scr_new && same(&scr, l40, 6));
+    push_cp(P_CCP, PPP_CONF_ACK, scr.d[1], scr.d + 4, scr.n - 4);
+    pull();
+    if (status()->ccp_state != PPP_FSM_OPENED) {    /* our renegotiation re-sent nothing to Ack yet */
+        push_cp(P_CCP, PPP_CONF_REQ, 6, l40, 6);
+        pull();
+    }
+    ppp_tick(&S, 10);
+    pull();
+    CHECK_EQ_I(status()->end_reason, PPP_END_NONE);
+    CHECK_EQ_I(status()->comp_tx, PPP_COMP_MPPE);
+    CHECK_EQ_I(status()->comp_rx, PPP_COMP_MPPE);
+    CHECK_EQ_I(status()->counters.mppe_keybits, 40);
 }
 
 /* MPPE fails closed: with encryption required, no cleartext datagram is sent
@@ -2112,6 +2494,10 @@ int main(void)
     test_mppe();
     test_mppe_required();
     test_mppe_edges();
+    test_mppe_lost();
+    test_mppe_short_keys();
+    test_mppe_logged();
+    test_mppe_on_request();
     test_mppe_windows();
     test_deflate_data();
     test_only_ip_is_compressed();

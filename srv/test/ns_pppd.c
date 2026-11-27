@@ -552,22 +552,17 @@ int main(int argc, char **argv)
     for (i = 0; i < sizeof calls / sizeof calls[0] && !dead; i++)
         one_call((int)i, &calls[i], log);
 
-    /* Encryption, against the Linux kernel's ppp_mppe (what Windows clients
-     * were matched against) and pppd's MS-CHAPv2, which also checks our
-     * authenticator response. Port 1 is switched to "PPP encryption: on"
-     * through the daemon's own settings page, as an owner would. */
+    /* Encryption on request, against the Linux kernel's ppp_mppe (what
+     * Windows clients were matched against) and pppd's MS-CHAPv2, which
+     * also checks our authenticator response. No setting: the port's CHAP
+     * login offers MS-CHAPv2 first, and a caller that asks for MPPE gets
+     * it (the calls above asked for none and were served in the clear). */
     if (!dead) {
         static const call_t mppe = {
             "require-mppe-128 (MS-CHAPv2 and 128-bit MPPE, nothing else)",
             "require-mppe-128 refuse-pap refuse-chap refuse-mschap refuse-eap",
             80000, 20000, 30000, "mppe", "mppe", "MPPE 128-bit stateless compression enabled" };
-        static const char req[] = "POST /modem HTTP/1.0\r\n"
-            "Content-Type: application/x-www-form-urlencoded\r\nContent-Length: 13\r\n\r\nencryption=on";
         static char resp[40000];
-        CHECK(http(req, resp, sizeof resp) > 0);
-        if (!strstr(resp, "saved")) printf("    the settings page did not save: %.200s\n", resp);
-        CHECK(strstr(resp, "saved") != NULL);
-        run_ms(3000);                       /* adopted; the network set up again */
         CHECK(http("GET /status.json HTTP/1.0\r\n\r\n", resp, sizeof resp) > 0);
         CHECK(strstr(resp, "\"ppp_encryption\":true") != NULL);
         one_call((int)i, &mppe, log);
@@ -583,6 +578,16 @@ int main(int argc, char **argv)
                 "require-mppe-40 require-mppe-128 mppe-stateful refuse-pap refuse-chap refuse-mschap refuse-eap",
                 40000, 10000, 15000, "mppe", "mppe", "MPPE 128-bit stateless compression enabled" };
             one_call((int)i + 1, &mppe2, log);
+        }
+        /* a caller with 40-bit keys only (as Windows 9x/ME without the
+         * 128-bit upgrade): our first request waits for its, so it is
+         * 40-bit too, and the call runs on the kernel's 40-bit ppp_mppe */
+        if (!dead) {
+            static const call_t mppe3 = {
+                "require-mppe-40 (40-bit keys only)",
+                "require-mppe-40 refuse-pap refuse-chap refuse-mschap refuse-eap",
+                40000, 10000, 15000, "mppe", "mppe", "MPPE 40-bit stateless compression enabled" };
+            one_call((int)i + 2, &mppe3, log);
         }
     }
 

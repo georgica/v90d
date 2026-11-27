@@ -102,15 +102,20 @@ static void test_port2(void)
     CHECK_EQ_S(c.port2.line_number, "5559999"); CHECK_EQ_I(c.port2.line_tones, CFG_TONES_EU);
     CHECK_EQ_I(c.port2.busy_chance, 10); CHECK_EQ_I(c.port2.drop_mean_min, 5);
     CHECK_EQ_I(c.port2.session_limit_min, 60); CHECK_EQ_I(c.port2.idle_timeout_min, 7);
-    /* encryption is per port: off on 1, on on 2 */
-    CHECK_EQ_I(c.encryption, 0); CHECK_EQ_I(c.port2.encryption, 1);
+    /* encryption and encryption2 (gone in 0.14: encryption on request) are
+     * read and set aside: the file still loads, and a save leaves them out */
+    {
+        static char saved[16384];
+        CHECK(cfg_write(&c, 1, saved, sizeof saved) > 0);
+        CHECK(strstr(saved, "encryption") == NULL);
+    }
 
     /* what one line's server is given */
     cfg_for_port(&c, 0, &v);
     CHECK_EQ_I(v.rings, 2); CHECK_EQ_S(v.line_number, "5551111"); CHECK(v.ppp_peer == IP(10, 64, 64, 2));
-    CHECK_EQ_I(v.v92, 1); CHECK_EQ_I(v.encryption, 0);
+    CHECK_EQ_I(v.v92, 1);
     cfg_for_port(&c, 1, &v);
-    CHECK_EQ_I(v.v92, 0); CHECK_EQ_I(v.port2.v92, 1); CHECK_EQ_I(v.encryption, 1);
+    CHECK_EQ_I(v.v92, 0); CHECK_EQ_I(v.port2.v92, 1);
     CHECK_EQ_I(v.rings, 3); CHECK_EQ_S(v.line_number, "5559999"); CHECK(v.ppp_peer == IP(10, 64, 64, 9));
     CHECK_EQ_I(v.modulations, CFG_MOD_V22BIS); CHECK_EQ_I(v.law, CFG_LAW_ALAW);
     CHECK_EQ_I(v.max_down, 2400); CHECK_EQ_I(v.max_up, 1200); CHECK_EQ_I(v.tx_level, -15);
@@ -125,7 +130,7 @@ static void test_port2(void)
     CHECK(strstr(text, "\n[modem2]\nmodulations = v22bis\nmax_downstream = 2400\nmax_upstream = 1200\n"
                        "tx_level = -15\nv42 = on\nv42bis = off\nv92 = off\nx2 = off\nk56 = off\nrings = 3\nlaw = alaw\n") != NULL);
     CHECK(strstr(text, "\nv42bis = on\nv92 = on\nx2 = off\nk56 = off\nrings = 2\n") != NULL);          /* port 1 */
-    CHECK(strstr(text, "\ncompression = on\nencryption = off\nencryption2 = on\n") != NULL);          /* per-port encryption */
+    CHECK(strstr(text, "\ncompression = on\nuser = ") != NULL);          /* no encryption keys (0.14) */
     CHECK(strstr(text, "\n[line2]\nnumber = 5559999\ntones = eu\nbusy_chance = 10\ndrop_mean = 5\n"
                        "session_limit = 60\nidle_timeout = 7\n") != NULL);
     CHECK(strstr(text, "\n[line]\nnumber = 5551111\n") != NULL);
@@ -450,8 +455,7 @@ static const struct { const char *text; int line; const char *what; } bad[] = {
     /* cross-field rules */
     { "[ppp]\nauth = pap\n", 2, "auth: pap needs at least one user" },
     { "[ppp]\n\n\nauth = chap\n", 4, "auth: chap needs at least one user" },
-    { "[ppp]\nencryption = on\n", 2, "encryption needs MS-CHAPv2, so at least one user" },
-    { "[ppp]\nencryption2 = on\n", 2, "encryption needs MS-CHAPv2, so at least one user" },
+    { "[ppp]\nencryption = maybe\n", 2, "'maybe' is not one of: on, off" },   /* an old key, still read */
     { "[modem]\nv42 = off\n", 2, "v42bis = on needs v42 = on" },
     { "[modem]\nv42 = off\nv42bis = on\n", 3, "v42bis = on needs v42 = on" },
     { "[modem]\nx2 = yes\n", 2, "x2: 'yes' is not one of: on, off" },
@@ -759,8 +763,8 @@ static void test_write(void)
     CHECK(n > 0);
     CHECK(strstr(a, "dns2 = none\n") != NULL);
     CHECK(strstr(a, "\nv42bis = off\nv92 = on\nx2 = off\nk56 = off\nrings = 10\n") != NULL);
-    /* PPP compression and per-port encryption are written with the rest of [ppp] */
-    CHECK(strstr(a, "\necho_interval = 0\ncompression = off\nencryption = off\nencryption2 = off\nuser = ") != NULL);
+    /* PPP compression is written with the rest of [ppp] */
+    CHECK(strstr(a, "\necho_interval = 0\ncompression = off\nuser = ") != NULL);
     /* V.92 upstream rates: up to 48000 goes through a write and a parse */
     c.max_up = 48000; c.v92 = 0;
     CHECK(cfg_write(&c, 1, a, sizeof a) > 0);

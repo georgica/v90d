@@ -102,7 +102,9 @@ typedef enum {
     PPP_END_KEEPALIVE,         /* echo requests went unanswered */
     PPP_END_LOOPBACK,          /* we are hearing ourselves */
     PPP_END_IPCP_FAILED,       /* IPCP did not converge or was closed */
-    PPP_END_ENCRYPT_REQUIRED   /* encryption is required but MPPE was not agreed */
+    PPP_END_ENCRYPT_REQUIRED,  /* encryption is required but MPPE was not agreed */
+    PPP_END_MPPE_LOST          /* MPPE fell out of step past recovery (a long
+                                  outage: ppp_mppe_rx_late) */
 } ppp_end_t;
 
 typedef struct {
@@ -163,13 +165,20 @@ typedef struct {
     /* --- packet compression (CCP) --- */
     unsigned comp;             /* PPP_COMP_* mask; 0 = CCP is not spoken
                                   (Protocol-Reject). Default: both */
-    uint8_t  encrypt;          /* nonzero: offer and accept MPPE encryption
-                                  (RFC 3078) in CCP, keyed from MS-CHAPv2
-                                  (needs cfg.auth & PPP_AUTH_MSCHAPV2). When
-                                  on, option 18 carries the 128-bit MPPE bits
-                                  in place of MPPC: stateless asked for first,
-                                  stateful taken when the peer wants it (a
-                                  Windows client on a modem). Default off. */
+    uint8_t  encrypt;          /* 0 (default): MPPE on request -- a caller
+                                  that asks for it in CCP, after an MS-CHAPv2
+                                  login, gets it, and then nothing goes in
+                                  the clear; any other caller gets the
+                                  compression it asks for. Nonzero: MPPE
+                                  required (RFC 3078) in CCP, keyed from
+                                  MS-CHAPv2 (needs cfg.auth &
+                                  PPP_AUTH_MSCHAPV2). When
+                                  on, option 18 carries the MPPE bits in
+                                  place of MPPC: 128-bit keys, or the
+                                  strongest of 56 and 40 a peer without them
+                                  has (Windows 9x/ME); stateless asked for
+                                  first, stateful taken when the peer wants it
+                                  (a Windows client on a modem). Default off. */
     uint8_t  comp_no_rx;       /* nonzero: compress what we send only; ask
                                   the peer for nothing */
     uint8_t  deflate_wbits;    /* Deflate window we ask the peer to use
@@ -202,7 +211,18 @@ typedef struct {
     /* the phase changed; on PPP_PHASE_DEAD the caller should hang up and
      * then call ppp_lower_down() (not from inside this callback) */
     void (*phase_cb)(void *ctx, ppp_phase_t phase);
+    /* Optional, for a per-call log: every control packet (LCP, PAP, CHAP,
+     * IPCP, CCP, any protocol from 0x8000 up) received (out 0) or queued to
+     * send (out 1), never IP. ms is the time since ppp_init (ppp_tick's
+     * sum); pkt the packet from its Code octet, n octets of it (at most
+     * PPP_TRACE_MAX; the 4-octet header alone for PAP and CHAP, so no
+     * password, challenge answer or name is given); len its whole length.
+     * Received packets are traced as they arrive, before they are judged
+     * (also those discarded in the phase they came in). */
+    void (*trace)(void *ctx, int out, uint32_t ms, uint16_t proto,
+                  const uint8_t *pkt, size_t n, size_t len);
 } ppp_config_t;
+#define PPP_TRACE_MAX 64
 
 typedef struct {
     uint32_t rx_frames;        /* good frames */
@@ -239,6 +259,7 @@ typedef struct {
     uint32_t mppe_peer_req, mppe_peer_nak;
     uint8_t  mppe_seen;
     uint8_t  mppe_stateful;    /* MPPE agreed stateful: 1 towards, 2 from the peer */
+    uint8_t  mppe_keybits;     /* MPPE key length agreed: 40, 56 or 128 (0: none) */
 } ppp_counters_t;
 #define PPP_MPPE_SEEN_REQ 1u
 #define PPP_MPPE_SEEN_NAK 2u
@@ -318,6 +339,23 @@ typedef struct ppp {
     uint8_t  cw_want_h;        /* ask for stateless MPPE (H bit) in our next request */
     uint8_t  cw_mppe_h, cpend_mppe_h;  /* the H bit of our last request / of the
                                   peer's request we accepted */
+    uint32_t mppe_key;         /* the MPPE key length bit (S, M or L) we ask for
+                                  and accept: 128-bit until the peer shows it
+                                  has only shorter ones, then its strongest */
+    uint32_t mppe_floor;       /* the strongest key bit of the peer's own
+                                  request (0: none yet): no Nak goes below it */
+    uint32_t cw_mppe_key, cpend_mppe_key;  /* that bit in our last request / in
+                                  the peer's request we accepted */
+    uint8_t  mppe_asked;       /* on request: the caller asked for MPPE (with
+                                  our keys in hand): it gets MPPE, nothing in
+                                  the clear */
+    uint8_t  ccp_switch;       /* ... while our request was for compression:
+                                  make the next one MPPE */
+    uint8_t  mppe_redos;       /* CCP renegotiated for want of MPPE both ways */
+    uint32_t ccp_wait_ms;      /* on request: CCP not opened yet, waiting this
+                                  much longer for the caller's request */
+    uint8_t  ccp_redo;         /* the two directions came up at different key
+                                  lengths: negotiate CCP again (not keyed yet) */
     uint8_t  mppe_started;     /* MPPE was keyed once this authentication; a CCP
                                   re-open must not re-key it (RC4 keystream reuse) */
     ppp_mppe_t mppe;           /* the encryption session, keyed at ccp_up */
