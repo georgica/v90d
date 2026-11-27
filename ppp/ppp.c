@@ -1171,10 +1171,13 @@ static void chap_input(ppp_t *p, const uint8_t *pkt, size_t n)
         }
     } else if (p->auth_proto == PPP_AUTH_MSCHAPV1) {
         /* RFC 2433 section 5: the 49-octet value is LM-Response[24],
-         * NT-Response[24], Flags[1]; flag 1, the NT response counts, 0
-         * (an old client) the LM one. The keys (RFC 3079 section 2) are
-         * the same both ways: 16 octets from the NT hash's hash and the
-         * challenge, 8 for the short ones from the LAN Manager hash. */
+         * NT-Response[24], Flags[1]. Only the NT response (flag 1) is
+         * taken: the LM one alone (flag 0) proves only the password
+         * upper-cased and cut to 14 octets. The keys (RFC 3079 section 2)
+         * are the same both ways: 16 octets from the NT hash's hash and the
+         * challenge, 8 for the short ones from the LAN Manager hash (which
+         * has no challenge in it: Microsoft's design, and all Windows 98
+         * does for 40/56-bit MPPE). */
         size_t k = ul;
         while (k > 0 && user[k - 1] != '\\') k--;
         if (k > 0) {
@@ -1182,13 +1185,12 @@ static void chap_input(ppp_t *p, const uint8_t *pkt, size_t n)
             user += k; ul -= k;
         }
         if (vs == 49) {
-            const uint8_t *lmr = d + 1, *ntr = d + 1 + 24;
+            const uint8_t *ntr = d + 1 + 24;
             int use_nt = d[1 + 48] & 1;
             uint8_t h[16];
-            if (use_nt) ppp_nt_password_hash(secret, sl >= 0 ? (size_t)sl : 0, h);
-            else ppp_lm_password_hash(secret, sl >= 0 ? (size_t)sl : 0, h);
+            ppp_nt_password_hash(secret, sl >= 0 ? (size_t)sl : 0, h);
             ppp_mschap1_response(p->challenge, h, want);
-            ok = sl >= 0 && same_bytes(want, use_nt ? ntr : lmr, 24);
+            ok = sl >= 0 && use_nt && same_bytes(want, ntr, 24);
             ppp_wipe(h, sizeof h);
             if (ok) {
                 ppp_mschap1_mppe_start(secret, (size_t)sl, p->challenge, 16, p->mppe_send);

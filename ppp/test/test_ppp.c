@@ -686,9 +686,9 @@ static void test_chap(void)
 }
 
 /* MS-CHAP v1 (RFC 2433), which Windows 98 needs for MPPE keys: offered
- * first when allowed, an 8-octet challenge, the NT response (or, from an
- * old client, the LM one alone), a plain Success; MPPE keys of both
- * lengths (RFC 3079 section 2: 40/56-bit from the LAN Manager hash) */
+ * first when allowed, an 8-octet challenge, the NT response (never the LM
+ * one alone), a plain Success; MPPE keys of both lengths (RFC 3079
+ * section 2: 40/56-bit from the LAN Manager hash) */
 static void test_mschap1(void)
 {
     ppp_config_t c;
@@ -728,14 +728,17 @@ static void test_mschap1(void)
         CHECK(memcmp(S.mppe_short_send, st, 8) == 0 && memcmp(S.mppe_short_recv, st, 8) == 0);
     }
 
-    /* an old client's LM response alone (flag 0): taken */
+    /* the LM response alone (flag 0) is refused: the LAN Manager hash takes
+     * the password upper-cased and cut to 14 octets, far too weak to log in
+     * with (Windows 98 sends the NT response) */
     start(&c);
     lcp_up(peer_lcp, sizeof peer_lcp);
     ch = find(PPP_PROTO_CHAP, 1);
-    if (ch) mschap1_answer(ch, "alice", "WONDERLAND", 0);      /* the LM hash ignores case */
+    if (ch) mschap1_answer(ch, "alice", "wonderland", 0);
     pull();
-    CHECK(find(PPP_PROTO_CHAP, 3) != NULL);
-    CHECK_EQ_I(status()->phase, PPP_PHASE_NETWORK);
+    CHECK(find(PPP_PROTO_CHAP, 3) == NULL);
+    CHECK(find(PPP_PROTO_CHAP, 4) != NULL);
+    CHECK_EQ_I(status()->end_reason, PPP_END_AUTH_FAILED);
 
     /* wrong secret: Failure "E=691", link ended */
     start(&c);
