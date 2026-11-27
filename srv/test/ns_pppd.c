@@ -477,6 +477,18 @@ static void one_call(int n, const call_t *k, const char *log)
         if (!log_has(log, k->in_log)) printf("    pppd's log lacks \"%s\"\n", k->in_log);
         CHECK(log_has(log, k->in_log));
     }
+    /* Van Jacobson header compression (RFC 1144), on by default at both
+     * ends: our IPCP request offers it (16 slots, slot number may be left
+     * out) and pppd's is Acked, so the kernel's slhc compresses the
+     * transfers above towards us and our ppp_vj towards it. With novj
+     * neither: pppd asks for none and Rejects ours. */
+    if (strstr(k->opts, "novj")) {
+        CHECK(!log_has(log, "sent [IPCP ConfAck id=0x1 <compress VJ"));
+    } else {
+        if (!log_has(log, "rcvd [IPCP ConfReq id=0x1 <compress VJ 0f 01>")) printf("    pppd's log lacks our VJ request\n");
+        CHECK(log_has(log, "rcvd [IPCP ConfReq id=0x1 <compress VJ 0f 01>"));
+        CHECK(log_has(log, "rcvd [IPCP ConfAck id=0x1 <compress VJ"));
+    }
     caller_hangup(&C);
     modem_on = 0; hook = 0; c_tx = 0;
     run_ms(1500);
@@ -492,6 +504,7 @@ int main(int argc, char **argv)
         { "nodeflate (BSD-Compress is all it offers)", "nodeflate", 40000, 0, 10000, "none", "none", "rcvd [CCP ConfRej id=0x1 <bsd v1 15>]" },
         { "nobsdcomp nodeflatedraft (RFC 1979 number only)", "nobsdcomp nodeflatedraft", 80000, 0, 30000, "deflate", "deflate", "Deflate (15) compression enabled" },
         { "noccp", "noccp", 40000, 0, 10000, "none", "none", "sent [LCP ProtRej" },
+        { "novj (no Van Jacobson header compression either way)", "novj", 40000, 0, 10000, "deflate", "deflate", "Deflate (15) compression enabled" },
     };
     static const double one[1] = { 1.0 };
     static char conf[300], log[300], err[CFG_ERR_MAX];

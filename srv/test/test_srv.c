@@ -947,6 +947,7 @@ static void test_dreamcast_call(void)
     run_ms(1100);
     CHECK(strcmp(S.status.peer_name, "alice") == 0);
     CHECK(C.ppp.dns1 == IPA(46, 101, 91, 123)); CHECK(C.ppp.dns2 == IPA(209, 50, 50, 129));
+    CHECK_EQ_I(S.dce.cfg.ppp.no_vj, 1);     /* a console: no VJ, as no CCP */
     CHECK_EQ_I(S.status.ppp_comp_tx, ST_COMP_NONE); CHECK_EQ_I(S.status.ppp_comp_rx, ST_COMP_NONE);
     /* a packet of the console arrives on the LAN side with 64 hops to go */
     mktcp(p, 30, 1024, 80, 0x10);
@@ -977,6 +978,7 @@ static void test_dreamcast_call(void)
     CHECK(wait_ip(20000) > 0);
     CHECK_EQ_I((int)S.dce.cfg.ppp.auth, (int)(PPP_AUTH_MSCHAPV2 | PPP_AUTH_CHAP | PPP_AUTH_PAP));
     CHECK_EQ_I(S.dce.cfg.ppp.encrypt, 0);
+    CHECK_EQ_I(S.dce.cfg.ppp.no_vj, 0);     /* an internet port: VJ offered */
     CHECK(strcmp(S.status.peer_name, "alice") == 0);
     CHECK(C.ppp.dns1 == c.ppp_local);      /* [network] dns_relay, on by default: the box answers */
     CHECK(C.ppp.dns2 == 0);
@@ -2095,6 +2097,25 @@ static void test_qc_text(void)
     CHECK(strlen(b) == 9);
 }
 
+/* the VJ header compression line of a call's log (srv_vj_text) */
+static void test_vj_text(void)
+{
+    ppp_counters_t k; char b[200];
+    memset(&k, 0, sizeof k);
+    CHECK(srv_vj_text(&k, b, sizeof b) == 0 && b[0] == 0);           /* not agreed either way */
+    k.vj_tx_slots = 16; k.vj_rx_slots = 16;
+    k.vj_tx_comp = 950; k.vj_tx_uncomp = 12; k.vj_rx_comp = 400; k.vj_rx_uncomp = 5; k.vj_errors = 2;
+    CHECK(srv_vj_text(&k, b, sizeof b) > 0);
+    CHECK(strcmp(b, "VJ header compression: to caller 950 of 962 TCP packets compressed (16 slots), from caller 400 of 405 (16 slots), 2 dropped") == 0);
+    k.vj_rx_slots = 0; k.vj_rx_comp = k.vj_rx_uncomp = 0; k.vj_errors = 0;
+    srv_vj_text(&k, b, sizeof b);
+    CHECK(strcmp(b, "VJ header compression: to caller 950 of 962 TCP packets compressed (16 slots), from caller not agreed") == 0);
+    k.vj_tx_slots = 0; k.vj_rx_slots = 4;
+    srv_vj_text(&k, b, sizeof b);
+    CHECK(strcmp(b, "VJ header compression: to caller not agreed, from caller 0 of 0 (4 slots)") == 0);
+    CHECK(srv_vj_text(NULL, b, sizeof b) == 0);
+}
+
 static void test_heavy_guard(void)
 {
     cfg_t c; int slot = 0;
@@ -2185,6 +2206,7 @@ static void test_webtv(void)
     CHECK_EQ_I(srv_webtv(&S), 1);
     CHECK_EQ_I((int)S.dce.cfg.ppp.auth, PPP_AUTH_PAP);
     CHECK_EQ_I(S.dce.cfg.ppp.encrypt, 0);
+    CHECK_EQ_I(S.dce.cfg.ppp.no_vj, 1);     /* no VJ header compression for a box */
     CHECK(S.dce.cfg.ppp.pap_cb != NULL && S.dce.cfg.ppp.pap_cb(S.dce.cfg.ppp.ctx, u, 3, pw, 6));
     CHECK(S.link != SRV_LINK_MENU);
     CHECK((S.dce.cfg.modulations & V90M_MOD_V90) != 0);
@@ -2346,6 +2368,7 @@ int main(void)
     test_heavy_guard();
     test_k56_text();
     test_qc_text();
+    test_vj_text();
     test_mppe_note();
     test_ppp_trace_text();
     /* the same server on a line with linear receive (srv_tick_lin): whole

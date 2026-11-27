@@ -3,7 +3,7 @@
  * Implements, from the RFCs: HDLC-like async framing (RFC 1662), LCP
  * (RFC 1661), PAP (RFC 1334) and CHAP-MD5 (RFC 1994) as authenticator,
  * IPCP (RFC 1332) with the DNS options of RFC 1877. We assign the peer its
- * IP address. Van Jacobson compression is rejected, not implemented.
+ * IP address. Van Jacobson TCP/IP header compression (RFC 1144) each way.
  * Packet compression: CCP (RFC 1962) with PPP Deflate (RFC 1979) and MPPC
  * (RFC 2118, without encryption), each direction negotiated on its own;
  * see README.md.
@@ -44,6 +44,7 @@
 #include "ppp_mppc.h"
 #include "ppp_crypto.h"
 #include "ppp_mppe.h"
+#include "ppp_vj.h"
 
 /* Transmit buffer size in octets (stuffed wire form). One worst-case IP
  * frame is 2 * (1500 + 6) + 2 = 3014 octets. */
@@ -221,6 +222,10 @@ typedef struct {
      * (also those discarded in the phase they came in). */
     void (*trace)(void *ctx, int out, uint32_t ms, uint16_t proto,
                   const uint8_t *pkt, size_t n, size_t len);
+    /* nonzero: no Van Jacobson TCP/IP header compression (IPCP option 2,
+     * RFC 1144), neither asked for nor taken. Default (0): asked for (16
+     * slots) and given to a peer that asks for it, each way on its own */
+    uint8_t  no_vj;
 } ppp_config_t;
 #define PPP_TRACE_MAX 64
 
@@ -260,6 +265,13 @@ typedef struct {
     uint8_t  mppe_seen;
     uint8_t  mppe_stateful;    /* MPPE agreed stateful: 1 towards, 2 from the peer */
     uint8_t  mppe_keybits;     /* MPPE key length agreed: 40, 56 or 128 (0: none) */
+    /* Van Jacobson header compression: slots agreed towards / from the peer
+     * (0: not in use that way), and the TCP packets each way */
+    uint8_t  vj_tx_slots, vj_rx_slots;
+    uint32_t vj_tx_comp, vj_tx_uncomp;  /* sent compressed / uncompressed (slot set) */
+    uint32_t vj_rx_comp, vj_rx_uncomp;  /* received and rebuilt */
+    uint32_t vj_errors;                 /* received and dropped: tossed after a lost
+                                           frame, or malformed */
 } ppp_counters_t;
 #define PPP_MPPE_SEEN_REQ 1u
 #define PPP_MPPE_SEEN_NAK 2u
@@ -326,6 +338,11 @@ typedef struct ppp {
 
     /* IPCP */
     uint8_t  w_addr, ipcp_closing, addr_naks;
+    uint8_t  w_vj;             /* VJ asked for in our next IPCP request */
+    uint8_t  pend_vj_slots, pend_vj_cid;   /* the peer's VJ option we Acked (0 slots: none) */
+    ppp_vj_t vj;               /* the header compression state, both ways */
+    uint8_t  vjbuf[PPP_MAX_MRU];
+    uint32_t vj_lost_seen;     /* frames lost on the way in, as last told to VJ */
     uint32_t our_ip, peer_ip, pend_peer_ip;
 
     /* CCP: what we ask for (our receive direction), one algorithm at a

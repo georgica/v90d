@@ -6,6 +6,7 @@
 #include <string.h>
 #include "test.h"
 #include "ppp.h"
+#include "ppp_vj.h"
 #include "ppp_md5.h"
 #include "gen.h"
 
@@ -21,6 +22,7 @@ static ppp_t S;
 /* MPPE keys injected after ppp_init (this harness authenticates with PAP,
  * which does not derive them; MS-CHAPv2 would). inject_mppe turns it on. */
 static int inject_mppe;
+static int peer_vj;          /* the peer asks for VJ header compression in IPCP */
 static uint8_t inj_s[16], inj_r[16];
 
 /* test data: IP packets with a moving 40-octet header in front of the
@@ -151,7 +153,7 @@ static ppp_status_t *status(void)
 static void up_mru(const ppp_config_t *c, unsigned mru)
 {
     static const uint8_t pap[] = { 5, 'a','l','i','c','e', 10, 'w','o','n','d','e','r','l','a','n','d' };
-    static const uint8_t ip[] = { 3, 6, 10, 0, 0, 2 };
+    static const uint8_t ip[] = { 3, 6, 10, 0, 0, 2, 2, 6, 0x00, 0x2d, 0x0f, 0x01 };
     uint8_t lcp[10] = { 5, 6, 0x11, 0x22, 0x33, 0x44, 1, 4, 0, 0 };
     frame_t *cr;
 
@@ -180,7 +182,7 @@ static void up_mru(const ppp_config_t *c, unsigned mru)
     CHECK(cr != NULL);
     if (!cr) return;
     push_cp(PPP_PROTO_IPCP, PPP_CONF_ACK, cr->d[1], cr->d + 4, cr->n - 4);
-    push_cp(PPP_PROTO_IPCP, PPP_CONF_REQ, 1, ip, sizeof ip);
+    push_cp(PPP_PROTO_IPCP, PPP_CONF_REQ, 1, ip, peer_vj ? sizeof ip : 6);
     pull();
     CHECK_EQ_I(status()->ip_up, 1);
 }
@@ -1876,6 +1878,35 @@ static void test_mppe_on_request(void)
     CHECK_EQ_I(status()->comp_tx, PPP_COMP_MPPE);
     CHECK_EQ_I(status()->comp_rx, PPP_COMP_MPPE);
 
+    /* (e) Windows' "optional encryption" asks for MPPC and MPPE in one
+     * request (0x61): we do not do both at once, and it takes either, so it
+     * keeps MPPC in the clear (text pages are much faster compressed) */
+    {
+        static const uint8_t opt61[6] = { 18, 6, 0, 0, 0, 0x61 }, mppc[6] = { 18, 6, 0, 0, 0, 0x01 };
+        base_cfg(&cfg);
+        cfg.comp = BOTH;
+        inject_mppe = 1;
+        up(&cfg);
+        inject_mppe = 0;
+        push_cp(P_CCP, PPP_CONF_REQ, 5, opt61, 6);
+        pull();
+        CHECK(scr_new && scr.n > 4 && scr.d[4] == 26);             /* ours: compression (Deflate first) */
+        f = find(P_CCP, PPP_CONF_NAK);
+        CHECK(f && same(f, mppc, 6));                              /* its: toward MPPC alone */
+        CHECK_EQ_I(ppp_send_ip(&S, ip, sizeof ip), 0);            /* not held: no encryption asked */
+        /* with no MPPC to give (compression off), it gets MPPE instead */
+        base_cfg(&cfg);
+        cfg.comp = 0;
+        inject_mppe = 1;
+        up(&cfg);
+        inject_mppe = 0;
+        push_cp(P_CCP, PPP_CONF_REQ, 5, opt61, 6);
+        pull();
+        f = find(P_CCP, PPP_CONF_NAK);
+        CHECK(f && same(f, s128, 6));
+        CHECK(scr_new && same(&scr, s128, 6));
+    }
+
     /* (d) no keys (the login was not MS-CHAPv2): its MPPE request is Nak'd
      * down to MPPC, the call goes on in the clear */
     base_cfg(&cfg);
@@ -1886,6 +1917,85 @@ static void test_mppe_on_request(void)
     f = find(P_CCP, PPP_CONF_NAK);
     CHECK(f && f->n == 10 && f->d[9] == 0x01);
     CHECK_EQ_I(ppp_send_ip(&S, ip, sizeof ip), 0);
+}
+
+/* Van Jacobson with MPPE: the datagram is compressed first, the result
+ * (0x002d / 0x002f) encrypted; and from a caller that asked for
+ * encryption, a cleartext VJ packet is dropped */
+static void test_vj_mppe(void)
+{
+    ppp_config_t cfg;
+    static ppp_mppe_t peer;
+    static ppp_vj_t pvj;
+    static const uint8_t ompe[6] = { 18, 6, 0x01, 0x00, 0x00, 0x40 };
+    static uint8_t ip[200], pt[300], back[300], plain[300], enc[300], w[300];
+    frame_t *f;
+    unsigned i, ok = 0, vj = 0;
+    size_t n;
+    int d;
+
+    for (i = 0; i < 16; i++) { inj_s[i] = (uint8_t)(i + 1); inj_r[i] = (uint8_t)(i + 101); }
+    base_cfg(&cfg);
+    cfg.comp = 0;
+    cfg.encrypt = 1;
+    inject_mppe = 1; peer_vj = 1;
+    up(&cfg);
+    inject_mppe = 0; peer_vj = 0;
+    CHECK_EQ_I(status()->counters.vj_tx_slots, 16);
+    push_cp(P_CCP, PPP_CONF_REQ, 20, ompe, 6);
+    pull();
+    push_cp(P_CCP, PPP_CONF_ACK, scr.d[1], scr.d + 4, scr.n - 4);
+    pull();
+    CHECK_EQ_I(status()->comp_tx, PPP_COMP_MPPE);
+    ppp_mppe_begin(&peer, inj_r, inj_s, 16, PPP_MPPE_FORCE_NONE);
+    ppp_vj_rx_init(&pvj, 16);
+    /* a TCP stream to the caller */
+    memset(ip, 0, 40);
+    ip[0] = 0x45; ip[3] = 140; ip[6] = 0x40; ip[8] = 64; ip[9] = 6;
+    ip[12] = 10; ip[15] = 1; ip[16] = 10; ip[19] = 2;
+    ip[20] = 0; ip[21] = 80; ip[22] = 4; ip[23] = 1; ip[32] = 0x50; ip[33] = 0x10; ip[34] = 0x10;
+    for (i = 0; i < 10; i++) {
+        uint32_t seq = 1000 + 100 * i, sum = 0; unsigned k;
+        ip[4] = 0; ip[5] = (uint8_t)(i + 1);
+        ip[24] = (uint8_t)(seq >> 24); ip[25] = (uint8_t)(seq >> 16); ip[26] = (uint8_t)(seq >> 8); ip[27] = (uint8_t)seq;
+        ip[10] = ip[11] = 0;
+        for (k = 0; k < 20; k += 2) sum += (uint32_t)ip[k] << 8 | ip[k + 1];
+        while (sum >> 16) sum = (sum & 0xffff) + (sum >> 16);
+        ip[10] = (uint8_t)(~sum >> 8); ip[11] = (uint8_t)~sum;
+        for (k = 40; k < 140; k++) ip[k] = (uint8_t)(k + i);
+        CHECK_EQ_I(ppp_send_ip(&S, ip, 140), 0);
+        pull();
+        f = find(P_COMP, 0);
+        if (!f) continue;
+        d = ppp_mppe_decrypt(&peer, f->d, f->n, pt, sizeof pt);
+        if (d < 2) continue;
+        if (pt[0] == 0 && (pt[1] == 0x2d || pt[1] == 0x2f)) {
+            int r;
+            vj++;
+            r = ppp_vj_uncompress(&pvj, pt[1], pt + 2, (size_t)d - 2, back, sizeof back);
+            if (r == 140 && memcmp(back, ip, 140) == 0) ok++;
+        }
+    }
+    CHECK_EQ_I(vj, 10);
+    CHECK_EQ_I(ok, 10);
+    CHECK(find(PPP_PROTO_VJC, 0) == NULL && find(PPP_PROTO_VJUC, 0) == NULL);  /* never in the clear */
+    /* from the caller: VJ under MPPE is delivered; VJ in the clear is not */
+    {
+        static ppp_vj_t ptx;
+        uint16_t pr;
+        ppp_vj_tx_init(&ptx, 16, 1);
+        ip_count = 0;
+        pr = ppp_vj_compress(&ptx, ip, 140, w, sizeof w, &n);
+        plain[0] = (uint8_t)(pr >> 8); plain[1] = (uint8_t)pr;
+        memcpy(plain + 2, w, n);
+        n = ppp_mppe_encrypt(&peer, plain, n + 2, enc, sizeof enc);
+        push(P_COMP, enc, n);
+        CHECK_EQ_I(ip_count, 1);
+        CHECK(ip_len == 140 && memcmp(ip_got, ip, 140) == 0);
+        pr = ppp_vj_compress(&ptx, ip, 140, w, sizeof w, &n);
+        push(pr, w, n);                         /* cleartext */
+        CHECK_EQ_I(ip_count, 1);
+    }
 }
 
 static void test_mppe_edges(void)
@@ -2516,6 +2626,7 @@ int main(void)
     test_mppe_short_keys();
     test_mppe_logged();
     test_mppe_on_request();
+    test_vj_mppe();
     test_mppe_windows();
     test_deflate_data();
     test_only_ip_is_compressed();

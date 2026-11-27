@@ -147,6 +147,26 @@ void srv_ppp_trace_text(int out, uint32_t ms, uint16_t proto, const uint8_t *pkt
         snprintf(buf + at, n - at, " ...");
 }
 
+size_t srv_vj_text(const ppp_counters_t *k, char *buf, size_t n)
+{
+    char to[80], from[80], drop[32] = "";
+    int r;
+    if (!buf || !n) return 0;
+    buf[0] = 0;
+    if (!k || (!k->vj_tx_slots && !k->vj_rx_slots)) return 0;
+    if (k->vj_tx_slots)
+        snprintf(to, sizeof to, "%lu of %lu TCP packets compressed (%u slots)", (unsigned long)k->vj_tx_comp,
+                 (unsigned long)(k->vj_tx_comp + k->vj_tx_uncomp), (unsigned)k->vj_tx_slots);
+    else snprintf(to, sizeof to, "not agreed");
+    if (k->vj_rx_slots)
+        snprintf(from, sizeof from, "%lu of %lu (%u slots)", (unsigned long)k->vj_rx_comp,
+                 (unsigned long)(k->vj_rx_comp + k->vj_rx_uncomp), (unsigned)k->vj_rx_slots);
+    else snprintf(from, sizeof from, "not agreed");
+    if (k->vj_errors) snprintf(drop, sizeof drop, ", %lu dropped", (unsigned long)k->vj_errors);
+    r = snprintf(buf, n, "VJ header compression: to caller %s, from caller %s%s", to, from, drop);
+    return r < 0 ? 0 : (size_t)r < n ? (size_t)r : n - 1;
+}
+
 size_t srv_qc_text(const v90m_qc *q, char *buf, size_t n)
 {
     char ask[32], lvl[16];
@@ -495,6 +515,7 @@ static void call_start(srv_t *s)
          * up on a link that asks for none */
         d.ppp.auth = PPP_AUTH_PAP;
         d.ppp.pap_cb = webtv_pap;
+        d.ppp.no_vj = 1;            /* no VJ header compression either: not tried with a box */
     } else if (enc)
         d.ppp.auth = PPP_AUTH_MSCHAPV2 | PPP_AUTH_CHAP | (c->auth == CFG_AUTH_PAP ? PPP_AUTH_PAP : 0);
     else
@@ -517,6 +538,7 @@ static void call_start(srv_t *s)
          * servers that know where the games' servers are today. V.92 is
          * left out above: the console's modem is older than it. */
         d.ppp.comp = PPP_COMP_NONE;
+        d.ppp.no_vj = 1;            /* nor VJ header compression, for the same reason */
         d.ppp.dns1 = CONSOLE_DNS1; d.ppp.dns2 = CONSOLE_DNS2;
         console_init(&s->console);
     }
