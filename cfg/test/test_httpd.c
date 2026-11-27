@@ -1017,6 +1017,10 @@ static void test_settings_post(void)
     CHECK(parse_resp(resp, len, &r) && r.code == 200 && strstr(resp, "Content-Type: text/javascript") != NULL);
     CHECK(strstr(resp, "replace(/IDX/g") != NULL);
     CHECK(strstr(resp, "script-src 'self';") != NULL && strstr(resp, "'unsafe-inline'; script") != NULL);
+    /* it reads a call's log from the box itself, and from nowhere else */
+    CHECK(strstr(resp, " connect-src 'self';") != NULL && strstr(resp, "default-src 'none';") != NULL);
+    CHECK(strstr(resp, "'data-pop'") != NULL && strstr(resp, "execCommand('copy')") != NULL);
+    CHECK(strstr(resp, "location.reload()") != NULL);
     /* the port is the page's: a post to /line2 without port=2, or with it
      * escaped, changes nothing */
     {
@@ -1705,8 +1709,33 @@ static void test_two_ports(void)
     len = exchange("GET /firmware HTTP/1.0\r\n\r\n", resp, sizeof resp);
     CHECK(strstr(resp, "/dreamcast") == NULL);
     CHECK_EQ_I(code_of("POST /calls HTTP/1.0\r\nContent-Length: 0\r\n\r\n"), 405);
+    /* the log of a call, as text and as JSON */
+    {
+        st_call_t k;
+        memset(&k, 0, sizeof k);
+        k.tel_result = ST_TEL_ANSWERED; k.neg.valid = 1;
+        k.neg.stage = "train"; k.neg.modulation = "none"; k.neg.error = "none";
+        status_add_call(&S2, &k);
+    }
+    len = exchange("GET /calls/log?port=2&call=4 HTTP/1.0\r\n\r\n", resp, sizeof resp);
+    CHECK(parse_resp(resp, len, &r) && r.code == 200);
+    CHECK(strstr(resp, "text/plain") != NULL && strstr(resp, "Port 2, call 4\n") != NULL);
+    len = exchange("GET /calls/log.json?call=4&port=2 HTTP/1.0\r\n\r\n", resp, sizeof resp);
+    CHECK(parse_resp(resp, len, &r) && r.code == 200);
+    CHECK(strstr(resp, "application/json") != NULL && strstr(resp, "\"port\":2,\"number\":4,") != NULL);
+    CHECK_EQ_I(code_of("GET /calls/log HTTP/1.0\r\n\r\n"), 404);
+    CHECK_EQ_I(code_of("GET /calls/log?port=2 HTTP/1.0\r\n\r\n"), 404);
+    CHECK_EQ_I(code_of("GET /calls/log?port=1&call=4 HTTP/1.0\r\n\r\n"), 404);
+    CHECK_EQ_I(code_of("GET /calls/log?port=2&call=4x HTTP/1.0\r\n\r\n"), 404);
+    CHECK_EQ_I(code_of("GET /calls/log?port=2&call= HTTP/1.0\r\n\r\n"), 404);
+    CHECK_EQ_I(code_of("GET /calls/log?port=2&port=2 HTTP/1.0\r\n\r\n"), 404);
+    CHECK_EQ_I(code_of("GET /calls/log?port=2&call=4294967300 HTTP/1.0\r\n\r\n"), 404);
+    CHECK_EQ_I(code_of("GET /calls/log?port=4294967298&call=4 HTTP/1.0\r\n\r\n"), 404);
+    CHECK_EQ_I(code_of("POST /calls/log?port=2&call=4 HTTP/1.0\r\nContent-Length: 0\r\n\r\n"), 405);
     /* behind the login like the rest */
     strcpy(C.admin_password, "pw");
+    CHECK_EQ_I(code_of("GET /calls/log?port=2&call=4 HTTP/1.0\r\n\r\n"), 303);
+    CHECK_EQ_I(code_of("GET /calls/log.json?port=2&call=4 HTTP/1.0\r\n\r\n"), 401);
     CHECK_EQ_I(code_of("GET /port2 HTTP/1.0\r\n\r\n"), 303);
     CHECK_EQ_I(code_of("GET /calls HTTP/1.0\r\n\r\n"), 303);
     CHECK_EQ_I(code_of("GET /status2.json HTTP/1.0\r\n\r\n"), 401);

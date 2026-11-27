@@ -547,11 +547,46 @@ static void ms_step(dce_t *d, int retraining)
  * names the one before) */
 static int moving_mod(const dce_t *d, const v90m_state *ms) { return d->moving && ms->modulation != V90M_CONN_NONE; }
 
+/* a line of the negotiation log whenever the start-up moves on; nothing
+ * more once data mode was reached (the stops after it are logged apart) */
+static void neg_track(dce_t *d, const v90m_state *ms)
+{
+    v90m_diag g;
+    dce_neg_event_t *e;
+    if (d->neg.data_reached) return;
+    v90m_get_diag(d->modem, &g);
+    d->neg.data_reached = g.data_reached;
+    if (d->neg.n_events && (int)g.phase == d->neg_phase && (int)g.selected == d->neg_sel && ms->used_v8 == d->neg_v8) return;
+    d->neg_phase = (int)g.phase; d->neg_sel = (int)g.selected; d->neg_v8 = ms->used_v8;
+    if (d->neg.n_events < DCE_NEG_EVENTS) e = &d->neg.events[d->neg.n_events++];
+    else { e = &d->neg.events[DCE_NEG_EVENTS - 1]; d->neg.dropped++; }   /* the newest keeps the last place */
+    e->at_ms = d->call_ms;
+    e->phase = v90m_phase_name(g.phase);
+    e->selected = v90m_conn_name(g.selected);
+    e->used_v8 = ms->used_v8;
+}
+
+void dce_get_neg(const dce_t *d, dce_neg_t *n)
+{
+    v90m_diag g;
+    v90m_state ms;
+    *n = d->neg;
+    v90m_get_diag(d->modem, &g);
+    v90m_get_state(d->modem, &ms);
+    n->used_v8 = ms.used_v8;
+    n->data_reached = g.data_reached;
+    n->phase = v90m_phase_name(g.phase);
+    n->selected = v90m_conn_name(g.selected);
+    n->error = v90m_err_name(g.error);
+}
+
 /* after every modem sample; returns 1 while the call is alive */
 static int after_sample(dce_t *d)
 {
     v90m_state ms;
     v90m_get_state(d->modem, &ms);
+    if (d->neg_wait == 0 || ms.end != V90M_END_NONE) neg_track(d, &ms);
+    if (++d->neg_wait == DCE_NEG_SAMPLES) d->neg_wait = 0;
     if (ms.end != V90M_END_NONE) {
         end_now(d, ms.end == V90M_END_X2_FAILED ? DCE_END_X2_FAILED
                  : ms.end == V90M_END_K56_FAILED ? DCE_END_K56_FAILED

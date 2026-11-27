@@ -82,6 +82,11 @@ the stock firmware stays in the box, one click away.
   their header only, never a password). A Windows caller that hangs up
   with error 742 shows in the log as "the caller asked for encryption ...
   and none was agreed" (it could not log in with MS-CHAPv2).
+- A negotiation log for each call the modem ran for, linked from the Calls
+  page: what we offered, whether the caller used V.8, how far the start-up
+  got, the modulation chosen and why it ended. For finding out why a modem
+  does not connect. It does not yet show every fallback tried for a modem
+  without V.8. It opens on the page, to read or copy. Also as JSON; see [cfg/README.md](cfg/README.md).
 - An optional update check (off by default, under System on the Settings
   page): once a day the box asks GitHub whether a newer release exists and,
   if so, offers it on the Firmware page with one-click install. It contacts

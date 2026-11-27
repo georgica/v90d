@@ -523,7 +523,7 @@ static void test_calls(void)
     CHECK(!has(json, "\"duration_s\":7004"));
     a = strstr(json, "\"duration_s\":7024"); b = strstr(json, "\"duration_s\":7005");
     CHECK(a && b && a < b);                         /* newest first */
-    CHECK(has(json, "{\"start\":\"2023-11-15T04:53:20Z\",\"start_unix\":1700024000,\"duration_s\":7024,"
+    CHECK(has(json, "{\"number\":24,\"log\":false,\"start\":\"2023-11-15T04:53:20Z\",\"start_unix\":1700024000,\"duration_s\":7024,"
                     "\"dialed\":\"5551234\",\"tel_result\":\"answered\","
                     "\"modulation\":\"v90\",\"down_bps\":40024,\"up_bps\":30024,\"end\":\"caller_hangup\"}"));
     CHECK(calls_html(&s) > 0);
@@ -788,8 +788,8 @@ static void test_history(void)
     CHECK(n > 0 && (size_t)n == strlen(html));
     CHECK(has(html, "<h2>Call history</h2>"));
     CHECK(has(html, "<tr><th>Port</th><th>Start (UTC)</th><th>Duration</th><th>Dialed</th><th>Result</th>"
-                    "<th>Modulation</th><th>Down bit/s</th><th>Up bit/s</th><th>Ended</th></tr>"));
-    CHECK(has(html, "<tr><td colspan=\"9\">none yet</td></tr>"));
+                    "<th>Modulation</th><th>Down bit/s</th><th>Up bit/s</th><th>Ended</th><th>Negotiation</th></tr>"));
+    CHECK(has(html, "<tr><td colspan=\"10\">none yet</td></tr>"));
     CHECK(has(html, "<b>Calls</b>"));                      /* its tab is the active one */
 
     /* port 1: 15 calls at even seconds, port 2: 12 at the odd ones between */
@@ -843,6 +843,7 @@ static void test_history(void)
         s->n_calls = STATUS_MAX_CALLS; s->call_next = 0;
         for (k = 0; k < STATUS_MAX_CALLS; k++) {
             memset(&c, 0xff, sizeof c);
+            c.neg.valid = 1;                /* every row with its link */
             c.modulation = ST_MOD_V32BIS; c.end = ST_END_CARRIER_LOST; c.tel_result = ST_TEL_WRONG_NUMBER;
             s->calls[k] = c;
         }
@@ -853,8 +854,99 @@ static void test_history(void)
     CHECK_EQ_I(status_render_calls(both, html, 2000), -1);
 }
 
+/* a call whose log is as full as it can be */
+static void full_log(st_call_t *c)
+{
+    unsigned i;
+    memset(c, 0, sizeof *c);
+    c->start_time = 4294967295u; c->duration_s = 4294967295u;
+    c->tel_result = ST_TEL_SESSION_LIMIT; c->end = ST_END_RETRAIN_FAILED;
+    memset(c->dialed, '<', sizeof c->dialed);
+    c->neg.valid = 1; c->neg.offered = 0xffffffffu; c->neg.used_v8 = 1;
+    c->neg.stage = "phase4"; c->neg.modulation = "Bell 212A"; c->neg.error = "ANS_ERR_K56_RETRAIN";
+    c->neg.n_events = 0xffffffffu; c->neg.dropped = 4294967295u;
+    for (i = 0; i < STATUS_NEG_EVENTS; i++) {
+        c->neg.events[i].at_ms = 4294967295u;
+        c->neg.events[i].stage = "phase4"; c->neg.events[i].modulation = "Bell 212A";
+    }
+}
+
+static void test_call_log(void)
+{
+    static status_t p1, p2;
+    const status_t *both[2] = { &p1, &p2 }, *one[2] = { &p1, NULL };
+    st_call_t c;
+    int n;
+
+    status_init(&p1); status_init(&p2);
+    CHECK_EQ_I(status_render_call_log(both, 1, 1, 0, html, sizeof html), STATUS_NO_CALL);
+    memset(&c, 0, sizeof c);                        /* not answered: no log */
+    c.tel_result = ST_TEL_BUSY;
+    status_add_call(&p1, &c);
+    c.tel_result = ST_TEL_ANSWERED; c.start_time = 1700000000u; c.duration_s = 34; c.end = ST_END_TRAIN_FAILED;
+    strcpy(c.dialed, "5551234");
+    c.neg.valid = 1; c.neg.offered = (1u << ST_MOD_V22) | (1u << ST_MOD_V22BIS) | (1u << ST_MOD_V21);
+    c.neg.stage = "train"; c.neg.modulation = "none"; c.neg.error = "V21_ERR_NO_CARRIER";
+    c.neg.n_events = 2;
+    c.neg.events[0].stage = "tone"; c.neg.events[0].modulation = "none";
+    c.neg.events[1].at_ms = 6150; c.neg.events[1].stage = "train"; c.neg.events[1].modulation = "none";
+    status_add_call(&p1, &c);
+    CHECK_EQ_I(status_call(&p1, 0)->number, 2);
+
+    CHECK(status_render_calls(one, html, sizeof html) > 0);
+    CHECK(has(html, "<td>negotiation failed</td><td><a href=\"/calls/log?port=1&amp;call=2\" data-pop>Log</a></td></tr>"));
+    /* the pop-up's style; the page is read again by the script, which waits
+     * while a log is open, and by the browser itself only without script */
+    CHECK(has(html, "<noscript><meta http-equiv=\"refresh\" content=\"15\"></noscript>"));
+    CHECK(has(html, "<section id=\"calls\">") && has(html, ".pop{") && !has(html, "<script>"));
+    CHECK(has(html, "<td>-</td></tr>"));
+    CHECK(!has(html, "call=1\""));
+    CHECK(status_render_json(&p1, json, sizeof json) > 0);
+    CHECK(has(json, "{\"number\":2,\"log\":true,"));
+    CHECK(has(json, "{\"number\":1,\"log\":false,"));
+
+    n = status_render_call_log(one, 1, 2, 0, html, sizeof html);
+    CHECK(n > 0 && (size_t)n == strlen(html));
+    CHECK(has(html, "Port 1, call 2, 2023-11-14 22:13:20 UTC\nDialed: 5551234\nResult: answered\n"
+                    "Ended: negotiation failed after 0:00:34\n"));
+    CHECK(has(html, "\nOffered: V.22bis, V.22, V.21\nCaller used V.8: no\nFurthest stage: train\n"
+                    "Modulation chosen: none\nData mode reached: no\nModem error: V21_ERR_NO_CARRIER\n"));
+    CHECK(has(html, "\n  0.0  stage tone, modulation none, V.8 no\n  6.1  stage train, modulation none, V.8 no\n"));
+    n = status_render_call_log(one, 1, 2, 1, json, sizeof json);
+    CHECK(n > 0 && json_ok(json));
+    CHECK(has(json, "\"offered\":[\"v22bis\",\"v22\",\"v21\"],\"used_v8\":false,\"stage\":\"train\""));
+    CHECK(has(json, "{\"at_ms\":6150,\"stage\":\"train\",\"modulation\":\"none\",\"used_v8\":false}]}"));
+
+    /* no log, no such call, no such port */
+    CHECK_EQ_I(status_render_call_log(both, 1, 1, 0, html, sizeof html), STATUS_NO_CALL);
+    CHECK_EQ_I(status_render_call_log(both, 1, 3, 0, html, sizeof html), STATUS_NO_CALL);
+    CHECK_EQ_I(status_render_call_log(both, 2, 2, 0, html, sizeof html), STATUS_NO_CALL);
+    CHECK_EQ_I(status_render_call_log(one, 2, 2, 0, html, sizeof html), STATUS_NO_CALL);
+    CHECK_EQ_I(status_render_call_log(both, 0, 2, 0, html, sizeof html), STATUS_NO_CALL);
+    CHECK_EQ_I(status_render_call_log(both, 3, 2, 0, html, sizeof html), STATUS_NO_CALL);
+
+    /* the largest log fits the buffers of a page; too small is refused */
+    full_log(&c);
+    status_add_call(&p2, &c);
+    n = status_render_call_log(both, 2, 1, 0, html, sizeof html);
+    CHECK(n > 0 && n < STATUS_HTML_MAX);
+    CHECK(has(html, "  ... 4294967295 changes not kept\n"));
+    printf("  largest call log: %d octets of text", n);
+    n = status_render_call_log(both, 2, 1, 1, html, sizeof html);
+    CHECK(n > 0 && n < STATUS_HTML_MAX && json_ok(html));
+    printf(", %d of JSON\n", n);
+    CHECK_EQ_I(status_render_call_log(both, 2, 1, 0, html, 100), -1);
+    /* a full history of such calls still fits status.json */
+    for (n = 0; n < STATUS_MAX_CALLS; n++) status_add_call(&p2, &c);
+    p2.calls_total = 4294967295u;
+    for (n = 0; n < STATUS_MAX_CALLS; n++) p2.calls[n].number = 4294967295u;
+    n = status_render_json(&p2, json, sizeof json);
+    CHECK(n > 0 && n < STATUS_JSON_MAX && json_ok(json));
+}
+
 int main(void)
 {
+    test_call_log();
     test_ports();
     test_history();
     test_checker();

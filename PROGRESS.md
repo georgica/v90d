@@ -3322,3 +3322,58 @@ bug and no way past authentication were found.
   ends the call through the modem.
 - Tests: ppp (no echo replies but data: up; then silent: ended; looped
   echoes still a loop), srv (no echoes on a WebTV port, 30 s on others).
+
+## A negotiation log for every answered call (2026-11-27): host-tested, NOT yet tested on a box
+
+For finding out why a modem does not connect. Built on libv90modem 0.7.4.
+
+- The Calls page links each call the modem ran for to a plain-text log
+  (`/calls/log?port=N&call=M`, JSON at `/calls/log.json`): what we offered,
+  whether the caller used V.8, the furthest stage reached, the modulation
+  chosen, whether data mode was reached, the modem's error and a timeline up
+  to data mode. The daemon's log gets one `negotiation:` line per call.
+- dce reads v90m_get_diag every 10 ms until data mode, and once as the call
+  ends. A state shorter than that may not show. The CPU cost on the box has
+  not been measured.
+- On the Calls page the log opens in a window with Copy and Close (/ui.js);
+  without script the link leads to the text. The policy gained
+  `connect-src 'self'`, so that the script may read it. The page's 15 s
+  reload moved into the script, which waits while a log is open; the
+  `meta refresh` is left for a browser without script.
+- Kept in memory with the call history: the last 20 calls of a port, 16
+  timeline entries each.
+- `status.json`: each call gains `number` and `log`; STATUS_JSON_MAX went
+  from 8192 to 10240, as a full history no longer fitted.
+- Limits of libv90modem 0.7.4: for a caller without V.8 the fallbacks
+  tried do not all show (a V.21 attempt that hears nothing reads "none"),
+  what the caller's CM offered is not told, and stage `v8` is passed by a
+  caller that sends no V.8.
+
+Tests: cfg (the log as text and JSON, the Calls page's link, no log for a
+call never answered, bad queries, the login, the largest log and a full
+history against the page buffers), srv (a V.22bis call's log, a silent
+caller's, a caller that hangs up while training). These tests were written
+after the code.
+
+Run on an x86-64 VM (Debian 12, GCC 12.2), on these sources: `make check`
+(libv90modem 0.7.4's host suite, then the box's), ALL HOST CHECKS PASS, 208
+suite results, all with 0 failures. `make check-ns`: ns_call 523 checks,
+ns_nat 95, ns_upnp 14, all with 0 failures (no pppd on the VM, so that call
+was not tried).
+
+`make check-arm` on a Raspberry Pi 4 Model B (Cortex-A72, 64-bit kernel,
+Raspbian 12), not under qemu: the programs were cross-built on the VM with
+the toolchain of fw/setup.sh and run natively (`QEMU=` empty, `ARM_CC=false`
+so that nothing could be compiled there). On this change on v90d 0.14.0,
+before the pop-up: ALL ARM CHECKS PASS, 309 result lines, all with 0 failures, 106 minutes.
+With the pop-up, still on 0.14.0, `cfg` and `srv` (the directories it
+changes) were built and run again the same way, `make test-arm` in each: all
+with 0 failures. No ARM test has run since the change was moved onto 0.14.2.
+A newer processor than the box's: this is not a run on the box.
+
+The pop-up's checks in cfg's tests were seen failing before it was written.
+The script itself they cannot run: it was tried in headless Chromium 156 on
+the same VM, against cfg's server and pages with made-up calls, 17 checks,
+none failing (the window, Copy pasted back whole, the three ways to close,
+no reload while open and one after, the Add button, without script, with a
+login and after it ended). No other browser was tried.

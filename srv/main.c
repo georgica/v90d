@@ -509,6 +509,10 @@ static void log_last_call(int port)
           who, h->dialed, (unsigned)h->tel_result < 7 ? tel_name[h->tel_result] : "?",
           (unsigned)h->modulation < sizeof mod_name / sizeof mod_name[0] ? mod_name[h->modulation] : "?",
           (unsigned)h->down_bps, (unsigned)h->up_bps, (unsigned)h->duration_s);
+    if (h->neg.valid)
+        logf_(CFG_LOG_INFO, "%s  negotiation: V.8 %s, reached %s, chose %s, error %s (log: /calls/log?port=%d&call=%lu)",
+              who, h->neg.used_v8 ? "yes" : "no", h->neg.stage, h->neg.modulation, h->neg.error,
+              port + 1, (unsigned long)h->number);
     if (h->modulation) {
         /* the call object is left as it ended: what the link layer did */
         v90m_ec_status v;

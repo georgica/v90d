@@ -25,7 +25,7 @@
 #define STATUS_HISTORY    20     /* calls on the page of both ports together */
 #define STATUS_DIALED_MAX 20
 #define STATUS_HTML_MAX   16384
-#define STATUS_JSON_MAX   8192
+#define STATUS_JSON_MAX   10240
 
 typedef enum {
     ST_LINE_IDLE = 0, ST_LINE_RINGING, ST_LINE_TRAINING, ST_LINE_CONNECTED,
@@ -81,7 +81,27 @@ typedef enum {
     ST_TEL_IDLE             /* idle_timeout reached */
 } st_tel_t;
 
+/* How the modem's start-up of an answered call went: the negotiation log.
+ * The names are libv90modem's own (static strings, NULL = not known). */
+#define STATUS_NEG_EVENTS 16
 typedef struct {
+    uint32_t    at_ms;          /* since the answer */
+    const char *stage;          /* the furthest stage reached */
+    const char *modulation;     /* chosen */
+    int         used_v8;
+} st_neg_event_t;
+typedef struct {
+    int         valid;          /* 0 = no modem ran for this call */
+    uint32_t    offered;        /* what we offered: bit (1u << ST_MOD_x) each */
+    int         used_v8;
+    int         data_reached;
+    const char *stage, *modulation, *error;
+    unsigned    n_events, dropped;
+    st_neg_event_t events[STATUS_NEG_EVENTS];
+} st_neg_t;
+
+typedef struct {
+    uint32_t number;        /* set by status_add_call: 1, 2, ... since start-up */
     uint32_t start_time;    /* UTC seconds since 1970, 0 = clock not set */
     uint32_t duration_s;
     uint32_t down_bps;
@@ -92,6 +112,7 @@ typedef struct {
                                = not known; the renderers stop at NUL or at
                                21 octets */
     int      tel_result;    /* ST_TEL_* */
+    st_neg_t neg;
 } st_call_t;
 
 /* IPv4 addresses in host byte order, 0 = none. */
@@ -167,5 +188,12 @@ int status_render_calls(const status_t *const ports[2], char *buf, size_t cap);
 typedef size_t (*status_bbs_rows)(void *ctx, const char *q, int skip, int max, char *buf, size_t cap, int *shown, int *left);
 int status_render_bbs(status_bbs_rows rows, void *ctx, const char *query, size_t qlen, char *buf, size_t cap);
 int status_render_json(const status_t *s, char *buf, size_t cap);
+/* The negotiation log of call `number` of port 1 or 2 (ports as for
+ * status_render_calls), as plain text or as a JSON object. Returns the
+ * length, -1 if it did not fit, or STATUS_NO_CALL when the history has no
+ * such call or the call has no log. */
+#define STATUS_NO_CALL (-2)
+int status_render_call_log(const status_t *const ports[2], int port, uint32_t number, int json,
+                           char *buf, size_t cap);
 
 #endif

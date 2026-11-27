@@ -29,7 +29,7 @@
 #include "vpn.h"
 
 enum { HC_FREE = 0, HC_RECV, HC_BODY, HC_SEND, HC_LINGER };
-enum { V_ERROR = 0, V_HTML, V_JSON, V_CONFIG, V_HTML2, V_JSON2 /* port 2 */, V_CALLS, V_BBS, V_LOG };
+enum { V_ERROR = 0, V_HTML, V_JSON, V_CONFIG, V_HTML2, V_JSON2 /* port 2 */, V_CALLS, V_BBS, V_LOG, V_CALL_LOG, V_CALL_JSON };
 enum { M_GET, M_HEAD, M_POST, M_OTHER };
 
 #define CRED_MAX (6 + CFG_SECRET_MAX)   /* "admin:" and the longest password */
@@ -99,7 +99,7 @@ static void put_head(sbuf_t *s, int code, const char *ctype, size_t clen, const 
     sb_puts(s, ""
                "X-Content-Type-Options: nosniff\r\n"
                "Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; script-src 'self';"
-               " form-action 'self'; frame-ancestors 'none'\r\n");
+               " connect-src 'self'; form-action 'self'; frame-ancestors 'none'\r\n");
     if (extra) sb_puts(s, extra);
     sb_puts(s, "\r\n");
 }
@@ -169,6 +169,27 @@ static void respond_text(httpd_t *h, httpd_conn_t *c, int code, const char *extr
     finish(h, c, code, CT_TEXT, extra, blen, head_only, now);
 }
 
+/* "port=1&call=7", in either order and both needed: 1 when it is that */
+static int call_query(const char *q, size_t n, int *port, uint32_t *number)
+{
+    size_t i = 0;
+    int seen = 0;
+    while (q && i < n) {
+        int which = n - i > 5 && memcmp(q + i, "port=", 5) == 0 ? 1 : n - i > 5 && memcmp(q + i, "call=", 5) == 0 ? 2 : 0;
+        uint32_t v = 0;
+        size_t first;
+        if (!which || (seen & which)) return 0;
+        first = i += 5;
+        while (i < n && q[i] >= '0' && q[i] <= '9' && v < 100000000u) v = v * 10u + (uint32_t)(q[i++] - '0');
+        if (i == first || (i < n && q[i] != '&')) return 0;
+        if (which == 1) *port = v <= 2u ? (int)v : 0;
+        else *number = v;
+        seen |= which;
+        if (i < n) i++;
+    }
+    return seen == 3;
+}
+
 /* one of the status views, or with V_ERROR the plain answer for code */
 static void respond(httpd_t *h, httpd_conn_t *c, int code, int view, int head_only, uint32_t now)
 {
@@ -191,6 +212,17 @@ static void respond(httpd_t *h, httpd_conn_t *c, int code, int view, int head_on
         const status_t *both[2];
         both[0] = h->status; both[1] = h->status2;
         finish(h, c, code, CT_HTML, NULL, status_render_calls(both, body, HTTPD_BODY_MAX), head_only, now);
+        break;
+    }
+    case V_CALL_LOG:
+    case V_CALL_JSON: {
+        const status_t *both[2];
+        int port, n; uint32_t number;
+        both[0] = h->status; both[1] = h->status2;
+        n = call_query(h->query, h->query_len, &port, &number)
+            ? status_render_call_log(both, port, number, view == V_CALL_JSON, body, HTTPD_BODY_MAX) : STATUS_NO_CALL;
+        if (n == STATUS_NO_CALL) respond_text(h, c, 404, NULL, "No log for that call.\n", head_only, now);
+        else finish(h, c, code, view == V_CALL_JSON ? "application/json" : CT_TEXT, NULL, n, head_only, now);
         break;
     }
     case V_BBS:
@@ -942,7 +974,8 @@ static void handle(httpd_t *h, httpd_conn_t *c, size_t n, uint32_t now)
         }
         return;
     }
-    /* the status views: read only, a query string is ignored but for /bbs */
+    /* the status views: read only, a query string is ignored but for /bbs
+     * and the log of a call */
     if (method != M_GET && method != M_HEAD) { respond(h, c, 405, V_ERROR, 0, now); return; }
     head_only = method == M_HEAD;
     if (plen == 1) view = V_HTML;
@@ -950,6 +983,11 @@ static void handle(httpd_t *h, httpd_conn_t *c, size_t n, uint32_t now)
     else if (h->status2 && plen == 6 && memcmp(uri, "/port2", 6) == 0) view = V_HTML2;
     else if (h->status2 && plen == 13 && memcmp(uri, "/status2.json", 13) == 0) view = V_JSON2;
     else if (plen == 6 && memcmp(uri, "/calls", 6) == 0) view = V_CALLS;
+    else if ((plen == 10 && memcmp(uri, "/calls/log", 10) == 0) ||
+             (plen == 15 && memcmp(uri, "/calls/log.json", 15) == 0)) {
+        view = plen == 10 ? V_CALL_LOG : V_CALL_JSON;
+        h->query = q ? q + 1 : NULL; h->query_len = q ? ulen - plen - 1 : 0;
+    }
     else if (plen == 4 && memcmp(uri, "/bbs", 4) == 0) {         /* its page and its search are in the query */
         view = V_BBS; h->bbs_query = q ? q + 1 : NULL; h->bbs_qlen = q ? ulen - plen - 1 : 0;
     }
@@ -984,7 +1022,7 @@ static void handle(httpd_t *h, httpd_conn_t *c, size_t n, uint32_t now)
     }
     {
         int a = authorised(h, c->rx, n, now);
-        if (a != 1) { refuse(h, c, a, view != V_JSON && view != V_JSON2, head_only, now); return; }
+        if (a != 1) { refuse(h, c, a, view != V_JSON && view != V_JSON2 && view != V_CALL_JSON, head_only, now); return; }
     }
     respond(h, c, 200, view, head_only, now);
     return;

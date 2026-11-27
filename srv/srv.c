@@ -403,12 +403,49 @@ static int own_number(const cfg_t *c, const char *dialed)
     return strlen(c->line_number) == 10 && c->line_number[0] != '1' && dialed[0] == '1' && strcmp(dialed + 1, c->line_number) == 0;
 }
 
+/* the library's modulation bits as the status page's */
+static uint32_t offered_of(unsigned m)
+{
+    static const struct { unsigned bit; uint32_t st; } t[] = {
+        { V90M_MOD_V92, 1u << ST_MOD_V92 }, { V90M_MOD_V90, 1u << ST_MOD_V90 }, { V90M_MOD_X2, 1u << ST_MOD_X2 },
+        { V90M_MOD_K56, 1u << ST_MOD_K56FLEX }, { V90M_MOD_V34, 1u << ST_MOD_V34 },
+        { V90M_MOD_V32BIS, 1u << ST_MOD_V32BIS }, { V90M_MOD_V22, (1u << ST_MOD_V22BIS) | (1u << ST_MOD_V22) },
+        { V90M_MOD_BELL212A, 1u << ST_MOD_BELL212A }, { V90M_MOD_V21, 1u << ST_MOD_V21 },
+        { V90M_MOD_BELL103, 1u << ST_MOD_BELL103 }
+    };
+    uint32_t o = 0;
+    size_t i;
+    for (i = 0; i < sizeof t / sizeof t[0]; i++) if (m & t[i].bit) o |= t[i].st;
+    return o;
+}
+
+/* the negotiation log of the call that ended, for its line of history */
+static void neg_history(const srv_t *s, st_neg_t *h)
+{
+    dce_neg_t n;
+    unsigned i;
+    dce_get_neg(&s->dce, &n);
+    h->valid = 1;
+    h->offered = s->neg_offered;
+    h->used_v8 = n.used_v8; h->data_reached = n.data_reached;
+    h->stage = n.phase; h->modulation = n.selected; h->error = n.error;
+    h->dropped = n.dropped;
+    for (i = 0; i < n.n_events && i < STATUS_NEG_EVENTS; i++) {
+        h->events[i].at_ms = n.events[i].at_ms;
+        h->events[i].stage = n.events[i].phase;
+        h->events[i].modulation = n.events[i].selected;
+        h->events[i].used_v8 = n.events[i].used_v8;
+    }
+    h->n_events = i;
+}
+
 static void call_start(srv_t *s)
 {
     dce_cfg_t d;
     const cfg_t *c = &s->cfg;
     int bbs, svc, acts, enc, webtv_tf, other; char board[BBS_NUMBER_LEN + 1];
     s->link = SATURN_NONE;
+    s->neg_offered = 0;                 /* until a modem runs for this call */
     s->call_start = s->clock; s->call_s = 0; s->ppp_up_once = 0; s->ppp_from_s = 0;
     /* a WebTV port: every call is the box's, whatever it dialled */
     s->webtv = webtv_here(s);
@@ -563,6 +600,7 @@ static void call_start(srv_t *s)
         d.raw_rx = raw_from_caller; d.raw_ec = 1; d.ppp_detect = 1;
     }
     dce_init(&s->dce, &d);
+    s->neg_offered = offered_of(d.modulations);
     dce_get_status(&s->dce, &s->ds);
     s->in_call = 1; s->hangup_sent = 0;
 }
@@ -635,6 +673,8 @@ static void refresh(srv_t *s)
 }
 
 /* the line is back on hook: one line of history for what happened */
+typedef char neg_events_fit[STATUS_NEG_EVENTS >= DCE_NEG_EVENTS ? 1 : -1];
+
 static void episode_end(srv_t *s)
 {
     st_call_t h;
@@ -642,6 +682,7 @@ static void episode_end(srv_t *s)
     memset(&h, 0, sizeof h);
     memcpy(h.dialed, s->tel.dialed, STATUS_DIALED_MAX); h.dialed[STATUS_DIALED_MAX] = 0;
     if (s->tel.answered_this) {
+        if (s->neg_offered) neg_history(s, &h.neg);
         h.start_time = s->call_start;
         h.duration_s = s->call_s;
         h.modulation = mod_of(d->modulation);
