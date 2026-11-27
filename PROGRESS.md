@@ -3143,3 +3143,132 @@ caught it.
 - Tests: srv (the K56flex line for each case: nothing offered, offered and
   not chosen, version 2 agreed, version 1 declined, version-2-only and
   version-1-only offers, an undefined version, a short buffer, NULL).
+
+## 0.14.0: PPP fixes from an audit and the ISP's Windows error 742 report (2026-11-26)
+
+Two Windows dial-up members of the Netstalgia ISP (nsdiald, on v90d's PPP)
+saw the PC end PPP right after its MS-CHAPv2 login, before IPCP, with
+Windows error 742 ("does not support the data encryption requirements").
+An audit of ppp/ (negotiation, authentication, framing, compression and
+encryption; fuzzed under ASan and UBSan, crypto checked against reference
+implementations) found the cause and three other bugs. No memory-safety
+bug and no way past authentication were found.
+
+- **40-bit and 56-bit MPPE.** CCP agreed 128-bit keys only, so a PC with
+  shorter ones (Windows 9x/ME without the 128-bit upgrade) could never
+  agree and ended with 742. Now one key length both ways: 128-bit, or the
+  strongest of 56 and 40 a peer shows it has (by request, Nak or, as pppd
+  does, Reject); the short keys as RFC 3079 3.3/3.4 and the kernel derive
+  them. CCP is negotiated again, before anything is keyed, if the two
+  directions were Acked at different lengths. A Nak never takes the length
+  below the strongest of the peer's own request (a review found that one
+  injected Nak could talk a 128-bit peer down to 40), and that floor only
+  ever rises (a later request that claims less, one injected, say, changes
+  nothing). `mppe_keybits` counts
+  it; the daemon's compression line says "40-bit keys" and so on. A
+  `require-mppe-40` call runs against the kernel's ppp_mppe (ns_pppd).
+- **The caller's encryption request is always kept.** With encryption off
+  its option-18 request was never recorded, so a log said "asked nothing".
+  It is kept now, and the daemon logs "the caller asked for encryption
+  (option 18 ...) and none was agreed" for such a call (srv_mppe_note),
+  however the call ended.
+- **Stateless MPPE after a long loss.** More than 512 packets lost in a row
+  (the catch-up credit) and no packet ever decrypted again: the call stayed
+  up carrying nothing. The receiver now steps as far as the credit goes on
+  each packet and catches up over the next ones. Past the 2047-count window
+  (either mode) the link now ends with `PPP_END_MPPE_LOST` after 32 such
+  packets, instead of staying up dead.
+- **Configure-Nak/Reject within the peer's MRU** (whole options, as many as
+  fit).
+- **A PPP trace** (`ppp_config_t.trace`, asked for by the ISP): every
+  control packet each way with the time, the protocol and up to 64 octets,
+  PAP and CHAP header only, also inside a Protocol-Reject (no secrets). The daemon logs it at debug level
+  (srv_ppp_trace_text), for example `PPP +1.234 s in  CCP Configure-Request
+  id 5, 10 octets: 12 06 00 00 00 21`.
+- **Encryption on request, with no setting.** The PPP encryption switch is
+  gone from the Modem page and the config file (an older file's
+  `encryption` and `encryption2` lines are read and ignored). A caller that
+  asks for MPPE gets it; one that does not is served in the clear, with the
+  compression it asks for. Once a caller has asked, nothing goes in the
+  clear either way. Windows' "optional encryption" asks for MPPC and MPPE
+  in one request (0x61); we do not do both at once, so it keeps MPPC in
+  the clear where the port compresses (text is far quicker that way), and
+  only "require data encryption" (MPPE alone) is taken as asking. With the keys in hand CCP waits up to a Restart period
+  for the caller's request before sending ours, so ours can be MPPE from
+  the start (pppd with require-mppe gives up on any other first request). Both logins (CHAP and PAP) offer MS-CHAPv2 first, which
+  MPPE needs, then CHAP-MD5, then (a PAP port) PAP: a caller moves on with
+  a Nak, or now also a Configure-Reject (old stacks that Reject a method
+  they do not know), and only a Reject of the last method ends the link.
+  An older file with `encryption = on` (required) loads, and the daemon
+  says at start that encryption is now given on request, so a caller that
+  does not ask is served in the clear (a security review asked that the
+  change not be silent).
+  A port with a login carries IP 4 octets smaller (the MPPE overhead);
+  status.json's `ppp_encryption` means "given on request" now. In the
+  library `cfg.encrypt` 0 is on request, 1 still means required.
+- **A race on ppp0.** The NAT child (re-applying the rules as a call begins
+  or ends) and the STUN child ran on as themselves holding the daemon's TUN
+  devices; when a port's ppp0 was set up again meanwhile (a console's lease
+  running out), it was "busy" and callers got PPP with no network.
+  ns_call's console lease test caught it now and then. Both children now
+  close every descriptor, and the set-up waits for a NAT child first. That
+  was not all of it: any child between its fork and its exec (the lease
+  script, started as the lease runs out) holds the descriptor too, and
+  close-on-exec only lets go at the exec. So the device is no longer made
+  again when only its addresses or MTU change: it gets them in place
+  (tun_readdress), and is made anew only if that fails. ns_call checks
+  that the lease test never logs "cannot set up".
+- Tests: mppe (long runs of loss caught up on, 513 to 2046; the late
+  count; 40- and 56-bit packets against a reference written apart), ccp
+  (the link ends past the window; 40- and 56-bit callers each way, a
+  Windows-style Nak, a Reject after the peer's request, 128 when offered,
+  no Nak below the peer's own request in either order, two lengths never
+  keyed; the request logged with encryption off; on request: Windows-style
+  (asked, Deflate Rejected, MPPE; no clear meanwhile), pppd-style (no
+  MPPE asked: Deflate and the clear), a caller that Acks our Deflate and
+  asks MPPE, no keys), ppp (MS-CHAPv2, CHAP-MD5 and PAP in turn on Rejects;
+  a Reject cut to MRU
+  68; the trace, in order, no password, none in a Protocol-Reject), srv
+  (the encryption note, the trace line; a PAP caller on a port that offers
+  MS-CHAPv2 first), cfg (old encryption keys read and not written; no
+  field on the page), ns_pppd (require-mppe-128, -40 and both, with no
+  setting; the plain calls unchanged), ns_call
+  (the trace in a call's log).
+- **libv90modem 0.7.4** (from 0.7.2; additive, the same ABI): V.92 Quick
+  Connect on the answering side, on whenever V.92 is offered (a caller that
+  asks for it gets the short start-up; one that does not complete it falls
+  back to V.8 within 2 s), and V.8bis's ACK(1) fixed. 0.7.3's HST fixes come
+  with it (HST stays off in v90d). After each call where Quick Connect was
+  asked for, the log says what came of it (srv_qc_text, from v90m_get_qc):
+  the caller's Ucode and LAPM bit, taken or not, the ANSpcm level, its TONEq
+  and the short Phase 2, or the fall back to V.8. Tests: srv (each case of
+  the line). Not yet tried with a real V.92 modem.
+- **Van Jacobson TCP/IP header compression** (RFC 1144), asked for by a
+  Netstalgia member (BinModem's author): Windows 95/98/ME ("Use IP header
+  compression", on by default), classic Mac OS and BinModem offer it, and
+  at modem speeds it makes interactive TCP much quicker (an echoed
+  keystroke is a few octets instead of 41). IPCP option 2 (0x002d) each way
+  on its own, 16 slots offered, the peer's Max-Slot-Id and Comp-Slot-Id
+  honoured, other compression protocols Rejected; on by default, off with
+  `ppp_config_t.no_vj` (and on console and WebTV ports, as CCP is). VJ
+  works before CCP and MPPE; after a lost frame compressed packets are
+  tossed until the slot is named or re-stated (RFC 1144 4.2). New module
+  `ppp/ppp_vj.c` (build lists that name the PPP sources need it). Counters
+  `vj_tx_comp`, `vj_tx_uncomp`, `vj_rx_comp`, `vj_rx_uncomp`, `vj_errors`,
+  `vj_tx_slots`, `vj_rx_slots`; the daemon logs a line per call
+  (srv_vj_text). Tests: vj (mixed streams rebuilt to the octet, plain IP
+  cases, more connections than slots, slot number left out or not, tossing
+  and the resend, malformed input, 200000 random packets; clean under ASan
+  and UBSan), ppp (negotiation both forms, IPHC Rejected, off; data both
+  ways, the peer's slot count and Comp-Slot-Id, a bad FCS and recovery,
+  Protocol-Reject when not agreed), ccp (VJ under MPPE, no clear VJ), srv
+  (the log line; off on console and WebTV ports), ns_pppd (every call with
+  VJ against pppd and the kernel's slhc, and a novj call).
+- dce's noisy-line test (V.22bis without error control, noise bursts) judged
+  too early: a frame lost at the very end of the bursts showed as a gap only
+  with the next packet, so the final four packets fell into the reset that
+  followed (RFC 1979: dropped meanwhile). Offering VJ made IPCP six octets
+  longer, the bursts landed later, and the quick run (under qemu) hit it.
+  The test now sends a packet each way and lets a reset complete before it
+  judges, and checks recovery in each direction that lost frames (which
+  ways a burst hits is chance). No change to the PPP code: recovery worked.

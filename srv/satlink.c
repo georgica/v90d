@@ -205,12 +205,15 @@ static void sl_stun_poll(uint32_t now_ms)
     stun_pid = fork();
     if (stun_pid == 0) {
         struct addrinfo hints, *res = NULL;
-        child_plain(-1, -1, 0);
+        /* runs no program: lets go of the daemon's TUN devices, lines and
+         * sockets; the pipe becomes its standard output */
+        (void)fcntl(pp[1], F_SETFL, 0);
+        child_plain(-1, pp[1], 1);
         memset(&hints, 0, sizeof hints); hints.ai_family = AF_INET; hints.ai_socktype = SOCK_DGRAM;
         if (getaddrinfo(SATURN_STUN_HOST, NULL, &hints, &res) == 0 && res) {
             uint32_t ip = ntohl(((struct sockaddr_in *)(void *)res->ai_addr)->sin_addr.s_addr);
             uint8_t a[4] = { (uint8_t)(ip >> 24), (uint8_t)(ip >> 16), (uint8_t)(ip >> 8), (uint8_t)ip };
-            if (write(pp[1], a, sizeof a) != (ssize_t)sizeof a) _exit(1);
+            if (write(1, a, sizeof a) != (ssize_t)sizeof a) _exit(1);
         }
         _exit(0);
     }

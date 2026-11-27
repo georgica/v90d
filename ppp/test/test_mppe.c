@@ -76,6 +76,37 @@ static void roundtrip(size_t keylen, int force)
     }
 }
 
+/* The short keys (40- and 56-bit, RFC 3079 3.3/3.4: the first 8 octets
+ * of the start key, the first octets forced), the first three stateless
+ * packets of "test message" from START128. The ciphertexts come from a
+ * reference written apart from ppp_crypto (Python hashlib SHA-1 and its
+ * own RC4); its 40-bit initial key is RFC 3079 3.5's D1 26 9E C4 9F A6 2E 3E. */
+static void test_short_vectors(void)
+{
+    static const uint8_t c40[3][12] = {
+        { 0xea,0x98,0xa2,0x12,0xb4,0x83,0x25,0xfc,0x44,0x3f,0xba,0x20 },
+        { 0x86,0x47,0x2d,0x18,0x6d,0x94,0xf4,0x89,0xc8,0x3f,0x58,0x96 },
+        { 0x43,0x4e,0xf3,0x4a,0xc3,0xa6,0x1d,0xfc,0xfc,0xb0,0x09,0x59 },
+    };
+    static const uint8_t c56[3][12] = {
+        { 0x1c,0x9e,0x80,0x2f,0x85,0x16,0xe2,0x2a,0x7c,0xe3,0x82,0x70 },
+        { 0xc6,0x78,0x81,0x72,0x90,0xda,0xcf,0xc6,0x1a,0xcd,0x39,0xa6 },
+        { 0xf9,0x78,0xfc,0xc3,0xe9,0xab,0x49,0xb5,0x4f,0x5f,0xfa,0x83 },
+    };
+    ppp_mppe_t m;
+    uint8_t out[64], zero[16] = { 0 };
+    int i, k;
+
+    for (k = 0; k < 2; k++) {
+        ppp_mppe_begin(&m, START128, zero, 8, k ? PPP_MPPE_FORCE_56 : PPP_MPPE_FORCE_40);
+        for (i = 0; i < 3; i++) {
+            size_t n = ppp_mppe_encrypt(&m, (const uint8_t *)"test message", 12, out, sizeof out);
+            CHECK_EQ_I((int)n, 14);
+            CHECK(eq(out + 2, k ? c56[i] : c40[i], 12));
+        }
+    }
+}
+
 static void test_roundtrip(void)
 {
     roundtrip(16, PPP_MPPE_FORCE_NONE);     /* 128-bit */
@@ -160,6 +191,79 @@ static void test_window(void)
     n = ppp_mppe_encrypt(&a2, msg, 8, ct, sizeof ct);           /* the next in line still works */
     CHECK_EQ_I(ppp_mppe_decrypt(&b, ct, n, pt, sizeof pt), 8);
     CHECK(eq(pt, msg, 8));
+}
+
+/* A long run of lost packets (a noise burst, a retrain) is caught up on
+ * over the next packets, paid out of the credit a few key changes at a
+ * time, however long the run was up to the window: the receiver never
+ * stays out of step for good. Past the window the packets are dropped and
+ * counted (ppp_mppe_rx_late) for the caller to end the link. */
+static void test_long_loss(void)
+{
+    static ppp_mppe_t a, b;
+    static const unsigned runs[] = { 513, 514, 600, 1000, 1500, 2000, PPP_MPPE_WINDOW - 1 };
+    uint8_t msg[8] = { 9, 8, 7, 6, 5, 4, 3, 2 }, ct[16], pt[16];
+    unsigned r, i, first, ok;
+    size_t n;
+
+    for (r = 0; r < sizeof runs / sizeof runs[0]; r++) {
+        pair(&a, &b, 16, PPP_MPPE_FORCE_NONE);
+        for (i = 0; i < 100; i++) {                                     /* ordinary traffic first */
+            n = ppp_mppe_encrypt(&a, msg, 8, ct, sizeof ct);
+            CHECK_EQ_I(ppp_mppe_decrypt(&b, ct, n, pt, sizeof pt), 8);
+        }
+        for (i = 0; i < runs[r]; i++)
+            (void)ppp_mppe_encrypt(&a, msg, 8, ct, sizeof ct);            /* lost */
+        first = 0; ok = 0;
+        for (i = 1; i <= 600; i++) {
+            int d;
+            msg[0] = (uint8_t)i;
+            n = ppp_mppe_encrypt(&a, msg, 8, ct, sizeof ct);
+            d = ppp_mppe_decrypt(&b, ct, n, pt, sizeof pt);
+            if (d == 8) { CHECK(eq(pt, msg, 8)); ok++; if (!first) first = i; }
+            else CHECK_EQ_I(d, -1);
+        }
+        CHECK(first > 0 && first <= 300);                               /* back in step */
+        CHECK_EQ_I(ok, 600 - first + 1);                                /* and stays there */
+        CHECK_EQ_I(ppp_mppe_rx_late(&b), 0);
+    }
+
+    /* past the window: dropped and counted, one by one; a packet in line
+     * clears the count */
+    {
+        static ppp_mppe_t a2;
+        pair(&a, &b, 16, PPP_MPPE_FORCE_NONE);
+        n = ppp_mppe_encrypt(&a, msg, 8, ct, sizeof ct);
+        CHECK_EQ_I(ppp_mppe_decrypt(&b, ct, n, pt, sizeof pt), 8);
+        a2 = a;
+        for (i = 0; i < PPP_MPPE_WINDOW; i++)
+            (void)ppp_mppe_encrypt(&a, msg, 8, ct, sizeof ct);
+        for (i = 1; i <= 3; i++) {
+            n = ppp_mppe_encrypt(&a, msg, 8, ct, sizeof ct);
+            CHECK_EQ_I(ppp_mppe_decrypt(&b, ct, n, pt, sizeof pt), -1);
+            CHECK_EQ_I(ppp_mppe_rx_late(&b), i);
+        }
+        n = ppp_mppe_encrypt(&a2, msg, 8, ct, sizeof ct);
+        CHECK_EQ_I(ppp_mppe_decrypt(&b, ct, n, pt, sizeof pt), 8);
+        CHECK_EQ_I(ppp_mppe_rx_late(&b), 0);
+    }
+
+    /* stateful the same: out of step past the window, the packet meant to
+     * bring it back is too late, and each one is counted */
+    pair(&a, &b, 16, PPP_MPPE_FORCE_NONE);
+    ppp_mppe_stateful(&a, 1, 1);
+    ppp_mppe_stateful(&b, 1, 1);
+    n = ppp_mppe_encrypt(&a, msg, 8, ct, sizeof ct);
+    CHECK_EQ_I(ppp_mppe_decrypt(&b, ct, n, pt, sizeof pt), 8);
+    for (i = 0; i < PPP_MPPE_WINDOW + 10; i++)
+        (void)ppp_mppe_encrypt(&a, msg, 8, ct, sizeof ct);
+    ppp_mppe_tx_resync(&a);
+    n = ppp_mppe_encrypt(&a, msg, 8, ct, sizeof ct);
+    CHECK_EQ_I(ppp_mppe_decrypt(&b, ct, n, pt, sizeof pt), -1);
+    CHECK_EQ_I(ppp_mppe_rx_late(&b), 1);
+    /* a reset clears it */
+    ppp_mppe_reset(&b);
+    CHECK_EQ_I(ppp_mppe_rx_late(&b), 0);
 }
 
 /* ---- stateful (RFC 3078 7.2, 8.2) ---- */
@@ -294,7 +398,9 @@ int main(void)
     test_stateful_long();
     test_mixed();
     test_roundtrip();
+    test_short_vectors();
     test_loss();
     test_window();
+    test_long_loss();
     T_REPORT("mppe");
 }

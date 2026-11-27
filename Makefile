@@ -41,7 +41,7 @@ test-arm: $(addprefix $(BUILD)/arm_,$(TESTS))
 
 # real-modem test rig for the stock firmware's SIP/RTP path (see rig/README.md)
 RIG_ALL := rig/sipmodem.c rig/modemterm.c rig/pppcall.c dce/dce.c \
-           $(addprefix ppp/,ppp_md5.c ppp_crypto.c ppp_hdlc.c ppp_fsm.c ppp_deflate.c ppp_mppc.c ppp_mppe.c ppp.c)
+           $(addprefix ppp/,ppp_md5.c ppp_crypto.c ppp_hdlc.c ppp_fsm.c ppp_deflate.c ppp_mppc.c ppp_mppe.c ppp_vj.c ppp.c)
 RIG_INC := -Irig -Idce -Ippp $(LIBV90M_INC)
 rig: $(BUILD)/sipmodem.x86 $(BUILD)/sipmodem.arm
 $(BUILD)/sipmodem.x86: $(RIG_ALL) $(LIBV90M_A) | $(BUILD)

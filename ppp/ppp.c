@@ -19,6 +19,7 @@
 #define LCP_ECHO_REP     10
 #define LCP_DISCARD_REQ  11
 /* IPCP options (RFC 1332 section 3, RFC 1877 section 1) */
+#define IPCP_OPT_COMP    2   /* IP-Compression-Protocol (RFC 1332 3.2) */
 #define IPCP_OPT_ADDR    3
 #define IPCP_OPT_DNS1    129
 #define IPCP_OPT_DNS2    131
@@ -43,16 +44,26 @@
 #define CCP_OPT_DEFLATE  26
 #define DEFLATE_METHOD   8   /* RFC 1979 section 3 */
 #define MPPC_BIT         1u  /* RFC 2118 section 2 */
-/* RFC 3078 MPPE bits in the same option 18. We offer and accept 128-bit
- * keys only, in either mode: we ask for stateless (what pppd does) and go
+/* RFC 3078 MPPE bits in the same option 18. We offer and accept one key
+ * length, in either mode: 128-bit, or for a peer that has only shorter
+ * keys the strongest of 56 and 40 it has (Windows 9x/ME without the
+ * 128-bit upgrade: 40). We ask for stateless (what pppd does) and go
  * stateful when the peer Naks toward it or asks for it -- a Windows client
  * on a modem link does stateful only (issue #6). */
 #define MPPE_BIT_S       0x00000040u  /* 128-bit session keys */
+#define MPPE_BIT_M       0x00000080u  /* 56-bit */
+#define MPPE_BIT_L       0x00000020u  /* 40-bit */
+#define MPPE_KEYS        (MPPE_BIT_S | MPPE_BIT_M | MPPE_BIT_L)
 #define MPPE_BIT_H       0x01000000u  /* stateless */
 #define RESET_TRIES      3   /* Reset-Requests before CCP is negotiated anew */
 #define CW_NAK_LIMIT     3   /* Naks of one of our options before we drop it */
 
 #define LOOP_LIMIT       5   /* own magic seen this often: looped back */
+
+static uint16_t get16(const uint8_t *p)
+{
+    return (uint16_t)(((unsigned)p[0] << 8) | p[1]);
+}
 
 static uint32_t get32(const uint8_t *p)
 {
@@ -173,6 +184,30 @@ static void run_pending(ppp_t *p)
 /* Frame one packet into the transmit buffer. The information field is
  * h + a + b. Returns 0, or -1 if there is no room (leaving `reserve`
  * octets untouched). */
+/* cfg.trace: a control packet in or out, in up to three pieces */
+static void trace(ppp_t *p, int out, uint16_t proto, const uint8_t *h, size_t hn,
+                  const uint8_t *a, size_t an, const uint8_t *b, size_t bn)
+{
+    uint8_t buf[PPP_TRACE_MAX];
+    size_t len = hn + an + bn, cap = PPP_TRACE_MAX, n = 0, k;
+
+    if (!p->cfg.trace || proto < 0x8000)
+        return;
+    if (proto == PPP_PROTO_PAP || proto == PPP_PROTO_CHAP)
+        cap = 4;                        /* no secrets in a log */
+    k = hn < cap ? hn : cap; memcpy(buf, h, k); n = k;
+    k = an < cap - n ? an : cap - n; if (k) memcpy(buf + n, a, k); n += k;
+    k = bn < cap - n ? bn : cap - n; if (k) memcpy(buf + n, b, k); n += k;
+    /* a Protocol-Reject carries the packet it rejects: one of PAP or CHAP
+     * no further than that packet's own header */
+    if (proto == PPP_PROTO_LCP && n >= 6 && buf[0] == 8) {
+        unsigned rp = (unsigned)buf[4] << 8 | buf[5];
+        if ((rp == PPP_PROTO_PAP || rp == PPP_PROTO_CHAP) && n > 10)
+            n = 10;
+    }
+    p->cfg.trace(p->cfg.ctx, out, p->uptime_ms, proto, buf, n, len);
+}
+
 static int tx_frame(ppp_t *p, uint16_t proto,
                     const uint8_t *h, size_t hn,
                     const uint8_t *a, size_t an,
@@ -230,6 +265,7 @@ static int tx_frame(ppp_t *p, uint16_t proto,
         return -1;
     p->tx_tail += n;
     p->cnt.tx_frames++;
+    trace(p, 1, proto, h, hn, a, an, b, bn);
     return 0;
 }
 
@@ -350,7 +386,12 @@ static int negotiate(ppp_t *p, ppp_fsm_t *f, judge_fn judge,
 {
     int exhausted = f->failures >= f->max_failure;
     int worst = PPP_CONF_ACK, pass;
-    size_t n = 0;
+    size_t n = 0, fit = (size_t)(f->peer_mru ? f->peer_mru : PPP_MAX_MRU) - 4u;
+
+    /* the reply (its 4-octet header and the options) within the peer's MRU,
+     * as every other packet we send: whole options, as many as fit */
+    if (max > fit)
+        max = fit;
 
     for (pass = 0; pass < 2; pass++) {
         size_t pos = 0, vlen, slen;
@@ -659,9 +700,12 @@ static void lcp_recv_rej(ppp_fsm_t *f, const uint8_t *opts, size_t len)
         case LCP_OPT_PFC:   p->w_pfc = 0; break;
         case LCP_OPT_ACFC:  p->w_acfc = 0; break;
         case LCP_OPT_AUTH:
-            /* the peer does not authenticate at all */
+            /* the peer will not do this method: some old stacks Reject a
+             * method they do not know (MS-CHAPv2) where they should Nak.
+             * The next one allowed, if any is left; authentication stays
+             * mandatory, so with none left the link ends. */
             if (p->w_auth)
-                request_close(p, PPP_END_AUTH_REFUSED);
+                lcp_auth_refused(p, 0);
             break;
         default:
             break;
@@ -672,6 +716,7 @@ static void lcp_recv_rej(ppp_fsm_t *f, const uint8_t *opts, size_t len)
 static void auth_start(ppp_t *p);
 static void network_start(ppp_t *p);
 static void network_stop(ppp_t *p);
+static void ccp_start(ppp_t *p);
 
 static void lcp_up(ppp_fsm_t *f)
 {
@@ -755,6 +800,12 @@ static int lcp_ext_code(ppp_fsm_t *f, uint8_t code, uint8_t id,
         proto = ((unsigned)data[0] << 8) | data[1];
         if (proto == PPP_PROTO_LCP)
             return PPP_FSM_EXT_RXJ_BAD;
+        if (proto == PPP_PROTO_VJC || proto == PPP_PROTO_VJUC) {
+            /* it will not take VJ after all: plain IP from now on */
+            ppp_vj_tx_init(&p->vj, 0, 0);
+            p->cnt.vj_tx_slots = 0;
+            return PPP_FSM_EXT_NONE;
+        }
         if (proto == PPP_PROTO_IPCP || proto == PPP_PROTO_IP) {
             /* without IP this link has no purpose */
             if (p->phase == PPP_PHASE_NETWORK)
@@ -1109,19 +1160,30 @@ static void ipcp_reset(ppp_fsm_t *f)
     p->our_ip = p->cfg.our_ip;
     p->w_addr = (p->our_ip != 0);
     p->addr_naks = 0;
+    p->w_vj = (uint8_t)!p->cfg.no_vj;
 }
 
 static size_t ipcp_build_cr(ppp_fsm_t *f, uint8_t *o, size_t max)
 {
     ppp_t *p = (ppp_t *)f->ctx;
 
+    size_t n = 0;
+
     (void)max;
-    if (!p->w_addr)
-        return 0;
-    o[0] = IPCP_OPT_ADDR;
-    o[1] = 6;
-    put32(o + 2, p->our_ip);
-    return 6;
+    if (p->w_vj) {
+        /* RFC 1332 3.2: VJ, Max-Slot-Id (slots - 1), Comp-Slot-Id (the
+         * slot number may be left out of a compressed packet) */
+        o[n++] = IPCP_OPT_COMP; o[n++] = 6;
+        o[n++] = (uint8_t)(PPP_PROTO_VJC >> 8); o[n++] = (uint8_t)PPP_PROTO_VJC;
+        o[n++] = PPP_VJ_SLOTS - 1; o[n++] = 1;
+    }
+    if (p->w_addr) {
+        o[n++] = IPCP_OPT_ADDR;
+        o[n++] = 6;
+        put32(o + n, p->our_ip);
+        n += 4;
+    }
+    return n;
 }
 
 static int ipcp_judge(ppp_t *p, uint8_t type, const uint8_t *val, size_t vlen,
@@ -1156,9 +1218,19 @@ static int ipcp_judge(ppp_t *p, uint8_t type, const uint8_t *val, size_t vlen,
         put32(sugg, dns);
         *slen = 4;
         return PPP_CONF_NAK;
+    case IPCP_OPT_COMP:
+        /* Van Jacobson (0x002d) in RFC 1332's form (Max-Slot-Id,
+         * Comp-Slot-Id) or RFC 1172's older one without them (16 slots,
+         * the slot number may be left out): how we compress towards the
+         * peer. Any number of slots is fine: we use no more than 16 of
+         * them. Another protocol (RFC 2507's IPHC, say) is not done here. */
+        if (p->cfg.no_vj || vlen < 2 || get16(val) != PPP_PROTO_VJC || (vlen != 2 && vlen != 4))
+            return PPP_CONF_REJ;
+        p->pend_vj_slots = (uint8_t)(vlen == 4 ? (val[2] >= PPP_VJ_SLOTS ? PPP_VJ_SLOTS : val[2] + 1) : PPP_VJ_SLOTS);
+        p->pend_vj_cid = (uint8_t)(vlen == 4 ? val[3] != 0 : 1);
+        return PPP_CONF_ACK;
     default:
-        /* IP-Compression-Protocol (Van Jacobson) is not implemented; the
-         * deprecated IP-Addresses option and NBNS are not supported */
+        /* the deprecated IP-Addresses option and NBNS are not supported */
         return PPP_CONF_REJ;
     }
 }
@@ -1173,6 +1245,8 @@ static int ipcp_recv_cr(ppp_fsm_t *f, const uint8_t *opts, size_t len,
     int has_addr = 0, r;
 
     p->pend_peer_ip = 0;
+    p->pend_vj_slots = 0;
+    p->pend_vj_cid = 0;
     while (ppp_fsm_next_option(opts, len, &pos, &type, &val, &vlen))
         if (type == IPCP_OPT_ADDR)
             has_addr = 1;
@@ -1205,6 +1279,12 @@ static void ipcp_recv_nak(ppp_fsm_t *f, const uint8_t *opts, size_t len)
     const uint8_t *val;
 
     while (ppp_fsm_next_option(opts, len, &pos, &type, &val, &vlen)) {
+        if (type == IPCP_OPT_COMP) {
+            /* a Nak toward another compression protocol: not one we do */
+            if (vlen < 2 || get16(val) != PPP_PROTO_VJC)
+                p->w_vj = 0;
+            continue;
+        }
         if (type != IPCP_OPT_ADDR || vlen != 4)
             continue;
         if (p->cfg.our_ip == 0) {
@@ -1225,9 +1305,12 @@ static void ipcp_recv_rej(ppp_fsm_t *f, const uint8_t *opts, size_t len)
     uint8_t type;
     const uint8_t *val;
 
-    while (ppp_fsm_next_option(opts, len, &pos, &type, &val, &vlen))
+    while (ppp_fsm_next_option(opts, len, &pos, &type, &val, &vlen)) {
         if (type == IPCP_OPT_ADDR)
             p->w_addr = 0;
+        if (type == IPCP_OPT_COMP)
+            p->w_vj = 0;
+    }
 }
 
 static void ipcp_up(ppp_fsm_t *f)
@@ -1235,6 +1318,12 @@ static void ipcp_up(ppp_fsm_t *f)
     ppp_t *p = (ppp_t *)f->ctx;
 
     p->peer_ip = p->pend_peer_ip;
+    /* header compression as each request was Acked: towards the peer as it
+     * asked, from it as we did; every slot empty */
+    ppp_vj_tx_init(&p->vj, p->pend_vj_slots, p->pend_vj_cid);
+    ppp_vj_rx_init(&p->vj, p->w_vj ? PPP_VJ_SLOTS : 0);
+    p->cnt.vj_tx_slots = p->pend_vj_slots;
+    p->cnt.vj_rx_slots = (uint8_t)(p->w_vj ? PPP_VJ_SLOTS : 0);
 }
 
 static void ipcp_finished(ppp_fsm_t *f)
@@ -1276,11 +1365,75 @@ static unsigned comp_of(unsigned opt)
     return opt == CCP_OPT_MPPC ? PPP_COMP_MPPC : opt ? PPP_COMP_DEFLATE : PPP_COMP_NONE;
 }
 
+/* MPPE key lengths, strongest first: the strength of a key bit, and the
+ * strongest one in a set of them */
+static int mppe_rank(uint32_t bit)
+{
+    return bit == MPPE_BIT_S ? 3 : bit == MPPE_BIT_M ? 2 : bit == MPPE_BIT_L ? 1 : 0;
+}
+
+static uint32_t mppe_best(uint32_t v)
+{
+    return v & MPPE_BIT_S ? MPPE_BIT_S : v & MPPE_BIT_M ? MPPE_BIT_M : v & MPPE_BIT_L ? MPPE_BIT_L : 0;
+}
+
+/* The peer has shown which key lengths it has. Its own Configure-Request
+ * says so with authority: the length becomes the strongest it offers (and
+ * that is the floor from then on). A Nak (one frame anyone on the line
+ * could inject) may only bring the length down to a shorter one the peer
+ * offers, never below the strongest of its own request: a peer that asked
+ * for 128-bit is not talked down to 40. */
+static void mppe_settle(ppp_t *p, uint32_t v, int request)
+{
+    uint32_t best = mppe_best(v & MPPE_KEYS);
+    if (!best)
+        return;
+    if (request) {
+        /* the floor only ever rises: a later request that claims less
+         * than an earlier one offered (one injected, say) changes nothing */
+        if (mppe_rank(best) >= mppe_rank(p->mppe_floor)) {
+            p->mppe_key = best;
+            p->mppe_floor = best;
+        }
+        return;
+    }
+    if (!(v & p->mppe_key) && mppe_rank(best) < mppe_rank(p->mppe_key) &&
+        mppe_rank(best) >= mppe_rank(p->mppe_floor))
+        p->mppe_key = best;
+}
+
 /* whether CCP is spoken at all: for compression, or for MPPE once the keys
  * are in hand (MPPE is negotiated inside CCP) */
 static int ccp_wanted(const ppp_t *p)
 {
-    return p->cfg.comp != 0 || (p->cfg.encrypt && p->mppe_have);
+    return p->cfg.comp != 0 || p->mppe_have;
+}
+
+/* On request: does this option-18 value ask for encryption? It names an
+ * MPPE key length, and the keys are in hand. A request that also asks for
+ * MPPC (Windows' "optional encryption", 0x61) takes either, and we do not
+ * do both at once: it keeps MPPC (in the clear, as text is far quicker
+ * compressed) where we do MPPC, and gets MPPE only where we do not. */
+static int mppe_asks(const ppp_t *p, uint32_t v)
+{
+    if (!(v & MPPE_KEYS) || !p->mppe_have)
+        return 0;
+    return !((v & MPPC_BIT) && (p->cfg.comp & PPP_COMP_MPPC));
+}
+
+/* MPPE is what our request carries and what we take: encryption required,
+ * or (on request, the default) the caller has asked for it; with the keys
+ * of an MS-CHAPv2 login either way */
+static int mppe_want(const ppp_t *p)
+{
+    return p->mppe_have && (p->cfg.encrypt || p->mppe_asked);
+}
+
+/* nothing in the clear: encryption required, a caller that has asked for
+ * it, or MPPE that has run (a CCP gone down must not leave the clear) */
+static int mppe_hold(const ppp_t *p)
+{
+    return p->cfg.encrypt || (p->mppe_asked && p->mppe_have) || p->mppe_started;
 }
 
 static unsigned cw_bit(unsigned opt)
@@ -1299,14 +1452,18 @@ static void ccp_pick(ppp_t *p)
     /* set again by ccp_build_cr if the new wish is MPPE: an MPPE request the
      * peer refused must not count as agreed when CCP opens on another one */
     p->cw_mppe = 0;
-    if (p->cfg.comp_no_rx)
+    if (p->cfg.comp_no_rx && !mppe_want(p))
         return;
+    /* MPPE, when it is wanted, before any compression: the caller asked */
+    if (mppe_want(p) && !(p->cw_tried & cw_bit(CCP_OPT_MPPC))) {
+        p->cw_opt = CCP_OPT_MPPC;
+        return;
+    }
     for (i = 0; i < 3; i++) {
         unsigned opt = order[i];
         int want = (p->cfg.comp & comp_of(opt)) != 0;
-        /* option 18 is also wanted for encryption, even with no MPPC */
-        if (opt == CCP_OPT_MPPC && p->cfg.encrypt && p->mppe_have)
-            want = 1;
+        if (mppe_want(p))
+            want = 0;               /* MPPE or nothing */
         if (want && !(p->cw_tried & cw_bit(opt))) {
             p->cw_opt = opt;
             return;
@@ -1342,10 +1499,11 @@ static size_t ccp_build_cr(ppp_fsm_t *f, uint8_t *o, size_t max)
          * (RFC 2118 section 2) */
         o[0] = CCP_OPT_MPPC;
         o[1] = 6;
-        p->cw_mppe = (uint8_t)(p->cfg.encrypt && p->mppe_have);
+        p->cw_mppe = (uint8_t)mppe_want(p);
         /* the mode is that of this request: what an Ack of it agrees */
         p->cw_mppe_h = p->cw_want_h;
-        put32(o + 2, p->cw_mppe ? (MPPE_BIT_S | (p->cw_mppe_h ? MPPE_BIT_H : 0)) : MPPC_BIT);
+        p->cw_mppe_key = p->mppe_key;
+        put32(o + 2, p->cw_mppe ? (p->mppe_key | (p->cw_mppe_h ? MPPE_BIT_H : 0)) : MPPC_BIT);
         return 6;
     }
     if (p->cw_opt) {
@@ -1375,28 +1533,39 @@ static int ccp_judge(ppp_t *p, uint8_t type, const uint8_t *val, size_t vlen,
          * Nak'd toward what we do. Every copy of the option is judged here,
          * not only the one ccp_recv_cr chose, so the length is checked here. */
         uint32_t v = vlen == 4 ? get32(val) : 0;
-        if (p->cfg.encrypt && p->mppe_have) {
-            uint32_t h = v & MPPE_BIT_H;
-            if (vlen == 4) {
-                p->cnt.mppe_peer_req = v;
-                p->cnt.mppe_seen |= PPP_MPPE_SEEN_REQ;
+        if (vlen == 4) {
+            /* for the log, whether or not we encrypt: what the peer asked */
+            p->cnt.mppe_peer_req = v;
+            p->cnt.mppe_seen |= PPP_MPPE_SEEN_REQ;
+            /* on request: a caller that asks for MPPE (with the keys in
+             * hand) gets it, and from now on nothing in the clear */
+            if (mppe_asks(p, v) && !p->mppe_asked) {
+                p->mppe_asked = 1;
+                if (p->cw_opt != CCP_OPT_MPPC || !p->cw_mppe)
+                    p->ccp_switch = 1;      /* our own request becomes MPPE */
             }
-            if (vlen == 4 && (v & (MPPE_BIT_S | 0xa0u)) && !h)
+        }
+        if (mppe_want(p)) {
+            uint32_t h = v & MPPE_BIT_H;
+            if (vlen == 4 && (v & MPPE_KEYS) && !h)
                 /* a peer that asks for stateful MPPE (Windows on a modem
                  * link) gets asked for the same from now on: it would Nak
                  * stateless down to it anyway */
                 p->cw_want_h = 0;
-            if (vlen == 4 && (v & ~MPPE_BIT_H) == MPPE_BIT_S) {
+            if (vlen == 4)
+                mppe_settle(p, v, 1);
+            if (vlen == 4 && (v & ~MPPE_BIT_H) == p->mppe_key) {
                 p->cpend_opt = type;
                 p->cpend_wbits = 0;
                 p->cpend_mppe = 1;
                 p->cpend_mppe_h = (uint8_t)(h != 0);
+                p->cpend_mppe_key = p->mppe_key;
                 return PPP_CONF_ACK;
             }
             /* RFC 3078 section 2: Nak with the one key length we do, in the
-             * mode the peer asked for; 40/56-bit, MPPC and the obsolete D
+             * mode the peer asked for; the others, MPPC and the obsolete D
              * bit come off */
-            put32(sugg, MPPE_BIT_S | h);
+            put32(sugg, p->mppe_key | h);
             *slen = 4;
             return PPP_CONF_NAK;
         }
@@ -1446,8 +1615,9 @@ static int ccp_recv_cr(ppp_fsm_t *f, const uint8_t *opts, size_t len,
 
         if (type == CCP_OPT_DEFLATE && (p->cfg.comp & PPP_COMP_DEFLATE)) r = 3;
         else if (type == CCP_OPT_DEFLATE_DRAFT && (p->cfg.comp & PPP_COMP_DEFLATE)) r = 2;
+        else if (type == CCP_OPT_MPPC && vlen == 4 && mppe_asks(p, get32(val))) r = 4;  /* encryption first */
         else if (type == CCP_OPT_MPPC && vlen == 4 &&
-                 ((p->cfg.comp & PPP_COMP_MPPC) || (p->cfg.encrypt && p->mppe_have))) r = 1;
+                 ((p->cfg.comp & PPP_COMP_MPPC) || mppe_want(p))) r = 1;
         if (r > rank) {
             rank = r;
             p->cchosen = type;
@@ -1483,7 +1653,9 @@ static void ccp_recv_nak(ppp_fsm_t *f, const uint8_t *opts, size_t len)
                 p->cnt.mppe_peer_nak = v;
                 p->cnt.mppe_seen |= PPP_MPPE_SEEN_NAK;
             }
-            if ((v & MPPE_BIT_S) && ++p->cw_naks <= CW_NAK_LIMIT)
+            if (vlen == 4)
+                mppe_settle(p, v, 0);
+            if ((v & p->mppe_key) && ++p->cw_naks <= CW_NAK_LIMIT)
                 p->cw_want_h = (uint8_t)((v & MPPE_BIT_H) != 0);
             else
                 ccp_drop_wish(p);
@@ -1514,9 +1686,16 @@ static void ccp_recv_rej(ppp_fsm_t *f, const uint8_t *opts, size_t len)
     uint8_t type;
     const uint8_t *val;
 
-    while (ppp_fsm_next_option(opts, len, &pos, &type, &val, &vlen))
-        if (type == p->cw_opt)
-            ccp_drop_wish(p);
+    while (ppp_fsm_next_option(opts, len, &pos, &type, &val, &vlen)) {
+        if (type != p->cw_opt)
+            continue;
+        /* MPPE at a key length the peer has since shown it lacks (pppd
+         * Rejects where Windows Naks): ask again at the one now settled */
+        if (type == CCP_OPT_MPPC && p->cw_mppe && p->cw_mppe_key != p->mppe_key &&
+            ++p->cw_naks <= CW_NAK_LIMIT)
+            continue;
+        ccp_drop_wish(p);
+    }
 }
 
 static void ccp_up(ppp_fsm_t *f)
@@ -1536,7 +1715,22 @@ static void ccp_up(ppp_fsm_t *f)
             request_close(p, PPP_END_ENCRYPT_REQUIRED);
             return;
         }
-        ppp_mppe_begin(&p->mppe, p->mppe_send, p->mppe_recv, 16, PPP_MPPE_FORCE_NONE);
+        if (p->cw_mppe_key != p->cpend_mppe_key) {
+            /* our request was Acked at one key length and the peer's at
+             * another (it showed its shorter keys only after Acking ours):
+             * MPPE is one length both ways, so ask again at the one now
+             * settled, before anything is keyed */
+            p->tx_alg = p->rx_alg = PPP_COMP_NONE;
+            p->ccp_redo = 1;
+            return;
+        }
+        /* RFC 3079 3.3: the short keys are the first 8 octets of the
+         * master start keys, their first octets then forced (3.4) */
+        ppp_mppe_begin(&p->mppe, p->mppe_send, p->mppe_recv,
+                       p->mppe_key == MPPE_BIT_S ? 16 : 8,
+                       p->mppe_key == MPPE_BIT_M ? PPP_MPPE_FORCE_56
+                       : p->mppe_key == MPPE_BIT_L ? PPP_MPPE_FORCE_40 : PPP_MPPE_FORCE_NONE);
+        p->cnt.mppe_keybits = (uint8_t)(p->mppe_key == MPPE_BIT_S ? 128 : p->mppe_key == MPPE_BIT_M ? 56 : 40);
         /* the mode of each direction is the one its Ack agreed: the peer's
          * request is our transmit direction, ours our receive */
         ppp_mppe_stateful(&p->mppe, !p->cpend_mppe_h, !p->cw_mppe_h);
@@ -1557,6 +1751,19 @@ static void ccp_up(ppp_fsm_t *f)
          * link instead of carrying the caller's traffic unencrypted. */
         p->tx_alg = p->rx_alg = PPP_COMP_NONE;
         request_close(p, PPP_END_ENCRYPT_REQUIRED);
+        return;
+    }
+    if (mppe_want(p)) {
+        /* on request: the caller asked for MPPE, but CCP came up without it
+         * both ways (it also Acked our compression): ask again with MPPE,
+         * a few times, then end rather than carry its traffic in the clear */
+        p->tx_alg = p->rx_alg = PPP_COMP_NONE;
+        if (++p->mppe_redos > 3) {
+            request_close(p, PPP_END_ENCRYPT_REQUIRED);
+            return;
+        }
+        p->cw_tried &= (uint8_t)~cw_bit(CCP_OPT_MPPC);
+        p->ccp_redo = 1;
         return;
     }
     p->tx_alg = (uint8_t)comp_of(p->cpend_opt);
@@ -1609,6 +1816,7 @@ static void ccp_renegotiate(ppp_t *p)
  * compressor afresh; until it has, compressed packets are discarded. */
 static void comp_rx_error(ppp_t *p)
 {
+    ppp_vj_rx_lost(&p->vj);
     p->cnt.comp_rx_errors++;
     p->cnt.comp_rx_dropped++;
     if (p->ccp.rejected_codes & (1u << CCP_RESET_REQ)) {
@@ -1642,10 +1850,19 @@ static void comp_reset_again(ppp_t *p)
  * back. No Reset-Ack is waited for. */
 static void mppe_rx_error(ppp_t *p)
 {
+    ppp_vj_rx_lost(&p->vj);
     p->cnt.comp_rx_errors++;
+    if (ppp_mppe_rx_late(&p->mppe) >= PPP_MPPE_LATE_MAX) {
+        /* the peer's count is out of reach for good: end the link rather
+         * than stay up carrying nothing (a re-key would reuse the keystream) */
+        p->tx_alg = p->rx_alg = PPP_COMP_NONE;
+        request_close(p, PPP_END_MPPE_LOST);
+        return;
+    }
     if (!ppp_mppe_rx_out_of_step(&p->mppe))
         return;
     p->cnt.comp_rx_dropped++;
+    ppp_vj_rx_lost(&p->vj);     /* a VJ packet may have been in it (RFC 1144 4.2) */
     if (p->rx_wait && p->rr_timer > 0)
         return;
     if (p->ccp.rejected_codes & (1u << CCP_RESET_REQ))
@@ -1666,7 +1883,7 @@ static void encrypt_tick(ppp_t *p, uint32_t ms)
 {
     uint32_t limit = p->cfg.restart_ms * (p->cfg.max_configure + 1u);
 
-    if (!p->cfg.encrypt || p->phase != PPP_PHASE_NETWORK || p->tx_alg == PPP_COMP_MPPE)
+    if (!mppe_hold(p) || p->phase != PPP_PHASE_NETWORK || p->tx_alg == PPP_COMP_MPPE)
         return;
     p->enc_wait_ms += ms;
     if (p->enc_wait_ms >= limit)
@@ -1779,10 +1996,57 @@ static void network_start(ppp_t *p)
     /* RFC 1962 section 2: CCP belongs to the Network-Layer Protocol phase */
     p->cw_tried = 0;
     p->cw_want_h = 1;           /* stateless first, as pppd asks */
+    p->mppe_key = MPPE_BIT_S;   /* 128-bit until the peer shows it has less */
+    p->mppe_floor = 0;          /* no request from the peer yet */
+    p->mppe_asked = 0;
+    p->ccp_switch = 0;
+    p->mppe_redos = 0;
+    p->ccp_redo = 0;
     p->enc_wait_ms = 0;
+    p->ccp_wait_ms = 0;
     if (ccp_wanted(p)) {
-        ppp_fsm_open(&p->ccp);
-        ppp_fsm_up(&p->ccp);
+        if (p->mppe_have && !p->cfg.encrypt)
+            /* encryption on request: wait (a Restart period at most) for
+             * the caller's request, so that ours can be MPPE if it asks
+             * for it -- pppd with require-mppe ends the link on a server
+             * whose first request is anything else */
+            p->ccp_wait_ms = p->ccp.restart_ms ? p->ccp.restart_ms : 3000;
+        else
+            ccp_start(p);
+    }
+}
+
+/* CCP from Initial: open it and send our request */
+static void ccp_start(ppp_t *p)
+{
+    p->ccp_wait_ms = 0;
+    ppp_fsm_open(&p->ccp);
+    ppp_fsm_up(&p->ccp);
+}
+
+/* While CCP waits for the caller (encryption on request): what its first
+ * request says about MPPE, before ours is built from it */
+static void ccp_prescan(ppp_t *p, const uint8_t *info, size_t n)
+{
+    size_t len, pos = 0, vlen;
+    uint8_t type;
+    const uint8_t *val;
+
+    if (n < 4 || info[0] != PPP_CONF_REQ)
+        return;
+    len = (size_t)info[2] << 8 | info[3];
+    if (len < 4 || len > n)
+        return;
+    while (ppp_fsm_next_option(info + 4, len - 4, &pos, &type, &val, &vlen)) {
+        uint32_t v;
+        if (type != CCP_OPT_MPPC || vlen != 4)
+            continue;
+        v = get32(val);
+        if (!mppe_asks(p, v))
+            continue;
+        p->mppe_asked = 1;
+        mppe_settle(p, v, 1);
+        p->cw_want_h = (uint8_t)((v & MPPE_BIT_H) != 0);
     }
 }
 
@@ -1796,6 +2060,7 @@ static void network_stop(ppp_t *p)
     p->peer_ip = 0;
     ppp_fsm_down(&p->ccp);
     ppp_fsm_close(&p->ccp);
+    p->ccp_wait_ms = 0;         /* a wait for the caller's CCP request ends too */
 }
 
 /* ---------------------------------------------------------------- */
@@ -1823,10 +2088,34 @@ static void net_input(ppp_t *p, uint16_t proto, const uint8_t *info, size_t n, i
     case PPP_PROTO_IPCP:
         ppp_fsm_input(&p->ipcp, info, n);
         break;
+    case PPP_PROTO_VJC:
+    case PPP_PROTO_VJUC:
+        /* Van Jacobson: only where we asked for it (otherwise as any
+         * protocol not agreed), rebuilt into the datagram it was */
+        if (!p->vj.rx_slots) {
+            protocol_reject(p, proto, info, n);
+            break;
+        }
+        if ((mppe_hold(p) && !encrypted) || p->ipcp.state != PPP_FSM_OPENED) {
+            p->cnt.rx_discards++;
+            break;
+        }
+        {
+            int r = ppp_vj_uncompress(&p->vj, proto, info, n, p->vjbuf, sizeof p->vjbuf);
+            if (r < 0) {
+                p->cnt.vj_errors++;
+                break;
+            }
+            if (proto == PPP_PROTO_VJC) p->cnt.vj_rx_comp++; else p->cnt.vj_rx_uncomp++;
+            p->cnt.rx_ip++;
+            if (p->cfg.ip_rx)
+                p->cfg.ip_rx(p->cfg.ctx, p->vjbuf, (size_t)r);
+        }
+        break;
     case PPP_PROTO_IP:
         /* fail closed: with encryption required, IP only via MPPE, never a
          * cleartext datagram slipped past the negotiation */
-        if (p->cfg.encrypt && !encrypted) {
+        if (mppe_hold(p) && !encrypted) {
             p->cnt.rx_discards++;
         } else if (p->ipcp.state == PPP_FSM_OPENED) {
             p->cnt.rx_ip++;
@@ -1882,6 +2171,7 @@ static void comp_input(ppp_t *p, const uint8_t *info, size_t n)
          * packet is decoded */
         if (p->rx_wait) {
             p->cnt.comp_rx_dropped++;
+            ppp_vj_rx_lost(&p->vj);     /* a VJ packet may have been in it (RFC 1144 4.2) */
             return;
         }
         r = hdr == p->rx_seq ? ppp_deflate_decompress(&p->cdec.d, info + 2, n - 2, p->cbuf_rx, sizeof p->cbuf_rx) : -1;
@@ -1901,6 +2191,7 @@ static void comp_input(ppp_t *p, const uint8_t *info, size_t n)
             p->rx_wait = 0;
         } else if (p->rx_wait) {
             p->cnt.comp_rx_dropped++;
+            ppp_vj_rx_lost(&p->vj);     /* a VJ packet may have been in it (RFC 1144 4.2) */
             /* still the old history, a Restart period after we asked */
             if (p->rr_timer == 0)
                 comp_reset_again(p);
@@ -1970,6 +2261,7 @@ static void handle_frame(ppp_t *p)
     }
     info = p->rx.buf + off;
     n = p->rx.len - off;
+    trace(p, 0, proto, info, n, NULL, 0, NULL, 0);
 
     if (proto == PPP_PROTO_LCP) {
         int was_open = p->lcp.state == PPP_FSM_OPENED;
@@ -2029,9 +2321,29 @@ static void handle_frame(ppp_t *p)
     }
     switch (proto) {
     case PPP_PROTO_CCP:
-        if (ccp_wanted(p))
+        if (ccp_wanted(p)) {
+            if (p->ccp_wait_ms) {
+                ccp_prescan(p, info, n);
+                ccp_start(p);
+            }
             ppp_fsm_input(&p->ccp, info, n);
-        else
+            if (p->ccp_redo) {
+                p->ccp_redo = 0;
+                p->ccp_switch = 0;
+                ccp_renegotiate(p);
+            } else if (p->ccp_switch) {
+                /* the caller asked for MPPE while our request is still for
+                 * compression: the next one we send is MPPE */
+                p->ccp_switch = 0;
+                if (p->ccp.state != PPP_FSM_OPENED) {
+                    /* send it now: back to Starting and up again (nothing
+                     * was Opened, so nothing is torn down) */
+                    p->cw_tried &= (uint8_t)~cw_bit(CCP_OPT_MPPC);
+                    ppp_fsm_down(&p->ccp);
+                    ppp_fsm_up(&p->ccp);
+                }
+            }
+        } else
             protocol_reject(p, proto, info, n);
         break;
     case PPP_PROTO_COMP:
@@ -2148,6 +2460,17 @@ void ppp_close(ppp_t *p)
     do_close(p, PPP_END_LOCAL_CLOSE);
 }
 
+/* RFC 1144 4.2: a frame lost or damaged on the way in may have been a
+ * compressed TCP packet; the decompressor tosses until it is sure again */
+static void vj_check_lost(ppp_t *p)
+{
+    uint32_t lost = p->rx.bad_fcs + p->rx.aborts + p->rx.overlong + p->rx.runts;
+    if (lost != p->vj_lost_seen) {
+        p->vj_lost_seen = lost;
+        ppp_vj_rx_lost(&p->vj);
+    }
+}
+
 void ppp_input_bytes(ppp_t *p, const uint8_t *buf, size_t n)
 {
     size_t i;
@@ -2155,10 +2478,12 @@ void ppp_input_bytes(ppp_t *p, const uint8_t *buf, size_t n)
     for (i = 0; i < n && p->phase != PPP_PHASE_DEAD; i++) {
         p->rx_octets++;
         if (ppp_hdlc_rx_byte(&p->rx, buf[i])) {
+            vj_check_lost(p);       /* one lost before this frame: toss first */
             handle_frame(p);
             run_pending(p);
         }
     }
+    vj_check_lost(p);
 }
 
 size_t ppp_output_pending(const ppp_t *p)
@@ -2181,7 +2506,7 @@ size_t ppp_output_bytes(ppp_t *p, uint8_t *buf, size_t max)
  * comes of it must go out, in this order: the peer's history follows
  * ours packet by packet. So room for the worst case is made sure of
  * before the compressor sees the packet. */
-static int send_compressed(ppp_t *p, const uint8_t *pkt, size_t len)
+static int send_compressed(ppp_t *p, uint16_t proto, const uint8_t *pkt, size_t len)
 {
     /* every octet escaped, header, FCS, flags; and the uncompressed MPPC
      * form has four octets in front of the packet */
@@ -2205,7 +2530,7 @@ static int send_compressed(ppp_t *p, const uint8_t *pkt, size_t len)
         uint8_t plain[PPP_MAX_MRU + 2];
         size_t en;
 
-        plain[0] = 0x00; plain[1] = PPP_PROTO_IP;
+        plain[0] = (uint8_t)(proto >> 8); plain[1] = (uint8_t)proto;
         memcpy(plain + 2, pkt, len);
         en = ppp_mppe_encrypt(&p->mppe, plain, len + 2, p->cbuf_tx, sizeof p->cbuf_tx);
         if (!en) { p->cnt.tx_dropped++; return PPP_ERR_FULL; }
@@ -2214,7 +2539,7 @@ static int send_compressed(ppp_t *p, const uint8_t *pkt, size_t len)
     } else if (p->tx_alg == PPP_COMP_DEFLATE) {
         /* RFC 1979 2.1: the Protocol field in one octet, then the packet.
          * The sequence number counts every packet, sent compressed or not. */
-        static const uint8_t proto1[1] = { PPP_PROTO_IP };
+        const uint8_t proto1[1] = { (uint8_t)proto };     /* 0x0021, 0x002d or 0x002f: one octet */
 
         h[0] = (uint8_t)(p->tx_seq >> 8);
         h[1] = (uint8_t)p->tx_seq;
@@ -2227,7 +2552,7 @@ static int send_compressed(ppp_t *p, const uint8_t *pkt, size_t len)
             r = tx_frame(p, PPP_PROTO_COMP, h, 2, p->cbuf_tx, cn, NULL, 0, PPP_TX_RESERVE);
             sent = cn + 2;
         } else {
-            r = tx_frame(p, PPP_PROTO_IP, NULL, 0, pkt, len, NULL, 0, PPP_TX_RESERVE);
+            r = tx_frame(p, proto, NULL, 0, pkt, len, NULL, 0, PPP_TX_RESERVE);
             sent = len;
             p->cnt.comp_tx_native++;
         }
@@ -2236,7 +2561,7 @@ static int send_compressed(ppp_t *p, const uint8_t *pkt, size_t len)
          * packet. A compressed packet may be at most one octet longer
          * than the packet was (beyond that it has expanded, section 3)
          * and must fit the peer's MRU with its two-octet header. */
-        static const uint8_t proto2[2] = { 0x00, PPP_PROTO_IP };
+        const uint8_t proto2[2] = { (uint8_t)(proto >> 8), (uint8_t)proto };
         size_t max = len + 1;
         unsigned bits;
 
@@ -2260,7 +2585,7 @@ static int send_compressed(ppp_t *p, const uint8_t *pkt, size_t len)
         } else {
             /* that would be longer than the peer's MRU: in its standard
              * form (RFC 1962 2.1), which MPPC does not count */
-            r = tx_frame(p, PPP_PROTO_IP, NULL, 0, pkt, len, NULL, 0, PPP_TX_RESERVE);
+            r = tx_frame(p, proto, NULL, 0, pkt, len, NULL, 0, PPP_TX_RESERVE);
             sent = len;
             p->cnt.comp_tx_native++;
         }
@@ -2288,20 +2613,52 @@ int ppp_send_ip(ppp_t *p, const uint8_t *pkt, size_t len)
         return PPP_ERR_DOWN;
     /* fail closed: with encryption required, never put a datagram on the wire
      * until MPPE is up (IPCP can open before CCP does) */
-    if (p->cfg.encrypt && p->tx_alg != PPP_COMP_MPPE)
+    if (mppe_hold(p) && p->tx_alg != PPP_COMP_MPPE)
         return PPP_ERR_DOWN;
     if (len > p->peer_mru)
         return PPP_ERR_SIZE;
     /* MPPE has no native form to fall back on: the whole frame must fit */
     if (p->tx_alg == PPP_COMP_MPPE && len + PPP_MPPE_OVERHEAD > p->peer_mru)
         return PPP_ERR_SIZE;
-    /* LCP, IPCP and CCP packets never come this way: only IP is compressed */
-    if (p->tx_alg != PPP_COMP_NONE && len > 0)
-        return send_compressed(p, pkt, len);
-    if (tx_frame(p, PPP_PROTO_IP, NULL, 0, pkt, len, NULL, 0, PPP_TX_RESERVE) != 0)
-        return PPP_ERR_FULL;
-    p->cnt.tx_ip++;
-    return 0;
+    {
+        /* Van Jacobson first (RFC 1144, on the datagram), then CCP's
+         * compression or encryption of whatever that made of it */
+        uint16_t proto = PPP_PROTO_IP;
+        const uint8_t *d = pkt;
+        size_t n = len;
+        int r;
+        if (p->vj.tx_slots && len > 0) {
+            /* the slots change only once the packet is surely sent: keep
+             * them to put back if it is not */
+            static ppp_vj_slot_t keep[PPP_VJ_SLOTS];
+            uint8_t keep_lru[PPP_VJ_SLOTS];
+            int keep_last = p->vj.tx_last;
+            memcpy(keep, p->vj.tx, sizeof keep);
+            memcpy(keep_lru, p->vj.tx_lru, sizeof keep_lru);
+            proto = ppp_vj_compress(&p->vj, pkt, len, p->vjbuf, sizeof p->vjbuf, &n);
+            if (!proto) { proto = PPP_PROTO_IP; n = len; }
+            else d = p->vjbuf;
+            /* LCP, IPCP and CCP packets never come this way: only IP is compressed */
+            r = p->tx_alg != PPP_COMP_NONE ? send_compressed(p, proto, d, n)
+                : tx_frame(p, proto, NULL, 0, d, n, NULL, 0, PPP_TX_RESERVE) != 0 ? PPP_ERR_FULL : 0;
+            if (r != 0) {
+                memcpy(p->vj.tx, keep, sizeof keep);
+                memcpy(p->vj.tx_lru, keep_lru, sizeof keep_lru);
+                p->vj.tx_last = keep_last;
+                return r;
+            }
+            if (proto == PPP_PROTO_VJC) p->cnt.vj_tx_comp++;
+            else if (proto == PPP_PROTO_VJUC) p->cnt.vj_tx_uncomp++;
+            if (p->tx_alg == PPP_COMP_NONE) p->cnt.tx_ip++;
+            return 0;
+        }
+        if (p->tx_alg != PPP_COMP_NONE && len > 0)
+            return send_compressed(p, proto, d, n);
+        if (tx_frame(p, proto, NULL, 0, d, n, NULL, 0, PPP_TX_RESERVE) != 0)
+            return PPP_ERR_FULL;
+        p->cnt.tx_ip++;
+        return 0;
+    }
 }
 
 void ppp_tick(ppp_t *p, uint32_t ms)
@@ -2309,6 +2666,12 @@ void ppp_tick(ppp_t *p, uint32_t ms)
     if (p->phase == PPP_PHASE_DEAD)
         return;
     p->uptime_ms += ms;
+    if (p->ccp_wait_ms) {
+        if (ms >= p->ccp_wait_ms)
+            ccp_start(p);           /* the caller sent no request: ours */
+        else
+            p->ccp_wait_ms -= ms;
+    }
     ppp_fsm_tick(&p->lcp, ms);
     ppp_fsm_tick(&p->ipcp, ms);
     ppp_fsm_tick(&p->ccp, ms);

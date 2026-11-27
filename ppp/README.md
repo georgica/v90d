@@ -41,13 +41,30 @@ the caller Acks governs what we send.
 - In the caller's request we Ack the first option we can use in the order
   Deflate 26, Deflate 24, MPPC, and Reject the others in the same answer
   (pppd sends 26, 24 and BSD together and expects exactly that).
-- Encryption changes option 18. When `[ppp] encryption = off` the MPPE bits
-  (0x00000020 / 0x00000040 / 0x00000080 / 0x01000000) are not something we do:
-  a caller's option 18 is Nak'd down to MPPC's 0x00000001, and a caller that
-  insists on encryption runs into Max-Failure and gets a Reject, so no
-  compression and IP stays up. When `[ppp] encryption = on` it is the
-  opposite: `comp` is empty (no Deflate, no MPPC), we request and require
-  128-bit MPPE (option 18, bit 0x00000040), stateless (| 0x01000000) unless
+- Encryption changes option 18. With `cfg.encrypt` 0 (the default, and
+  what the daemon uses since 0.14) encryption is given on request: a caller
+  whose option 18 carries MPPE key bits (0x20 / 0x40 / 0x80), and whose
+  login was MS-CHAPv2 (so the keys are in hand), gets MPPE. One whose
+  request carries MPPC's bit as well (Windows' "optional encryption",
+  0x61) takes either, and we do not do both at once: it keeps MPPC in the
+  clear, as text is far quicker compressed (it gets MPPE only where we do
+  no MPPC). "Require data encryption" (0x60, 0x40) asks for MPPE alone. That request
+  ranks above any compression in it. With the keys in hand CCP waits (a
+  Restart period at most) for the caller's first request before sending
+  ours, so ours is MPPE, in the mode and key length asked, when the caller
+  wants it: pppd with require-mppe ends the link on a server whose first
+  request is anything else. A caller that asks later still gets it: our
+  request becomes MPPE (sent at once if CCP is still negotiating, or by
+  negotiating CCP again if our compression had been Acked); and from then
+  on nothing goes in the clear
+  either way, as with encryption required. A caller that asks for no MPPE
+  gets compression and the clear, as before; one that asks without the
+  keys (another login) is Nak'd down to MPPC's 0x00000001. With
+  `cfg.encrypt` 1 (required) `comp` is empty (no Deflate, no MPPC), we
+  request and require
+  128-bit MPPE (option 18, bit 0x00000040), or for a caller that has only
+  shorter keys the strongest of 56-bit (0x80) and 40-bit (0x20) it has
+  (Windows 9x/ME without the 128-bit upgrade), stateless (| 0x01000000) unless
   the caller wants stateful, as Windows does on a modem; and if MPPE is not
   agreed in both directions the link is closed rather than run in the clear. That path is detailed under "RFC 2759 / 3078 / 3079" below.
 
@@ -259,8 +276,31 @@ RFC 2759 / 3078 / 3079 (MS-CHAPv2 and MPPE):
     count since the last packet, stepping over lost ones, up to
     `PPP_MPPE_WINDOW` (2047, under half the counts, as the kernel does); a
     count at or behind the last one (a replay) or further ahead is dropped
-    and changes nothing. A frame without D is refused. We offer 128-bit (S,
-    0x40) only.
+    and changes nothing. The key changes for a run of lost packets are paid
+    out of a credit (8 a packet, at most 512 saved): a run longer than the
+    credit is caught up on over the next packets (the receiver steps as far
+    as the credit goes and drops the packet), so a long burst of loss is
+    always followed, while a peer that jumps ahead in every packet costs
+    only the credit. Past the window neither mode can get back in step
+    (re-keying would reuse the keystream): after `PPP_MPPE_LATE_MAX` (32)
+    such packets in a row the link ends with `PPP_END_MPPE_LOST`. A frame
+    without D is refused. One key length both ways: we offer 128-bit (S,
+    0x40) and accept 56-bit (M, 0x80) or 40-bit (L, 0x20) only from a peer
+    whose request or Nak shows it has nothing longer (its strongest); the
+    short keys are the first 8 octets of the master start keys, forced as
+    in 3.4 (RFC 3079 3.3; the kernel does the same). Should the two
+    directions be Acked at different lengths (a peer that showed its short
+    keys only after Acking our 128-bit request), CCP is negotiated again
+    before anything is keyed. A Nak (one frame anyone on the line could
+    inject) never takes the length below the strongest of the peer's own
+    request. On request (the default) our first request follows the
+    caller's, key length included; with encryption required it is 128-bit
+    alone, as when Windows XP and 11 were confirmed against it, and a
+    Windows 9x/ME client Naks it down. The short keys' packets are checked
+    against a reference written apart (`test/test_mppe.c`,
+    test_short_vectors; its 40-bit initial key is RFC 3079 3.5's), and
+    `srv/test/ns_pppd.c` runs a `require-mppe-40` call against the
+    kernel's `ppp_mppe`.
 30a. Stateful MPPE (H clear; RFC 3078 7.2, 8.2), per direction, which is
     the only mode a Windows client does on a modem or PPPoE link (issue #6;
     Windows does stateless on its VPN links only). We ask for stateless
@@ -287,7 +327,7 @@ RFC 2759 / 3078 / 3079 (MS-CHAPv2 and MPPE):
     `srv/test/ns_pppd.c` runs a whole call against pppd with
     `require-mppe-128` and the kernel's `ppp_mppe`.
 31. Fails closed. With `cfg.encrypt`: CCP offers and accepts option 18 with
-    128-bit MPPE only (`comp` is cleared at `ppp_init`, so no
+    MPPE only, 128-bit or the short keys above (`comp` is cleared at `ppp_init`, so no
     Deflate or MPPC to fall back to); if MPPE is not agreed in both
     directions when CCP opens, if the peer Protocol-Rejects CCP, if the login
     gave no keys, or if MPPE is still not up after CCP's whole retry span
@@ -304,6 +344,46 @@ RFC 2759 / 3078 / 3079 (MS-CHAPv2 and MPPE):
     Reset-Request; stateful, only out of step (30a), and a Reset-Request
     never leads to a CCP renegotiation. The keys of a login are wiped when
     LCP goes down.
+33. What the caller asked for on option 18 is kept (`mppe_peer_req`)
+    whether or not we encrypt, so a call that ends because the caller
+    wanted MPPE and did not get it (Windows error 742) shows its request
+    in the log.
+34. A trace (`cfg.trace`, optional) of every control packet each way (any
+    protocol from 0x8000: LCP, PAP, CHAP, IPCP, CCP), never IP: the time
+    since `ppp_init`, the protocol, up to `PPP_TRACE_MAX` (64) octets from
+    the Code octet, and the whole length. PAP and CHAP give their 4-octet
+    header only: no password, challenge answer or name reaches a log, and
+    nor does one inside an LCP Protocol-Reject of a PAP or CHAP packet.
+    Received packets are traced on arrival, before they are judged.
+    Configure-Nak and -Reject replies, like every other packet we send, fit
+    the peer's MRU (whole options, as many as fit; the peer asks again
+    without them).
+35. Van Jacobson TCP/IP header compression (RFC 1144; `ppp_vj.c`), IPCP
+    option 2 with protocol 0x002d (RFC 1332 3.2), each way on its own. Our
+    request offers it with Max-Slot-Id 15 (16 slots) and Comp-Slot-Id 1;
+    the peer's, in RFC 1332's form or RFC 1172's older 4-octet one, is
+    Acked with any slot count (we use at most 16) and its Comp-Slot-Id
+    honoured (0: every compressed packet names its slot). Any other
+    compression protocol (RFC 2507's IPHC, 0x0061) is Rejected; a Nak
+    toward one drops ours. `cfg.no_vj` turns it off both ways. A TCP
+    datagram goes as 0x002d (only what changed: a few octets for an echoed
+    keystroke) or 0x002f (whole, its slot in the protocol field: a new
+    connection, a resend, changed options); anything else as 0x0021.
+    VJ works on the datagram, before CCP: what it makes is compressed or
+    encrypted like IP, and under MPPE a cleartext VJ packet is dropped
+    like cleartext IP. After a frame lost on the way in (a bad FCS, an
+    abort, an overlong or short frame, one the decompressor or MPPE could
+    not use) compressed packets are tossed until one names its slot or an
+    uncompressed one comes (RFC 1144 4.2); the sender's TCP resends what
+    was lost, which goes uncompressed and puts the slot right. A packet
+    that cannot be sent keeps the compressor's slots as they were. VJ that
+    was not agreed is Protocol-Rejected; a Protocol-Reject of VJ from the
+    peer stops it towards the peer. Counters: `vj_tx_comp`,
+    `vj_tx_uncomp`, `vj_rx_comp`, `vj_rx_uncomp`, `vj_errors`, and the
+    slots agreed each way. `test/test_vj.c` rebuilds long mixed streams to
+    the octet and fuzzes the decompressor; `srv/test/ns_pppd.c` runs every
+    call against pppd and the kernel's slhc with it on (and one with
+    `novj`).
 
 ## Windows callers: assumed, not tested
 
@@ -324,7 +404,9 @@ and the behaviour described in it:
   the ENCRYPT bit and a rising coherency count (30a). This was learnt the
   hard way: 0.8.0 offered stateless only and no Windows caller could
   encrypt (issue #6: errors 742, 628, and "optional" calls dropped after
-  CCP's retry span). Stateful Windows behaviour is from RFC 3078 and a
+  CCP's retry span). Windows 9x/ME without the 128-bit upgrade has 40-bit
+  keys only; up to 0.13 they were refused (error 742), and since 0.14 they
+  are taken (31). Stateful Windows behaviour is from RFC 3078 and a
   2011 linux-kernel report of Windows XP/7 PPPoE clients against pppd.
 
 The models of these in `test/pppc.c` (`PPPC_CCP_WINDOWS`,

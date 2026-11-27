@@ -40,6 +40,8 @@ typedef struct {
     ppp_rc4_t rc4;          /* stateful: the running RC4 stream */
     uint16_t credit;        /* stateless receive: key changes that may be spent catching up
                                over lost packets (PPP_MPPE_CREDIT_*) */
+    uint16_t late;          /* receive: packets dropped in a row as too far
+                               from the last one (ppp_mppe_rx_late) */
 } ppp_mppe_dir_t;
 
 typedef struct {
@@ -98,6 +100,15 @@ void ppp_mppe_rx_lost(ppp_mppe_t *m);
 
 /* Forget both directions' keys (wiped). */
 void ppp_mppe_reset(ppp_mppe_t *m);
+/* Receive: how many packets in a row were dropped as outside the window
+ * (PPP_MPPE_WINDOW) of the last one decrypted; 0 again after a packet that
+ * decrypts, and after ppp_mppe_reset. Past the window neither mode can get
+ * back in step (stateless would follow a count that may be a replay;
+ * stateful's FLUSHED answer comes too late), and re-keying from the master
+ * key would reuse the keystream: at PPP_MPPE_LATE_MAX the caller ends the
+ * link. */
+unsigned ppp_mppe_rx_late(const ppp_mppe_t *m);
+#define PPP_MPPE_LATE_MAX 32u
 
 /* Encrypt one datagram (the octets that follow 0x00FD: the encapsulated PPP
  * protocol and its payload). Writes the 2-octet MPPE header and the

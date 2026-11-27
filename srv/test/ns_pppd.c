@@ -364,6 +364,16 @@ static int log_has(const char *log, const char *needle)
     return strstr(buf, needle) != NULL;
 }
 
+/* a line of the log that has both a and b */
+static int log_line_has(const char *log, const char *a, const char *b)
+{
+    FILE *f = fopen(log, "r"); char line[600]; int hit = 0;
+    if (!f) return 0;
+    while (!hit && fgets(line, sizeof line, f)) hit = strstr(line, a) && strstr(line, b);
+    fclose(f);
+    return hit;
+}
+
 typedef struct {
     const char *what, *opts;        /* pppd options on top of the basic ones */
     size_t down_text, down_random, up;
@@ -477,6 +487,19 @@ static void one_call(int n, const call_t *k, const char *log)
         if (!log_has(log, k->in_log)) printf("    pppd's log lacks \"%s\"\n", k->in_log);
         CHECK(log_has(log, k->in_log));
     }
+    /* Van Jacobson header compression (RFC 1144), on by default at both
+     * ends: our IPCP request offers it (16 slots, slot number may be left
+     * out) and pppd's is Acked, so the kernel's slhc compresses the
+     * transfers above towards us and our ppp_vj towards it. With novj
+     * neither: pppd asks for none and Rejects ours. */
+    if (strstr(k->opts, "novj")) {
+        CHECK(!log_line_has(log, "IPCP ConfAck", "<compress VJ"));
+    } else {
+        if (!log_has(log, "rcvd [IPCP ConfReq id=0x1 <compress VJ 0f 01>")) printf("    pppd's log lacks our VJ request\n");
+        CHECK(log_has(log, "rcvd [IPCP ConfReq id=0x1 <compress VJ 0f 01>"));
+        /* its own request (Nak'd for the address first, so not id 1) Acked with VJ */
+        CHECK(log_line_has(log, "rcvd [IPCP ConfAck", "<compress VJ"));
+    }
     caller_hangup(&C);
     modem_on = 0; hook = 0; c_tx = 0;
     run_ms(1500);
@@ -492,6 +515,7 @@ int main(int argc, char **argv)
         { "nodeflate (BSD-Compress is all it offers)", "nodeflate", 40000, 0, 10000, "none", "none", "rcvd [CCP ConfRej id=0x1 <bsd v1 15>]" },
         { "nobsdcomp nodeflatedraft (RFC 1979 number only)", "nobsdcomp nodeflatedraft", 80000, 0, 30000, "deflate", "deflate", "Deflate (15) compression enabled" },
         { "noccp", "noccp", 40000, 0, 10000, "none", "none", "sent [LCP ProtRej" },
+        { "novj (no Van Jacobson header compression either way)", "novj", 40000, 0, 10000, "deflate", "deflate", "Deflate (15) compression enabled" },
     };
     static const double one[1] = { 1.0 };
     static char conf[300], log[300], err[CFG_ERR_MAX];
@@ -552,22 +576,17 @@ int main(int argc, char **argv)
     for (i = 0; i < sizeof calls / sizeof calls[0] && !dead; i++)
         one_call((int)i, &calls[i], log);
 
-    /* Encryption, against the Linux kernel's ppp_mppe (what Windows clients
-     * were matched against) and pppd's MS-CHAPv2, which also checks our
-     * authenticator response. Port 1 is switched to "PPP encryption: on"
-     * through the daemon's own settings page, as an owner would. */
+    /* Encryption on request, against the Linux kernel's ppp_mppe (what
+     * Windows clients were matched against) and pppd's MS-CHAPv2, which
+     * also checks our authenticator response. No setting: the port's CHAP
+     * login offers MS-CHAPv2 first, and a caller that asks for MPPE gets
+     * it (the calls above asked for none and were served in the clear). */
     if (!dead) {
         static const call_t mppe = {
             "require-mppe-128 (MS-CHAPv2 and 128-bit MPPE, nothing else)",
             "require-mppe-128 refuse-pap refuse-chap refuse-mschap refuse-eap",
             80000, 20000, 30000, "mppe", "mppe", "MPPE 128-bit stateless compression enabled" };
-        static const char req[] = "POST /modem HTTP/1.0\r\n"
-            "Content-Type: application/x-www-form-urlencoded\r\nContent-Length: 13\r\n\r\nencryption=on";
         static char resp[40000];
-        CHECK(http(req, resp, sizeof resp) > 0);
-        if (!strstr(resp, "saved")) printf("    the settings page did not save: %.200s\n", resp);
-        CHECK(strstr(resp, "saved") != NULL);
-        run_ms(3000);                       /* adopted; the network set up again */
         CHECK(http("GET /status.json HTTP/1.0\r\n\r\n", resp, sizeof resp) > 0);
         CHECK(strstr(resp, "\"ppp_encryption\":true") != NULL);
         one_call((int)i, &mppe, log);
@@ -583,6 +602,16 @@ int main(int argc, char **argv)
                 "require-mppe-40 require-mppe-128 mppe-stateful refuse-pap refuse-chap refuse-mschap refuse-eap",
                 40000, 10000, 15000, "mppe", "mppe", "MPPE 128-bit stateless compression enabled" };
             one_call((int)i + 1, &mppe2, log);
+        }
+        /* a caller with 40-bit keys only (as Windows 9x/ME without the
+         * 128-bit upgrade): our first request waits for its, so it is
+         * 40-bit too, and the call runs on the kernel's 40-bit ppp_mppe */
+        if (!dead) {
+            static const call_t mppe3 = {
+                "require-mppe-40 (40-bit keys only)",
+                "require-mppe-40 refuse-pap refuse-chap refuse-mschap refuse-eap",
+                40000, 10000, 15000, "mppe", "mppe", "MPPE 40-bit stateless compression enabled" };
+            one_call((int)i + 2, &mppe3, log);
         }
     }
 

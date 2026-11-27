@@ -502,7 +502,10 @@ static void nat_refresh(void)
     need = build_plan(&p);
     natr_pid = fork();
     if (natr_pid == 0) {
-        child_plain(-1, -1, 0);
+        /* this child runs no program of its own (iptables, where used, is
+         * run by it): it lets go of the daemon's TUN devices, lines and
+         * sockets, or a port's ppp0 could not be set up again while it runs */
+        child_plain(-1, -1, 1);
         if (need) _exit(nat_apply(&p) < 0);
         _exit(nat_remove() < 0 && errno != ENOENT);
     }
@@ -615,6 +618,10 @@ static void net_apply(void)
     nat_plan p;
     int i;
     net_dirty = 0;
+    /* a NAT child still at work (a call just began or ended) must be done
+     * before the TUN devices are opened again: the kernel keeps a device
+     * while any process holds it, and the new one would be "busy" */
+    if (natr_pid > 0) { (void)waitpid(natr_pid, NULL, 0); natr_pid = 0; natr_again = 0; }
     for (i = 0; i < n_ports; i++) {
         cfg_t *c = &S[i].cfg;
         {
@@ -627,13 +634,23 @@ static void net_apply(void)
                 srv_reconfigure(&S[i], &v);
             }
         }
+        /* the device there already gets its new addresses in place; only
+         * when that fails is it made again. Closing and opening it anew
+         * left a window: a child just forked (a lease script, say) holds
+         * the old descriptor until it execs, and the new device is "busy" */
+        if (tun_fd[i] >= 0 && tun_readdress(tun_name[i], c->ppp_local, c->ppp_peer,
+                                            c->mru - (c->auth != CFG_AUTH_NONE ? PPP_MPPE_OVERHEAD : 0)) == 0) {
+            logf_(CFG_LOG_INFO, "%s up: %s -> %s", tun_name[i], ip_str(c->ppp_local, a), ip_str(c->ppp_peer, b));
+            continue;
+        }
         if (tun_fd[i] >= 0) tun_close(tun_fd[i]);
-        /* an encrypting port carries IP packets 4 octets shorter (the MPPE
+        /* a port that may encrypt (MS-CHAPv2 offered: encryption on request)
+         * carries IP packets 4 octets shorter (the MPPE
          * header and the protocol field ride inside the frame); with the
          * smaller MTU the kernel answers "fragmentation needed" instead of
          * the PPP layer dropping a full-size packet */
         tun_fd[i] = tun_open(tun_name[i], c->ppp_local, c->ppp_peer,
-                             c->mru - (c->encryption ? PPP_MPPE_OVERHEAD : 0));
+                             c->mru - (c->auth != CFG_AUTH_NONE ? PPP_MPPE_OVERHEAD : 0));
         if (tun_fd[i] < 0) logf_(CFG_LOG_ERROR, "cannot set up %s: %s (callers will get PPP but no network)", tun_name[i], strerror(errno));
         else logf_(CFG_LOG_INFO, "%s up: %s -> %s", tun_name[i], ip_str(c->ppp_local, a), ip_str(c->ppp_peer, b));
     }

@@ -25,7 +25,12 @@ the stock firmware stays in the box, one click away.
   x2 (U.S. Robotics, 1997) and K56flex (1996, experimental). Both are
   answering only, off by default, and share one call at a time; see "Modems".
 - PPP server with users and passwords, MPPC compression and optional
-  MS-CHAPv2 with 128-bit MPPE encryption for Windows callers, NAT to the
+  Van Jacobson TCP/IP header compression (RFC 1144: Windows' "Use IP
+  header compression", classic Mac OS, BinModem), which makes typing in a
+  remote session much quicker at modem speeds;
+  MPPE encryption for any caller that asks for it, with no setting (MS-CHAPv2
+  is offered first; 128-bit keys, or 40/56-bit for Windows 9x/ME without
+  the 128-bit upgrade), NAT to the
   network on the Ethernet port, DNS handed to the
   caller.
 - Telephony the way an exchange does it: dial tone, tone or pulse dialling,
@@ -72,6 +77,11 @@ the stock firmware stays in the box, one click away.
   box's recent log and the kernel's, to read or save and attach to a bug
   report, so a board that misbehaves need not be opened for a serial console.
   Nothing leaves the box on its own; the owner chooses to share the file.
+  With the log level at debug, each call's PPP exchange is in it too: every
+  LCP, login, IPCP and CCP packet each way, with the time (logins show
+  their header only, never a password). A Windows caller that hangs up
+  with error 742 shows in the log as "the caller asked for encryption ...
+  and none was agreed" (it could not log in with MS-CHAPv2).
 - An optional update check (off by default, under System on the Settings
   page): once a day the box asks GitHub whether a newer release exists and,
   if so, offers it on the Firmware page with one-click install. It contacts
@@ -265,7 +275,7 @@ binary in the image and no closed blob.
 
 The modem is [libv90modem](https://github.com/georgica/libv90modem)
 (GPL-2.0-only), a library in a repository of its own that v90d builds
-against. `fw/setup.sh` fetches a pinned release of it (0.7.2, checked by
+against. `fw/setup.sh` fetches a pinned release of it (0.7.4, checked by
 SHA-256, like the other dependencies) and unpacks it next to this tree
 (`fw/setup-libv90m.sh` does that part alone); to
 build against a working copy instead, say where it is with `LIBV90M=`
@@ -315,6 +325,12 @@ V.92 is offered by default (`v92 = off` to stop it) and used when the
 caller's modem asks for PCM upstream; a caller that does not ask gets V.90,
 and so does a V.92 call whose start-up does not succeed (with the Conexant
 about one call in seven). An upgraded box keeps the setting it had.
+With V.92 on, a caller's modem that asks for V.92 Quick Connect (it has
+called this box before and remembers the line) gets the short start-up,
+which skips most of V.8 and the line probing; one that does not finish it
+within 2 s gets the ordinary start-up. After each call where it was asked
+for, the log says what came of it (`V.92 Quick Connect: asked ...`). It has
+not been tried with a real V.92 modem yet.
 
 The two 56k schemes from before V.90, x2 (U.S. Robotics, 1997) and K56flex
 (1996), can be offered to a modem that speaks one. Both are answering only,

@@ -706,6 +706,8 @@ int main(int argc, char **argv)
             strcat(led[i - 1], "/brightness");
             lf = fopen(led[i - 1], "w"); if (lf) { fputs("7\n", lf); fclose(lf); }
         }
+        snprintf(dclog, sizeof dclog, "%s/ns_dc.log", argv[2]);
+        unlink(dclog);                                  /* a last run's lines must not be read as this one's */
         pid = fork();
         if (pid == 0) {
             int a = fcntl(sv[1], F_DUPFD, 20), b = fcntl(sv2[1], F_DUPFD, 20);
@@ -827,6 +829,7 @@ int main(int argc, char **argv)
         CHECK_EQ_I(cfg_save(&c, conf, err, sizeof err), CFG_OK);
         CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
         snprintf(lanlog, sizeof lanlog, "%s/ns_lan.log", argv[2]);
+        unlink(lanlog);                                 /* a last run's lines must not be read as this one's */
         pid = fork();
         if (pid == 0) {
             int a = fcntl(sv[1], F_DUPFD, 20), lfd = open(lanlog, O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -860,6 +863,7 @@ int main(int argc, char **argv)
         close(sk);
         CHECK(file_has("/proc/sys/net/ipv4/conf/lo/proxy_arp", "0"));
         CHECK(file_has(lanlog, "port 1: the console's address on the network ran out"));
+        CHECK(!file_has(lanlog, "cannot set up"));      /* ppp0 re-addressed, never "busy" */
         /* the router was asked for the game ports; there is none in this
          * namespace, and the daemon says so and carries on */
         /* (the search waits four seconds of the clock on the wall, and this
@@ -886,6 +890,7 @@ int main(int argc, char **argv)
         CHECK_EQ_I(cfg_save(&c, conf, err, sizeof err), CFG_OK);
         CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
         snprintf(lanlog, sizeof lanlog, "%s/ns_sat.log", argv[2]);
+        unlink(lanlog);                                 /* a last run's lines must not be read as this one's */
         pid = fork();
         if (pid == 0) {
             int a = fcntl(sv[1], F_DUPFD, 20), lfd = open(lanlog, O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -1025,6 +1030,7 @@ int main(int argc, char **argv)
         CHECK_EQ_I(cfg_save(&c, conf, err, sizeof err), CFG_OK);
         CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
         snprintf(lanlog, sizeof lanlog, "%s/ns_inert.log", argv[2]);
+        unlink(lanlog);                                 /* a last run's lines must not be read as this one's */
         pid = fork();
         if (pid == 0) {
             int a = fcntl(sv[1], F_DUPFD, 20), lfd = open(lanlog, O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -1077,6 +1083,7 @@ int main(int argc, char **argv)
         CHECK_EQ_I(cfg_save(&c, conf, err, sizeof err), CFG_OK);
         CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
         snprintf(lanlog, sizeof lanlog, "%s/ns_vpn.log", argv[2]);
+        unlink(lanlog);                                 /* a last run's lines must not be read as this one's */
         pid = fork();
         if (pid == 0) {
             int a = fcntl(sv[1], F_DUPFD, 20), lfd = open(lanlog, O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -1161,6 +1168,7 @@ int main(int argc, char **argv)
         CHECK_EQ_I(cfg_save(&c, conf, err, sizeof err), CFG_OK);
         CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
         snprintf(lanlog, sizeof lanlog, "%s/ns_mm.log", argv[2]);
+        unlink(lanlog);                                 /* a last run's lines must not be read as this one's */
         pid = fork();
         if (pid == 0) {
             char mcmd[360]; int a = fcntl(sv[1], F_DUPFD, 20), lfd = open(lanlog, O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -1236,6 +1244,7 @@ int main(int argc, char **argv)
         CHECK_EQ_I(cfg_save(&c, conf, err, sizeof err), CFG_OK);
         CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
         snprintf(lanlog, sizeof lanlog, "%s/ns_mm2.log", argv[2]);
+        unlink(lanlog);                                 /* a last run's lines must not be read as this one's */
         pid = fork();
         if (pid == 0) {
             char mcmd[360]; int a = fcntl(sv[1], F_DUPFD, 20), lfd = open(lanlog, O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -1310,6 +1319,7 @@ int main(int argc, char **argv)
         CHECK_EQ_I(cfg_save(&c, conf, err, sizeof err), CFG_OK);
         CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
         snprintf(lanlog, sizeof lanlog, "%s/ns_bbs.log", argv[2]);
+        unlink(lanlog);                                 /* a last run's lines must not be read as this one's */
         pid = fork();
         if (pid == 0) {
             int a = fcntl(sv[1], F_DUPFD, 20), lfd = open(lanlog, O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -1471,6 +1481,7 @@ int main(int argc, char **argv)
         CHECK_EQ_I(cfg_save(&c, conf, err, sizeof err), CFG_OK);
         CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
         snprintf(lanlog, sizeof lanlog, "%s/ns_menu.log", argv[2]);
+        unlink(lanlog);                                 /* a last run's lines must not be read as this one's */
         pid = fork();
         if (pid == 0) {
             int a = fcntl(sv[1], F_DUPFD, 20), lfd = open(lanlog, O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -1487,10 +1498,28 @@ int main(int argc, char **argv)
         memset(prev_tx, 0xFF, sizeof prev_tx);
         /* the menu wants the lists: the details are fetched, the directory made */
         /* the fetch is a child in real time, started on the daemon's clock:
-         * up to 60 s of real time, for a heavily loaded machine (it ends when seen) */
+         * up to 300 s of real time, for a heavily loaded machine (it ends when
+         * seen, at once on a quiet one). The log is removed before the daemon
+         * starts: a last run's "2 with the guide's details", read before the
+         * child had truncated the file, once ended this wait at once. */
         {
-            time_t until = time(NULL) + 60;
-            while (time(NULL) < until && !file_has(lanlog, "2 with the guide's details")) { run_ms(100); usleep(20000); }
+            time_t until = time(NULL) + 300;
+            struct timespec w0, w1; long loops = 0;
+            clock_gettime(CLOCK_MONOTONIC, &w0);
+            while (time(NULL) < until && !file_has(lanlog, "2 with the guide's details")) { run_ms(100); usleep(20000); loops++; }
+            clock_gettime(CLOCK_MONOTONIC, &w1);
+            if (!file_has(lanlog, "2 with the guide's details")) {
+                /* what the daemon and its children were doing, for the report */
+                char ps[400];
+                printf("    the directory's details did not come in 300 s (%ld s by the monotonic clock, %ld rounds, daemon %s); the daemon's log:\n",
+                       (long)(w1.tv_sec - w0.tv_sec), loops, dead ? "gone" : "there");
+                snprintf(ps, sizeof ps, "sed 's/^/      /' %s", lanlog);
+                if (system(ps)) { }
+                snprintf(ps, sizeof ps, "ps -o pid,ppid,stat,etime,wchan:20,args --ppid %d -p %d | sed 's/^/      /'", (int)pid, (int)pid);
+                if (system(ps)) { }
+                snprintf(ps, sizeof ps, "ls -l /proc/%d/fd 2>&1 | sed 's/^/      fd /'; grep -E 'State|PPid' /proc/%d/status | sed 's/^/      /'", (int)pid, (int)pid);
+                if (system(ps)) { }
+            }
         }
         CHECK(file_has(lanlog, "menu: the BBS directory has 2 boards, 2 with the guide's details"));
         /* (a) Dial-Up Networking: PPP, no menu */
@@ -1792,6 +1821,7 @@ int main(int argc, char **argv)
         cfg_default(&c);
         strcpy(c.line_number, "5551234"); c.rings = 1; c.status_port = 8080; c.service = CFG_SERVICE_WEBTV;
         c.auth = CFG_AUTH_CHAP; c.n_users = 1; strcpy(c.users[0].name, "bob"); strcpy(c.users[0].secret, "builder");
+        c.log_level = CFG_LOG_DEBUG;        /* for the PPP trace, (e) below */
         CHECK_EQ_I(cfg_save(&c, conf, err, sizeof err), CFG_OK);
         CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
         snprintf(lanlog, sizeof lanlog, "%s/ns_wtv.log", argv[2]);
@@ -1848,6 +1878,13 @@ int main(int argc, char **argv)
         CHECK_EQ_I(p34a_renegotiate(&C.p34, C.p34.cfg.Kd, 0), 0);
         for (i = 0; i < 40 && !file_has(lanlog, "data stopped"); i++) { run_ms(100); usleep(10000); }
         CHECK(file_has(lanlog, "after PPP came up: a rate renegotiation begun by the caller, 50666/"));
+        /* (e) at debug level each PPP control packet of the call is a log
+         * line, in and out, with the time; a box's login shows its header
+         * only */
+        CHECK(file_has(lanlog, " out LCP Configure-Request id "));
+        CHECK(file_has(lanlog, " in  LCP Configure-Ack id "));
+        CHECK(file_has(lanlog, " in  IPCP Configure-Request id "));
+        CHECK(file_has(lanlog, "PPP +0."));
         hang_up();
         quiet_exit = 1;
         kill(pid, SIGTERM);
@@ -1986,6 +2023,7 @@ int main(int argc, char **argv)
         rf = fopen(rfile, "w"); if (rf) { fputs("nameserver ::1\n", rf); fclose(rf); }
         CHECK_EQ_I(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
         snprintf(lanlog, sizeof lanlog, "%s/ns_dns.log", argv[2]);
+        unlink(lanlog);                                 /* a last run's lines must not be read as this one's */
         pid = fork();
         if (pid == 0) {
             int a = fcntl(sv[1], F_DUPFD, 20), lfd = open(lanlog, O_WRONLY | O_CREAT | O_TRUNC, 0644);

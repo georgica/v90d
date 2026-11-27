@@ -11,6 +11,11 @@
  * non-blocking descriptor: read() yields one IP packet for the caller,
  * write() takes one from the caller. -1 with errno on failure. */
 int tun_open(const char *name, uint32_t local, uint32_t peer, int mtu);
+/* The device tun_open made, given new addresses and MTU in place: the
+ * descriptor stays, so nothing can find the device "busy" as a new one
+ * would (a child between fork and exec still holds the old descriptor).
+ * 0, or -1 with errno. */
+int tun_readdress(const char *name, uint32_t local, uint32_t peer, int mtu);
 /* Without a TUN driver (/dev/net/tun missing: the OBi200's Linux 2.6.30)
  * tun_open makes the device the PPP way: the kernel's PPP unit pppN over an
  * asynchronous PPP channel on a pseudo-terminal, `name` then being "ppp"

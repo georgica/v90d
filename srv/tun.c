@@ -133,6 +133,11 @@ fail:
     return -1;
 }
 
+int tun_readdress(const char *name, uint32_t local, uint32_t peer, int mtu)
+{
+    return if_setup(name, local, peer, mtu);
+}
+
 int tun_open(const char *name, uint32_t local, uint32_t peer, int mtu)
 {
     struct ifreq ifr;

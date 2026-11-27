@@ -94,6 +94,12 @@ static int on_pap(void *ctx, const uint8_t *user, size_t ulen, const uint8_t *pa
     return d->cfg.ppp.pap_cb(d->cfg.ppp.ctx, user, ulen, pass, plen);
 }
 
+static void on_trace(void *ctx, int out, uint32_t ms, uint16_t proto, const uint8_t *pkt, size_t n, size_t len)
+{
+    dce_t *d = ctx;
+    d->cfg.ppp.trace(d->cfg.ppp.ctx, out, ms, proto, pkt, n, len);
+}
+
 /* ---------------------------------------------------------------- setup */
 /* (Re)initialise PPP; the line rates are used once known (d->bitrate > 0).
  * PPP's Restart timer (3 s unless configured) has to cover a request and
@@ -111,6 +117,7 @@ static void ppp_setup(dce_t *d)
     pc.phase_cb = on_phase;
     pc.secret_cb = d->cfg.ppp.secret_cb ? on_secret : NULL;
     pc.pap_cb = d->cfg.ppp.pap_cb ? on_pap : NULL;
+    pc.trace = d->cfg.ppp.trace ? on_trace : NULL;
     if (!d->cfg.fixed_timers && d->bitrate > 0 && d->rx_bitrate > 0) {
         uint32_t rt = 1000000u / (uint32_t)d->bitrate + 1000000u / (uint32_t)d->rx_bitrate + 1500u;
         if (pc.restart_ms == 0) pc.restart_ms = 3000;

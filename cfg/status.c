@@ -239,7 +239,7 @@ static void h_comp(sbuf_t *b, const char *label, int alg, uint64_t plain, uint64
     h_open(b, label);
     if (alg == ST_COMP_MPPE) {
         /* MPPE encrypts, it does not compress: there is no ratio to show */
-        sb_puts(b, "MPPE (128-bit, encrypted)");
+        sb_puts(b, "MPPE (encrypted)");
     } else if (alg != ST_COMP_DEFLATE && alg != ST_COMP_MPPC) {
         sb_puts(b, "no");
     } else {
@@ -546,7 +546,7 @@ static int render(const status_t *s, const status_t *const *ports, int sel, char
     }
     h_str(&b, "V.92", s->v92 ? "on" : "off");
     h_str(&b, "PPP compression", s->ppp_compression ? "on" : "off");
-    h_str(&b, "PPP encryption", s->ppp_encryption ? "required (MPPE)" : "off");
+    h_str(&b, "PPP encryption", s->ppp_encryption ? "when the caller asks (MPPE)" : "none (no login on this port)");
     h_open(&b, "Uptime");
     sb_u64(&b, s->uptime_s / 86400u); sb_puts(&b, "d ");
     put_hms(&b, s->uptime_s % 86400u, 1);

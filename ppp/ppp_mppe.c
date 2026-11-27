@@ -66,6 +66,11 @@ void ppp_mppe_reset(ppp_mppe_t *m)
     ppp_wipe(m, sizeof *m);
 }
 
+unsigned ppp_mppe_rx_late(const ppp_mppe_t *m)
+{
+    return m->rx.late;
+}
+
 size_t ppp_mppe_encrypt(ppp_mppe_t *m, const uint8_t *in, size_t len, uint8_t *out, size_t max)
 {
     ppp_rc4_t r;
@@ -120,6 +125,7 @@ static int decrypt_stateful(ppp_mppe_dir_t *d, uint16_t hdr, const uint8_t *in, 
         }
     } else if (ahead == 0 || ahead > PPP_MPPE_WINDOW) {
         /* a replay or a late packet: dropped, nothing changes */
+        if (d->late < 0xffffu) d->late++;
         return -1;
     } else if (!flushed && !is_flag(count)) {
         /* a packet was lost and this one cannot be decrypted: out of step
@@ -139,6 +145,7 @@ static int decrypt_stateful(ppp_mppe_dir_t *d, uint16_t hdr, const uint8_t *in, 
         d->discard = 0;
     }
     d->coherency = (uint16_t)count;
+    d->late = 0;
     ppp_rc4(&d->rc4, in, out, len);
     return (int)len;
 }
@@ -161,16 +168,29 @@ int ppp_mppe_decrypt(ppp_mppe_t *m, const uint8_t *in, size_t len, uint8_t *out,
      * packets are stepped over. Zero steps is a replay, more than the window
      * a late packet (or a desync we will not follow): dropped, keys kept. */
     steps = (unsigned)((count - m->rx.coherency) & PPP_MPPE_COUNT);
-    if (steps == 0 || steps > PPP_MPPE_WINDOW)
+    if (steps == 0 || steps > PPP_MPPE_WINDOW) {
+        if (m->rx.late < 0xffffu) m->rx.late++;
         return -1;
+    }
     m->rx.credit = (uint16_t)(m->rx.credit + PPP_MPPE_CREDIT_STEP > PPP_MPPE_CREDIT_MAX ? PPP_MPPE_CREDIT_MAX
                                                                                        : m->rx.credit + PPP_MPPE_CREDIT_STEP);
-    if (steps - 1 > m->rx.credit)
-        return -1;                      /* more catching up than this peer has earned */
+    if (steps - 1 > m->rx.credit) {
+        /* more catching up than this peer has earned: spend what it has,
+         * step that far towards it and drop the packet. The credit grows
+         * faster than the count does, so the next packets get there (a
+         * long burst of loss is followed, never given up on), and a peer
+         * that jumps ahead in every packet still costs only the credit. */
+        for (i = 0; i < m->rx.credit; i++)
+            ppp_mppe_change_key(m->rx.start, m->rx.session, m->rx.keylen, m->rx.force);
+        m->rx.coherency = (uint16_t)((m->rx.coherency + m->rx.credit) & PPP_MPPE_COUNT);
+        m->rx.credit = 0;
+        return -1;
+    }
     m->rx.credit = (uint16_t)(m->rx.credit - (steps - 1));
     for (i = 0; i < steps; i++)
         ppp_mppe_change_key(m->rx.start, m->rx.session, m->rx.keylen, m->rx.force);
     m->rx.coherency = count;
+    m->rx.late = 0;
     ppp_rc4_init(&r, m->rx.session, m->rx.keylen);
     ppp_rc4(&r, in + 2, out, len - 2);
     ppp_wipe(&r, sizeof r);

@@ -319,7 +319,7 @@ static void test_escaping(void)
 
     /* fields outside their range do not index anything */
     base(&c);
-    c.line_tones = 7; c.auth = -3; c.lan_dhcp = 5; c.service = 9; c.dc_now = c.dc_lan = c.dc_upnp = c.dc_iwango = c.sat_match = 9; c.v92 = 9; c.x2 = 9; c.k56 = 9; c.compression = 9; c.encryption = 9; c.update_check = 9; c.dns_relay = 9; c.ipv6 = 9; c.n_users = 1000; c.modulations = 0xffffffffu;
+    c.line_tones = 7; c.auth = -3; c.lan_dhcp = 5; c.service = 9; c.dc_now = c.dc_lan = c.dc_upnp = c.dc_iwango = c.sat_match = 9; c.v92 = 9; c.x2 = 9; c.k56 = 9; c.compression = 9; c.update_check = 9; c.dns_relay = 9; c.ipv6 = 9; c.n_users = 1000; c.modulations = 0xffffffffu;
     c.rings = -2147483647 - 1; c.max_down = 2147483647;
     CHECK(settings_render_html(&c, 0, NULL, html, sizeof html) > 0);
     CHECK(has(html, "name=\"rings\" size=\"6\" maxlength=\"5\" value=\"-2147483648\">"));
@@ -411,17 +411,13 @@ static void test_ethernet(void)
     CHECK(has(html, "<option value=\"archive\" selected>"));
     CHECK_EQ_I(apply(&c, "port=2&service=dreamcast", &out), SETTINGS_OK);
     CHECK_EQ_I(out.service, CFG_SERVICE_INTERNET); CHECK_EQ_I(out.port2.service, CFG_SERVICE_DREAMCAST);
-    /* PPP encryption is set per port (it needs a user, which MS-CHAPv2 does) */
+    /* PPP encryption has no setting since 0.14 (given when the caller asks):
+     * no such field on the page, and a post of one is not taken */
     c.n_users = 1; strcpy(c.users[0].name, "u"); strcpy(c.users[0].secret, "p");
-    CHECK_EQ_I(apply(&c, "encryption=on", &out), SETTINGS_OK);
-    CHECK_EQ_I(out.encryption, 1); CHECK_EQ_I(out.port2.encryption, 0);
-    CHECK_EQ_I(apply(&c, "port=2&encryption=on", &out), SETTINGS_OK);
-    CHECK_EQ_I(out.encryption, 0); CHECK_EQ_I(out.port2.encryption, 1);
-    /* a bad value is reported under the key it would have set */
-    CHECK_EQ_I(apply(&c, "encryption=maybe", &out), SETTINGS_INVALID);
-    CHECK(strcmp(err, "[ppp] encryption: 'maybe' is not one of: on, off") == 0);
-    CHECK_EQ_I(apply(&c, "port=2&encryption=maybe", &out), SETTINGS_INVALID);
-    CHECK(strcmp(err, "[ppp] encryption2: 'maybe' is not one of: on, off") == 0);
+    n = settings_render_html(&c, 0, NULL, html, sizeof html);
+    CHECK(!has(html, "name=\"encryption\""));
+    CHECK(has(html, "PPP encryption needs no setting"));
+    CHECK(apply(&c, "encryption=on", &out) != SETTINGS_OK);
     c.service = CFG_SERVICE_ARCHIVE;
     CHECK_EQ_I(apply(&c, "service=internet", &out), SETTINGS_OK);
     CHECK_EQ_I(out.service, CFG_SERVICE_INTERNET);
@@ -1112,7 +1108,7 @@ static void test_round_trip(void)
     cfg_default(&c);
     CHECK(settings_render_html(&c, 0, NULL, html, sizeof html) > 0);
     n = submit(html, body, sizeof body);
-    CHECK_EQ_I(n, 7 + 1 + 1 + 6 + 2 + 2 * 1 + 6 + 1 + 1 + 1 + 1 + 5 + 1 + 1 + 1 + 1 + 1 + 1);     /* no user: the new row only */     /* service, v92, x2, k56, compression, encryption, the four Dreamcast switches, the Saturn one, update_check, dns_relay, ipv6 */
+    CHECK_EQ_I(n, 7 + 1 + 1 + 6 + 2 + 2 * 1 + 6 + 1 + 1 + 1 + 1 + 5 + 1 + 1 + 1 + 1 + 1);     /* no user: the new row only */     /* service, v92, x2, k56, compression, the four Dreamcast switches, the Saturn one, update_check, dns_relay, ipv6 */
     CHECK_EQ_I(apply(&c, body, &out), SETTINGS_OK);
     CHECK(memcmp(&c, &out, sizeof c) == 0);
 
@@ -1134,7 +1130,7 @@ static void test_round_trip(void)
     strcpy(c.users[1].name, "caf\xe9\x01");
     CHECK(settings_render_html(&c, 0, NULL, html, sizeof html) > 0);
     n = submit(html, body, sizeof body);
-    CHECK_EQ_I(n, 7 + 1 + 1 + 1 + 2 + 2 * 3 - 1 + 6 + 1 + 1 + 1 + 1 + 5 + 1 + 1 + 1 + 1 + 1 + 1);     /* the three users */     /* + update_check, x2, k56, encryption, dns_relay, ipv6 */
+    CHECK_EQ_I(n, 7 + 1 + 1 + 1 + 2 + 2 * 3 - 1 + 6 + 1 + 1 + 1 + 1 + 5 + 1 + 1 + 1 + 1 + 1);     /* the three users */     /* + update_check, x2, k56, dns_relay, ipv6 */
     CHECK_EQ_I(apply(&c, body, &out), SETTINGS_OK);
     CHECK(memcmp(&c, &out, sizeof c) == 0);
 
