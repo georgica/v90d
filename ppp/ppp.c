@@ -1079,17 +1079,20 @@ static void auth_finish(ppp_t *p, uint8_t id, int ok,
 
     p->auth_done = 1;
     p->auth_ok = (uint8_t)(ok != 0);
+    if (ok)
+        p->cnt.auth_why = PPP_AUTH_WHY_NONE;
     auth_reply(p, id);
-    if (!ok) {
-        /* RFC 1334 2.2.1 / RFC 1994 4.2: after a failure, end the link */
-        request_close(p, PPP_END_AUTH_FAILED);
-        return;
-    }
+    /* the name it gave, failed or not, for the log */
     if (ulen > PPP_NAME_MAX)
         ulen = PPP_NAME_MAX;
     for (i = 0; i < ulen; i++)       /* keep the name printable for logs */
         p->peer_name[i] = (user[i] >= 0x20 && user[i] < 0x7f) ? (char)user[i] : '?';
     p->peer_name[ulen] = 0;
+    if (!ok) {
+        /* RFC 1334 2.2.1 / RFC 1994 4.2: after a failure, end the link */
+        request_close(p, PPP_END_AUTH_FAILED);
+        return;
+    }
     network_start(p);
 }
 
@@ -1137,6 +1140,7 @@ static void pap_input(ppp_t *p, const uint8_t *pkt, size_t n)
         uint8_t secret[PPP_SECRET_MAX];
         int sl = lookup_secret(p, user, ul, secret, sizeof secret);
         ok = sl >= 0 && (size_t)sl == pl && same_bytes(secret, pass, pl);
+        p->cnt.auth_why = (uint8_t)(sl < 0 ? PPP_AUTH_WHY_USER : PPP_AUTH_WHY_SECRET);
         memset(secret, 0, sizeof secret);
     }
     auth_finish(p, pkt[1], ok, user, ul);
@@ -1219,9 +1223,21 @@ static void chap_input(ppp_t *p, const uint8_t *pkt, size_t n)
             const uint8_t *ntr = d + 1 + 24;
             int use_nt = d[1 + 48] & 1;
             uint8_t h[16];
+            int nt_ok, lm_ok;
             ppp_nt_password_hash(secret, sl >= 0 ? (size_t)sl : 0, h);
             ppp_mschap1_response(p->challenge, h, want);
-            ok = sl >= 0 && use_nt && same_bytes(want, ntr, 24);
+            nt_ok = same_bytes(want, ntr, 24);
+            ok = sl >= 0 && use_nt && nt_ok;
+            if (!ok && sl >= 0) {
+                /* why, for the log: the LAN Manager answer, which ignores
+                 * letter case, tells a wrong password from one in the
+                 * wrong case, and a refused LM-only answer from a wrong one */
+                ppp_lm_password_hash(secret, (size_t)sl, h);
+                ppp_mschap1_response(p->challenge, h, want);
+                lm_ok = same_bytes(want, d + 1, 24);
+                p->cnt.auth_why = (uint8_t)(!lm_ok ? PPP_AUTH_WHY_SECRET
+                                            : use_nt ? PPP_AUTH_WHY_CASE : PPP_AUTH_WHY_LM_ONLY);
+            }
             ppp_wipe(h, sizeof h);
             if (ok) {
                 ppp_mschap1_mppe_start(secret, (size_t)sl, p->challenge, 16, p->mppe_send);
@@ -1244,9 +1260,21 @@ static void chap_input(ppp_t *p, const uint8_t *pkt, size_t n)
         ppp_md5_final(&m, want);
         ok = sl >= 0 && same_bytes(want, d + 1, 16);
     }
+    if (!ok && !p->cnt.auth_why)
+        p->cnt.auth_why = (uint8_t)(sl < 0 ? PPP_AUTH_WHY_USER
+                                    : (p->auth_proto == PPP_AUTH_CHAP ? vs != 16 : vs != 49)
+                                    ? PPP_AUTH_WHY_FORMAT : PPP_AUTH_WHY_SECRET);
     ppp_wipe(secret, sizeof secret);
     ppp_wipe(want, sizeof want);
     auth_finish(p, pkt[1], ok, user, ul);
+}
+
+const char *ppp_auth_why_name(unsigned why)
+{
+    static const char *const n[] = {
+        "", "no such user", "wrong password", "the password in another letter case",
+        "a LAN Manager answer alone (refused; the password was right)", "a malformed answer" };
+    return why < sizeof n / sizeof n[0] ? n[why] : "?";
 }
 
 /* ---------------------------------------------------------------- */
