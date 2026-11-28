@@ -6,7 +6,7 @@
  *
  *     # serial 2026112400                 inside the signed part
  *     v90d-svc 1                          the first line that is not a comment
- *     svc 13855961775 nwnrevival.com:5000 raw AOL Neverwinter Nights
+ *     svc 16967384825 nwnrevival.com:5000 raw AOL Neverwinter Nights
  *         number, host:port, raw | telnet, the name (the rest of the line)
  *     # sig ed25519 <128 hex digits>
  *

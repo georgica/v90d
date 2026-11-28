@@ -206,7 +206,7 @@ blocks.
 A number can also connect a caller straight to one service on the internet,
 with no PPP and no prompt. **Raw** passes what the modems send both ways as
 it is, for a game or program with its own protocol: the AOL client of
-Neverwinter Nights dials **1 385 596 1775** and reaches the revived server.
+Neverwinter Nights dials **1 696 738 4825** (NWN-REV-IVAL) and reaches the revived server.
 **Telnet** says `Calling` and the name, then joins a board or text service.
 The call ends when the service hangs up.
 
