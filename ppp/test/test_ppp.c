@@ -872,7 +872,9 @@ static void test_mschap1(void)
     if (ch) mschap1_answer(ch, "mallory", "wonderland", 1);
     pull();
     CHECK_EQ_I(status()->counters.auth_why, PPP_AUTH_WHY_USER);
-    CHECK(strcmp(status()->peer_name, "mallory") == 0);
+    /* a name that is no user's is not kept: it may be a password typed in
+     * the wrong field */
+    CHECK_EQ_I(status()->peer_name[0], 0);
 
     /* a client that will not do v1 Naks toward v2: v2 */
     start(&c);

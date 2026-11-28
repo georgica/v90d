@@ -1082,7 +1082,10 @@ static void auth_finish(ppp_t *p, uint8_t id, int ok,
     if (ok)
         p->cnt.auth_why = PPP_AUTH_WHY_NONE;
     auth_reply(p, id);
-    /* the name it gave, failed or not, for the log */
+    /* the name it gave, for the log: on a failure only one that is a user
+     * of ours (a name that is not may be a password in the wrong field) */
+    if (!ok && p->cnt.auth_why == PPP_AUTH_WHY_USER)
+        ulen = 0;
     if (ulen > PPP_NAME_MAX)
         ulen = PPP_NAME_MAX;
     for (i = 0; i < ulen; i++)       /* keep the name printable for logs */

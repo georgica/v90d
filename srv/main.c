@@ -466,8 +466,8 @@ static void log_ppp_end(const char *who, const dce_t *d)
             snprintf(mppe, sizeof mppe, "; the caller asked for no MPPE");
     }
     if (d->ppp_end == PPP_END_AUTH_FAILED)      /* who tried, and why it failed */
-        snprintf(mppe, sizeof mppe, " (\"%s\": %s)", ps.peer_name,
-                 k->auth_why ? ppp_auth_why_name(k->auth_why) : "?");
+        snprintf(mppe, sizeof mppe, " (%s%s%s%s)", ps.peer_name[0] ? "\"" : "", ps.peer_name,
+                 ps.peer_name[0] ? "\": " : "", k->auth_why ? ppp_auth_why_name(k->auth_why) : "?");
     logf_(CFG_LOG_INFO, "%s  PPP ended: %s%s", who, why[d->ppp_end], mppe);
 }
 
