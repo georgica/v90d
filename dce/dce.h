@@ -189,7 +189,8 @@ typedef struct {
  * changed, up to data mode. The names are the library's own, static. */
 #define DCE_NEG_EVENTS 16
 /* how often the start-up is looked at, in samples (10 ms), and once more
- * when the call ends: a state shorter than that may not show */
+ * when the modem ends the call or the log is asked for (dce_get_neg): a
+ * state shorter than that may not show */
 #define DCE_NEG_SAMPLES 80
 typedef struct {
     uint32_t    at_ms;         /* call_ms when this was first seen */
@@ -244,7 +245,6 @@ typedef struct dce {
     int         modulation;
     int         bitrate, rx_bitrate;   /* transmit, receive */
     dce_neg_t   neg;           /* the events only: the rest is read when asked */
-    int         neg_phase, neg_sel, neg_v8;    /* as in the last event */
     int         neg_wait;      /* samples since the last look, modulo DCE_NEG_SAMPLES */
     uint32_t    peer_ip;
     uint32_t    ip_ms;         /* call_ms when PPP's IP was first seen up; 0 = not yet */

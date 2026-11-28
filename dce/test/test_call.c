@@ -520,6 +520,50 @@ static void test_caller_hangs_up(void)
     CHECK(s->online_ms > 0 && s->call_ms > s->online_ms);
 }
 
+/* ------------------------------------------------------------------ (x) */
+/* the negotiation log, asked for at every millisecond as a call that ends
+ * there would: its last line is always the state the summary tells, also
+ * between two of the DCE's own looks */
+static int neg_asks, neg_behind, neg_repeats;
+static dce_neg_t neg_last;
+static int p_neg_data(void)
+{
+    dce_neg_t *n = &neg_last, again;
+    const dce_neg_event_t *e;
+    unsigned i;
+    dce_get_neg(&D, n); dce_get_neg(&D, &again);
+    neg_asks++;
+    CHECK_EQ_I(again.n_events, n->n_events);                /* asking changes nothing */
+    if (!n->n_events) { neg_behind++; return n->data_reached; }
+    e = &n->events[n->n_events - 1];
+    if (strcmp(e->phase, n->phase) || strcmp(e->selected, n->selected) || e->used_v8 != n->used_v8) neg_behind++;
+    for (i = 1; i < n->n_events; i++)
+        if (!strcmp(n->events[i].phase, n->events[i - 1].phase) && !strcmp(n->events[i].selected, n->events[i - 1].selected)
+            && n->events[i].used_v8 == n->events[i - 1].used_v8) neg_repeats++;
+    return n->data_reached;
+}
+
+static void test_neg_log(void)
+{
+    dce_cfg_t sc; caller_cfg_t cc;
+    dce_neg_t after;
+
+    printf("(x) the negotiation log up to the moment it is asked for\n");
+    server_cfg(&sc); client_cfg(&cc);
+    call_begin(&sc, &cc, &line_clean);
+    neg_asks = neg_behind = neg_repeats = 0;
+    CHECK(run_until(p_neg_data, 30000) > 0);
+    printf("    %d asks to data mode: %u lines, %d times behind, %d repeated lines\n",
+           neg_asks, neg_last.n_events, neg_behind, neg_repeats);
+    CHECK_EQ_I(neg_behind, 0);
+    CHECK_EQ_I(neg_repeats, 0);
+    CHECK(neg_last.n_events >= 3 && neg_last.n_events <= DCE_NEG_EVENTS);
+    /* nothing more once data mode was reached */
+    CHECK(run_until(p_ip_up, 30000) > 0);
+    dce_get_neg(&D, &after);
+    CHECK_EQ_I(after.n_events, neg_last.n_events);
+}
+
 /* ------------------------------------------------------------------ (f) */
 static void v21_call(int caller_v42)
 {
@@ -1715,6 +1759,7 @@ int main(int argc, char **argv)
     RUN('w', test_detect_watch);
     RUN('d', test_wrong_password);
     RUN('e', test_caller_hangs_up);
+    RUN('x', test_neg_log);
     RUN('f', test_v21);
     RUN('g', test_other_endings);
     RUN('h', test_v90_lapm);
