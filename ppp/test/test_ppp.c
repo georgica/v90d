@@ -246,8 +246,8 @@ static void mschap2_answer_as(const frame_t *ch, const char *sent, const char *u
     push_cp(PPP_PROTO_CHAP, 2, ch->d[1], rsp, 50 + sl);
 }
 
-/* an MS-CHAP v1 Response (RFC 2433): LM response (or zeros), NT response
- * (or zeros), the "use NT" flag */
+/* an MS-CHAP v1 Response (RFC 2433): LM response, NT response (or zeros),
+ * the "use NT" flag */
 static void mschap1_answer(const frame_t *ch, const char *user, const char *secret, int use_nt)
 {
     uint8_t rsp[1 + 49 + 64], h[16];
@@ -255,12 +255,13 @@ static void mschap1_answer(const frame_t *ch, const char *user, const char *secr
 
     rsp[0] = 49;
     memset(rsp + 1, 0, 48);
+    /* the LAN Manager answer always, as Windows sends it; the NT one too
+     * when the flag says to use it */
+    ppp_lm_password_hash((const uint8_t *)secret, strlen(secret), h);
+    ppp_mschap1_response(ch->d + 5, h, rsp + 1);
     if (use_nt) {
         ppp_nt_password_hash((const uint8_t *)secret, strlen(secret), h);
         ppp_mschap1_response(ch->d + 5, h, rsp + 1 + 24);
-    } else {
-        ppp_lm_password_hash((const uint8_t *)secret, strlen(secret), h);
-        ppp_mschap1_response(ch->d + 5, h, rsp + 1);
     }
     rsp[1 + 48] = (uint8_t)(use_nt != 0);
     memcpy(rsp + 50, user, ul);
@@ -840,6 +841,7 @@ static void test_mschap1(void)
     CHECK(find(PPP_PROTO_CHAP, 3) == NULL);
     CHECK(find(PPP_PROTO_CHAP, 4) != NULL);
     CHECK_EQ_I(status()->end_reason, PPP_END_AUTH_FAILED);
+    CHECK_EQ_I(status()->counters.auth_why, PPP_AUTH_WHY_LM_ONLY);   /* right password, LM answer only */
 
     /* wrong secret: Failure "E=691", link ended */
     start(&c);
@@ -850,6 +852,29 @@ static void test_mschap1(void)
     f = find(PPP_PROTO_CHAP, 4);
     CHECK(f && f->n >= 4 + 5 && memcmp(f->d + 4, "E=691", 5) == 0);
     CHECK_EQ_I(status()->end_reason, PPP_END_AUTH_FAILED);
+    /* why, for the log: the NT answer is wrong but the LAN Manager one
+     * (letter case ignored) is right: the password in another case */
+    CHECK_EQ_I(status()->counters.auth_why, PPP_AUTH_WHY_CASE);
+    CHECK(strcmp(status()->peer_name, "alice") == 0);     /* the name, failure or not */
+
+    /* another password altogether */
+    start(&c);
+    lcp_up(win98_lcp, sizeof win98_lcp);
+    ch = find(PPP_PROTO_CHAP, 1);
+    if (ch) mschap1_answer(ch, "alice", "looking-glass", 1);
+    pull();
+    CHECK_EQ_I(status()->counters.auth_why, PPP_AUTH_WHY_SECRET);
+
+    /* no such user */
+    start(&c);
+    lcp_up(win98_lcp, sizeof win98_lcp);
+    ch = find(PPP_PROTO_CHAP, 1);
+    if (ch) mschap1_answer(ch, "mallory", "wonderland", 1);
+    pull();
+    CHECK_EQ_I(status()->counters.auth_why, PPP_AUTH_WHY_USER);
+    /* a name that is no user's is not kept: it may be a password typed in
+     * the wrong field */
+    CHECK_EQ_I(status()->peer_name[0], 0);
 
     /* a client that will not do v1 Naks toward v2: v2 */
     start(&c);

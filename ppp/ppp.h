@@ -92,6 +92,19 @@ typedef enum {
 #define PPP_AUTH_MSCHAPV1 8u       /* MS-CHAP v1 (RFC 2433), for MPPE keys; offered
                                       first when allowed (Windows 98 needs it) */
 
+/* Why a login failed (ppp_counters_t.auth_why), for the log; the caller is
+ * told only "failed". MS-CHAP v1's answer carries the LAN Manager response
+ * too, which ignores letter case, so it tells more. */
+#define PPP_AUTH_WHY_NONE    0  /* not failed (or no login yet) */
+#define PPP_AUTH_WHY_USER    1  /* no such user */
+#define PPP_AUTH_WHY_SECRET  2  /* wrong password */
+#define PPP_AUTH_WHY_CASE    3  /* MS-CHAP v1: right but for letter case (NT answer
+                                   wrong, LAN Manager answer right) */
+#define PPP_AUTH_WHY_LM_ONLY 4  /* MS-CHAP v1: the LAN Manager answer alone (the
+                                   "use NT" flag clear), refused though right */
+#define PPP_AUTH_WHY_FORMAT  5  /* an answer of the wrong length or shape */
+const char *ppp_auth_why_name(unsigned why);
+
 /* why the link ended (or is ending) */
 typedef enum {
     PPP_END_NONE = 0,
@@ -269,6 +282,7 @@ typedef struct {
     uint8_t  mppe_keybits;     /* MPPE key length agreed: 40, 56 or 128 (0: none) */
     uint8_t  win98;            /* the caller's first LCP request was Windows 98's
                                   (MS-CHAP v1 offered first) */
+    uint8_t  auth_why;         /* why the login failed: PPP_AUTH_WHY_* */
     /* Van Jacobson header compression: slots agreed towards / from the peer
      * (0: not in use that way), and the TCP packets each way */
     uint8_t  vj_tx_slots, vj_rx_slots;
